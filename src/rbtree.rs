@@ -1699,7 +1699,7 @@ mod tests {
                     t.insert(&mut v[i]);
                 }
                 expected.push(v[i].value);
-                expected.as_mut_slice().sort();
+                expected[..].sort();
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
 
@@ -1736,7 +1736,7 @@ mod tests {
                     }
                 }
                 expected.push(v[i].value);
-                expected.as_mut_slice().sort();
+                expected[..].sort();
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
 
@@ -1762,7 +1762,7 @@ mod tests {
                     }
                 }
                 expected.push(v[i].value);
-                expected.as_mut_slice().sort();
+                expected[..].sort();
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
         }
