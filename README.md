@@ -5,7 +5,7 @@ intrusive-collections
 
 A Rust library for creating intrusive collections. Currently supports doubly-linked lists and red-black trees.
 
-[Documentation](https://amanieu.github.io/intrusive-rs/intrusive/index.html)
+[Documentation](https://amanieu.github.io/intrusive-rs/intrusive_collections/index.html)
 
 ## Usage
 
