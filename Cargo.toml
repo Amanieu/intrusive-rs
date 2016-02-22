@@ -1,0 +1,16 @@
+[package]
+name = "intrusive-collections"
+version = "0.1.0"
+authors = ["Amanieu d'Antras <amanieu@gmail.com>"]
+description = "Intrusive collections for Rust (linked list and red-black tree)"
+documentation = "https://amanieu.github.io/intrusive-rs/intrusive/index.html"
+license = "Apache-2.0/MIT"
+repository = "https://github.com/Amanieu/intrusive-rs"
+readme = "README.md"
+keywords = ["intrusive", "no_std", "list", "rbtree"]
+
+[features]
+nightly = []
+
+[dev-dependencies]
+rand = "0.3"
