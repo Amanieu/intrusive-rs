@@ -8,10 +8,12 @@
 //! Intrusive red-black tree.
 
 use Adaptor;
+use intrusive_ref::IntrusiveRef;
 use Bound::{self, Included, Excluded, Unbounded};
 use core::ptr;
 use core::fmt;
 use core::mem;
+use core::cell::Cell;
 use core::borrow::Borrow;
 use core::cmp::Ordering;
 
@@ -64,37 +66,60 @@ pub trait TreeAdaptor<'a>: Adaptor<Link> {
 
 /// Intrusive link that allows an object to be inserted into a `RBTree`.
 pub struct Link {
-    left: NodePtr,
-    right: NodePtr,
-    parent_color: usize,
+    left: Cell<NodePtr>,
+    right: Cell<NodePtr>,
+    parent_color: Cell<usize>,
 }
-
-/// Constant initializer for a `Link`.
-pub const LINK_INIT: Link = Link {
-    left: NodePtr(0 as *mut _),
-    right: NodePtr(0 as *mut _),
-    parent_color: UNLINKED_MARKER,
-};
 
 impl Link {
     /// Creates a new `Link`.
     #[cfg(feature = "nightly")]
     #[inline]
     pub const fn new() -> Link {
-        LINK_INIT
+        Link {
+            left: Cell::new(NodePtr(ptr::null())),
+            right: Cell::new(NodePtr(ptr::null())),
+            parent_color: Cell::new(UNLINKED_MARKER),
+        }
     }
 
     /// Creates a new `Link`.
     #[cfg(not(feature = "nightly"))]
     #[inline]
     pub fn new() -> Link {
-        LINK_INIT
+        Link {
+            left: Cell::new(NodePtr::null()),
+            right: Cell::new(NodePtr::null()),
+            parent_color: Cell::new(UNLINKED_MARKER),
+        }
     }
 
-    /// Checks whether the `Link` is linked into a `RBTree`.
+    /// Checks whether the `Link` is linked into a `LinkedList`.
+    ///
+    /// Note that this function is only thread-safe if the "nightly" feature
+    /// is enabled.
     #[inline]
+    #[cfg(feature = "nightly")]
     pub fn is_linked(&self) -> bool {
-        self.parent_color != UNLINKED_MARKER
+        use core::ptr;
+        unsafe {
+            // The link might be concurrently modified by another thread,
+            // so make sure we read the value only once. Normally we would just
+            // make the links atomic but this significantly hurts optimization.
+            ptr::read_volatile(&self.parent_color).get() != UNLINKED_MARKER
+        }
+    }
+
+    /// Checks whether the `Link` is linked into a `LinkedList`.
+    ///
+    /// Note that this function is only thread-safe if the "nightly" feature
+    /// is enabled.
+    #[inline]
+    #[cfg(not(feature = "nightly"))]
+    pub fn is_linked(&self) -> bool {
+        // If we don't have read_volatile then there's not much we can do, so
+        // just hope the compiler does the right thing.
+        self.parent_color.get() != UNLINKED_MARKER
     }
 
     /// Unlinks the object from the `RBTree` without invalidating the rest
@@ -107,16 +132,18 @@ impl Link {
     /// `fast_clear` function on it. Any other operations on the affected tree
     /// will result in undefined behavior.
     #[inline]
-    pub unsafe fn unsafe_unlink(&mut self) {
-        self.parent_color = UNLINKED_MARKER;
+    pub unsafe fn unsafe_unlink(&self) {
+        self.parent_color.set(UNLINKED_MARKER);
     }
 }
 
 // An object containing a link can be sent to another thread if it is unlinked.
 unsafe impl Send for Link {}
 
-// Checking whether an object is linked is thread-safe as long as the rule
-// about reference aliasing is followed.
+// The cells are only accessed indirectly through `LinkedList` and are not
+// accessible directly, so a `&Link` is always safe to access from multiple
+// threads. The check in is_linked uses a volatile read and is therefore
+// thread-safe.
 unsafe impl Sync for Link {}
 
 // Provide an implementation of Clone which simply initializes the new link as
@@ -124,7 +151,7 @@ unsafe impl Sync for Link {}
 impl Clone for Link {
     #[inline]
     fn clone(&self) -> Link {
-        LINK_INIT
+        Link::new()
     }
 }
 
@@ -132,7 +159,7 @@ impl Clone for Link {
 impl Default for Link {
     #[inline]
     fn default() -> Link {
-        LINK_INIT
+        Link::new()
     }
 }
 
@@ -162,7 +189,7 @@ enum Color {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
-struct NodePtr(*mut Link);
+struct NodePtr(*const Link);
 
 // Use a special value to indicate an unlinked node. This value represents a
 // red root node, which is impossible in a valid red-black tree.
@@ -171,7 +198,7 @@ const UNLINKED_MARKER: usize = 0;
 impl NodePtr {
     #[inline]
     fn null() -> NodePtr {
-        NodePtr(ptr::null_mut())
+        NodePtr(ptr::null())
     }
 
     #[inline]
@@ -181,22 +208,22 @@ impl NodePtr {
 
     #[inline]
     unsafe fn is_linked(self) -> bool {
-        (*self.0).parent_color != UNLINKED_MARKER
+        (*self.0).parent_color.get() != UNLINKED_MARKER
     }
 
     #[inline]
     unsafe fn unlink(self) {
-        (*self.0).parent_color = UNLINKED_MARKER;
+        (*self.0).parent_color.set(UNLINKED_MARKER);
     }
 
     #[inline]
     unsafe fn parent(self) -> NodePtr {
-        NodePtr(((*self.0).parent_color & !1) as *mut _)
+        NodePtr(((*self.0).parent_color.get() & !1) as *const _)
     }
 
     #[inline]
     unsafe fn color(self) -> Color {
-        if (*self.0).parent_color & 1 == 1 {
+        if (*self.0).parent_color.get() & 1 == 1 {
             Color::Black
         } else {
             Color::Red
@@ -210,7 +237,7 @@ impl NodePtr {
             Color::Red => 0,
             Color::Black => 1,
         };
-        (*self.0).parent_color = (parent.0 as usize & !1) | bit;
+        (*self.0).parent_color.set((parent.0 as usize & !1) | bit);
     }
 
     #[inline]
@@ -225,22 +252,22 @@ impl NodePtr {
 
     #[inline]
     unsafe fn left(self) -> NodePtr {
-        (*self.0).left
+        (*self.0).left.get()
     }
 
     #[inline]
     unsafe fn right(self) -> NodePtr {
-        (*self.0).right
+        (*self.0).right.get()
     }
 
     #[inline]
     unsafe fn set_left(self, left: NodePtr) {
-        (*self.0).left = left;
+        (*self.0).left.set(left);
     }
 
     #[inline]
     unsafe fn set_right(self, right: NodePtr) {
-        (*self.0).right = right;
+        (*self.0).right.set(right);
     }
 
     #[inline]
@@ -680,9 +707,16 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     ///
     /// This returns None if the cursor is currently pointing to the null
     /// object.
+    ///
+    /// # Safety
+    ///
+    /// This function returns a `&mut` reference but makes no guarantee that
+    /// this references is not aliased. You must ensure that there are no live
+    /// references (mutable or immutable) to this object when calling this
+    /// function.
     #[inline]
-    pub fn get_mut(&mut self) -> Option<&'a mut A::Container> {
-        self.get_raw().map(|x| unsafe { &mut *x })
+    pub unsafe fn get_mut(&mut self) -> Option<&'a mut A::Container> {
+        self.get_raw().map(|x| &mut *x)
     }
 
     /// Returns a read-only cursor pointing to the current element.
@@ -734,16 +768,16 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// If the cursor is currently pointing to the null object then no element
     /// is removed and `None` is returned.
     #[inline]
-    pub fn remove(&mut self) -> Option<*mut A::Container> {
-        if self.is_null() {
-            return None;
-        }
+    pub fn remove(&mut self) -> Option<IntrusiveRef<A::Container>> {
         unsafe {
+            if self.is_null() {
+                return None;
+            }
             let next = self.current.next();
             let result = self.current.0;
             self.current.remove(&mut self.tree.root);
             self.current = next;
-            Some(self.tree.adaptor.get_container(result) as *mut _)
+            Some(IntrusiveRef::from_raw(self.tree.adaptor.get_container(result) as *mut _))
         }
     }
 
@@ -756,29 +790,26 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// If the cursor is currently pointing to the null object then no element
     /// is added or removed and `None` is returned.
     ///
-    /// # Safety
-    ///
-    /// An object that has been linked into an intrusive collection must not be
-    /// moved or dropped until it is removed from the collection. You must also
-    /// not hold any reference (mutable or immutable) to the object while
-    /// operating on the collection.
-    ///
     /// # Panics
     ///
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub unsafe fn replace_with(&mut self, val: *mut A::Container) -> Option<*mut A::Container> {
-        let new = NodePtr(self.tree.adaptor.get_link(val) as *mut _);
-        assert!(!new.is_linked(),
-                "attempted to insert an object that is already linked");
-        if self.is_null() {
-            return None;
+    pub fn replace_with(&mut self,
+                        val: IntrusiveRef<A::Container>)
+                        -> Option<IntrusiveRef<A::Container>> {
+        unsafe {
+            let new = NodePtr(self.tree.adaptor.get_link(val.into_raw()));
+            assert!(!new.is_linked(),
+                    "attempted to insert an object that is already linked");
+            if self.is_null() {
+                return None;
+            }
+            let result = self.current.0;
+            self.current.replace_with(new, &mut self.tree.root);
+            self.current = new;
+            Some(IntrusiveRef::from_raw(self.tree.adaptor.get_container(result) as *mut _))
         }
-        let result = self.current.0;
-        self.current.replace_with(new, &mut self.tree.root);
-        self.current = new;
-        Some(self.tree.adaptor.get_container(result) as *mut _)
     }
 
     /// Inserts a new element into the `RBTree` after the current one.
@@ -791,30 +822,25 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// If the cursor is pointing at the null object then the new element is
     /// inserted at the start of the `RBTree`.
     ///
-    /// # Safety
-    ///
-    /// An object that has been linked into an intrusive collection must not be
-    /// moved or dropped until it is removed from the collection. You must also
-    /// not hold any reference (mutable or immutable) to the object while
-    /// operating on the collection.
-    ///
     /// # Panics
     ///
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub unsafe fn insert_after(&mut self, val: *mut A::Container) {
-        let new = NodePtr(self.tree.adaptor.get_link(val) as *mut _);
-        assert!(!new.is_linked(),
-                "attempted to insert an object that is already linked");
-        if self.tree.is_empty() {
-            self.tree.insert_root(new);
-        } else if self.is_null() {
-            self.tree.root.first_child().insert_left(new, &mut self.tree.root);
-        } else if self.current.right().is_null() {
-            self.current.insert_right(new, &mut self.tree.root);
-        } else {
-            self.current.next().insert_left(new, &mut self.tree.root);
+    pub fn insert_after(&mut self, val: IntrusiveRef<A::Container>) {
+        unsafe {
+            let new = NodePtr(self.tree.adaptor.get_link(val.into_raw()));
+            assert!(!new.is_linked(),
+                    "attempted to insert an object that is already linked");
+            if self.tree.is_empty() {
+                self.tree.insert_root(new);
+            } else if self.is_null() {
+                self.tree.root.first_child().insert_left(new, &mut self.tree.root);
+            } else if self.current.right().is_null() {
+                self.current.insert_right(new, &mut self.tree.root);
+            } else {
+                self.current.next().insert_left(new, &mut self.tree.root);
+            }
         }
     }
 
@@ -828,30 +854,25 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// If the cursor is pointing at the null object then the new element is
     /// inserted at the end of the `RBTree`.
     ///
-    /// # Safety
-    ///
-    /// An object that has been linked into an intrusive collection must not be
-    /// moved or dropped until it is removed from the collection. You must also
-    /// not hold any reference (mutable or immutable) to the object while
-    /// operating on the collection.
-    ///
     /// # Panics
     ///
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub unsafe fn insert_before(&mut self, val: *mut A::Container) {
-        let new = NodePtr(self.tree.adaptor.get_link(val) as *mut _);
-        assert!(!new.is_linked(),
-                "attempted to insert an object that is already linked");
-        if self.tree.is_empty() {
-            self.tree.insert_root(new);
-        } else if self.is_null() {
-            self.tree.root.last_child().insert_right(new, &mut self.tree.root);
-        } else if self.current.left().is_null() {
-            self.current.insert_left(new, &mut self.tree.root);
-        } else {
-            self.current.prev().insert_right(new, &mut self.tree.root);
+    pub fn insert_before(&mut self, val: IntrusiveRef<A::Container>) {
+        unsafe {
+            let new = NodePtr(self.tree.adaptor.get_link(val.into_raw()));
+            assert!(!new.is_linked(),
+                    "attempted to insert an object that is already linked");
+            if self.tree.is_empty() {
+                self.tree.insert_root(new);
+            } else if self.is_null() {
+                self.tree.root.last_child().insert_right(new, &mut self.tree.root);
+            } else if self.current.left().is_null() {
+                self.current.insert_left(new, &mut self.tree.root);
+            } else {
+                self.current.prev().insert_right(new, &mut self.tree.root);
+            }
         }
     }
 }
@@ -872,7 +893,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     #[inline]
     pub const fn new(adaptor: A) -> RBTree<A> {
         RBTree {
-            root: NodePtr(0 as *mut _),
+            root: NodePtr(ptr::null()),
             adaptor: adaptor,
         }
     }
@@ -882,7 +903,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     #[inline]
     pub fn new(adaptor: A) -> RBTree<A> {
         RBTree {
-            root: NodePtr(0 as *mut _),
+            root: NodePtr::null(),
             adaptor: adaptor,
         }
     }
@@ -919,7 +940,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     #[inline]
     pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Container) -> Cursor<A> {
         Cursor {
-            current: NodePtr(self.adaptor.get_link(ptr) as *mut _),
+            current: NodePtr(self.adaptor.get_link(ptr)),
             tree: self,
         }
     }
@@ -930,9 +951,9 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     ///
     /// `ptr` must be a pointer to an object that is part of this tree.
     #[inline]
-    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *mut A::Container) -> CursorMut<A> {
+    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Container) -> CursorMut<A> {
         CursorMut {
-            current: NodePtr(self.adaptor.get_link(ptr) as *mut _),
+            current: NodePtr(self.adaptor.get_link(ptr)),
             tree: self,
         }
     }
@@ -1133,42 +1154,38 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// The new element will be inserted at the correct position in the tree
     /// based on its key.
     ///
-    /// # Safety
-    ///
-    /// An object that has been linked into an intrusive collection must not be
-    /// moved or dropped until it is removed from the collection. You must also
-    /// not hold any reference (mutable or immutable) to the object while
-    /// operating on the collection.
-    ///
     /// # Panics
     ///
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub unsafe fn insert(&mut self, val: *mut A::Container) {
-        let new = NodePtr(self.adaptor.get_link(val) as *mut _);
-        assert!(!new.is_linked(),
-                "attempted to insert an object that is already linked");
-        if self.is_empty() {
-            self.insert_root(new);
-        } else {
-            let key = self.adaptor.get_key(&*val);
-            let mut tree = self.root;
-            loop {
-                let current = &*self.adaptor.get_container(tree.0);
-                if key < self.adaptor.get_key(current) {
-                    if tree.left().is_null() {
-                        tree.insert_left(new, &mut self.root);
-                        break;
+    pub fn insert(&mut self, val: IntrusiveRef<A::Container>) {
+        unsafe {
+            let raw = val.into_raw();
+            let new = NodePtr(self.adaptor.get_link(raw));
+            assert!(!new.is_linked(),
+                    "attempted to insert an object that is already linked");
+            if self.is_empty() {
+                self.insert_root(new);
+            } else {
+                let key = self.adaptor.get_key(&*raw);
+                let mut tree = self.root;
+                loop {
+                    let current = &*self.adaptor.get_container(tree.0);
+                    if key < self.adaptor.get_key(current) {
+                        if tree.left().is_null() {
+                            tree.insert_left(new, &mut self.root);
+                            break;
+                        } else {
+                            tree = tree.left();
+                        }
                     } else {
-                        tree = tree.left();
-                    }
-                } else {
-                    if tree.right().is_null() {
-                        tree.insert_right(new, &mut self.root);
-                        break;
-                    } else {
-                        tree = tree.right();
+                        if tree.right().is_null() {
+                            tree.insert_right(new, &mut self.root);
+                            break;
+                        } else {
+                            tree = tree.right();
+                        }
                     }
                 }
             }
@@ -1226,11 +1243,18 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// then it will be treated as "negative infinity", and if max is
     /// `Unbounded`, then it will be treated as "positive infinity". Thus
     /// `range_mut(Unbounded, Unbounded)` will yield the whole collection.
+    ///
+    /// # Safety
+    ///
+    /// This iterator yields `&mut` references to objects in the `RBTree`
+    /// but makes no guarantee that these references are not aliased. You must
+    /// ensure that there are no live references (mutable or immutable) to any
+    /// object in the `RBTree` while the iterator is in use.
     #[inline]
-    pub fn range_mut<'a, Min: ?Sized + Ord, Max: ?Sized + Ord>(&'a mut self,
-                                                               min: Bound<&Min>,
-                                                               max: Bound<&Max>)
-                                                               -> IterMut<'a, A>
+    pub unsafe fn range_mut<'a, Min: ?Sized + Ord, Max: ?Sized + Ord>(&'a mut self,
+                                                                      min: Bound<&Min>,
+                                                                      max: Bound<&Max>)
+                                                                      -> IterMut<'a, A>
         where <A as TreeAdaptor<'a>>::Key: Borrow<Min> + Borrow<Max>
     {
         IterMut {
@@ -1266,8 +1290,15 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     }
 
     /// Gets a mutable iterator over the objects in the `RBTree`.
+    ///
+    /// # Safety
+    ///
+    /// This iterator yields `&mut` references to objects in the `RBTree`
+    /// but makes no guarantee that these references are not aliased. You must
+    /// ensure that there are no live references (mutable or immutable) to any
+    /// object in the `RBTree` while the iterator is in use.
     #[inline]
-    pub fn iter_mut(&mut self) -> IterMut<A> {
+    pub unsafe fn iter_mut(&mut self) -> IterMut<A> {
         IterMut {
             raw: self.iter_internal(),
             tree: self,
@@ -1276,7 +1307,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
 
     #[inline]
     fn drain_recurse<F>(&self, f: &mut F, current: NodePtr)
-        where F: FnMut(*mut A::Container)
+        where F: FnMut(IntrusiveRef<A::Container>)
     {
         // If the recursion down the left side of the tree panics, we should
         // still go through the right side of the tree and unlink all the nodes,
@@ -1304,7 +1335,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
                 current.unlink();
                 let guard = PanicGuard(current.right());
                 self.drain_recurse(f, current.left());
-                f(self.adaptor.get_container(current.0) as *mut _);
+                f(IntrusiveRef::from_raw(self.adaptor.get_container(current.0) as *mut _));
                 mem::forget(guard);
                 self.drain_recurse(f, current.right());
             }
@@ -1321,7 +1352,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// after the one that panicked.
     #[inline]
     pub fn drain<F>(&mut self, mut f: F)
-        where F: FnMut(*mut A::Container)
+        where F: FnMut(IntrusiveRef<A::Container>)
     {
         let root = self.root;
         self.root = NodePtr::null();
@@ -1365,11 +1396,11 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     }
 }
 
-unsafe impl<A: for<'a> TreeAdaptor<'a> + Sync> Sync for RBTree<A> where A::Container: Sync
-{}
+// Allow read-only access from multiple threads
+unsafe impl<A: for<'a> TreeAdaptor<'a> + Sync> Sync for RBTree<A> where A::Container: Sync {}
 
-unsafe impl<A: for<'a> TreeAdaptor<'a> + Send> Send for RBTree<A> where A::Container: Send
-{}
+// We require Sync on objects here because they may belong to multiple collections
+unsafe impl<A: for<'a> TreeAdaptor<'a> + Send> Send for RBTree<A> where A::Container: Send {}
 
 impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> IntoIterator for &'a RBTree<A> {
     type Item = &'a A::Container;
@@ -1381,23 +1412,14 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> IntoIterator for &'a RBTree<A> {
     }
 }
 
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> IntoIterator for &'a mut RBTree<A> {
-    type Item = &'a mut A::Container;
-    type IntoIter = IterMut<'a, A>;
-
-    #[inline]
-    fn into_iter(mut self) -> IterMut<'a, A> {
-        self.iter_mut()
-    }
-}
-
 impl<A: for<'a> TreeAdaptor<'a> + Default> Default for RBTree<A> {
     fn default() -> RBTree<A> {
         RBTree::new(A::default())
     }
 }
 
-impl<A: for<'a> TreeAdaptor<'a>> fmt::Debug for RBTree<A> where A::Container: fmt::Debug
+impl<A: for<'a> TreeAdaptor<'a>> fmt::Debug for RBTree<A>
+    where A::Container: fmt::Debug
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_set().entries(self.iter()).finish()
@@ -1505,8 +1527,10 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> DoubleEndedIterator for IterMut<'a, A>
 #[cfg(test)]
 mod tests {
     use std::vec::Vec;
-    use super::{RBTree, TreeAdaptor, Link};
+    use std::boxed::Box;
+    use IntrusiveRef;
     use Bound::*;
+    use super::{RBTree, TreeAdaptor, Link};
     use std::fmt;
     extern crate rand;
     use self::rand::{XorShiftRng, Rng};
@@ -1528,127 +1552,107 @@ mod tests {
             container.value
         }
     }
+    fn make_obj(value: i32) -> IntrusiveRef<Obj> {
+        IntrusiveRef::from_box(Box::new(Obj {
+            link: Link::new(),
+            value: value,
+        }))
+    }
 
     #[test]
     fn test_link() {
-        let mut a = Obj {
-            link: Link::default(),
-            value: 1,
-        };
+        let a = make_obj(1);
         assert!(!a.link.is_linked());
         assert_eq!(format!("{:?}", a.link), "unlinked");
 
         let mut b = RBTree::<ObjAdaptor>::default();
         assert!(b.is_empty());
 
-        unsafe {
-            b.insert(&mut a);
-        }
+        b.insert(a);
         assert!(!b.is_empty());
         assert!(a.link.is_linked());
         assert_eq!(format!("{:?}", a.link), "linked");
 
-        let c = a.clone();
+        let c = a.as_ref().clone();
         assert!(!c.link.is_linked());
 
         unsafe {
-            assert_eq!(b.cursor_from_ptr(&a).get().unwrap().value, 1);
-            assert_eq!(b.cursor_mut_from_ptr(&mut a).get().unwrap().value, 1);
+            assert_eq!(b.cursor_from_ptr(a.as_ref()).get().unwrap().value, 1);
+            assert_eq!(b.cursor_mut_from_ptr(a.as_ref()).get().unwrap().value, 1);
         }
 
-        assert_eq!(b.front_mut().remove().unwrap(), &mut a as *mut _);
+        assert_eq!(b.front_mut().remove().unwrap().as_ref() as *const _,
+                   a.as_ref() as *const _);
         assert!(b.is_empty());
         assert!(!a.link.is_linked());
     }
 
     #[test]
     fn test_cursor() {
-        let mut a = Obj {
-            link: Link::default(),
-            value: 1,
-        };
-        let mut b = Obj {
-            link: Link::default(),
-            value: 2,
-        };
-        let mut c = Obj {
-            link: Link::default(),
-            value: 3,
-        };
+        let a = make_obj(1);
+        let b = make_obj(2);
+        let c = make_obj(3);
         let mut t = RBTree::new(ObjAdaptor);
         let mut cur = t.cursor_mut();
         assert!(cur.is_null());
         assert!(cur.get_raw().is_none());
         assert!(cur.get().is_none());
-        assert!(cur.get_mut().is_none());
+        unsafe {
+            assert!(cur.get_mut().is_none());
+        }
         assert!(cur.remove().is_none());
 
-        unsafe {
-            cur.insert_before(&mut a);
-            cur.insert_before(&mut c);
-            cur.move_prev();
-            cur.insert_before(&mut b);
-            cur.move_next();
-        }
+        cur.insert_before(a);
+        cur.insert_before(c);
+        cur.move_prev();
+        cur.insert_before(b);
+        cur.move_next();
         assert!(cur.is_null());
 
         cur.move_next();
         assert!(!cur.is_null());
-        assert_eq!(cur.get_raw().unwrap(), &mut a as *mut _);
+        assert_eq!(cur.get_raw().unwrap() as *const _, a.as_ref() as *const _);
 
         {
             let mut cur2 = cur.as_cursor();
-            assert_eq!(cur2.get_raw().unwrap(), &mut a as *mut _);
+            assert_eq!(cur2.get_raw().unwrap(), a.as_ref() as *const _);
             cur2.move_next();
             assert_eq!(cur2.get().unwrap().value, 2);
             cur2.move_next();
-            assert_eq!(cur2.get_raw().unwrap(), &mut c as *mut _);
+            assert_eq!(cur2.get_raw().unwrap(), c.as_ref() as *const _);
             cur2.move_prev();
-            assert_eq!(cur2.get_raw().unwrap(), &mut b as *mut _);
+            assert_eq!(cur2.get_raw().unwrap(), b.as_ref() as *const _);
             cur2.move_next();
-            assert_eq!(cur2.get_raw().unwrap(), &mut c as *mut _);
+            assert_eq!(cur2.get_raw().unwrap(), c.as_ref() as *const _);
             cur2.move_next();
             assert!(cur2.is_null());
             assert_eq!(cur2.clone().get_raw(), cur2.get_raw());
         }
-        assert_eq!(cur.get_raw().unwrap(), &mut a as *mut _);
+        assert_eq!(cur.get_raw().unwrap() as *const _, a.as_ref() as *const _);
 
-        let mut a2 = Obj {
-            link: Link::default(),
-            value: 1,
-        };
-        let mut b2 = Obj {
-            link: Link::default(),
-            value: 2,
-        };
-        let mut c2 = Obj {
-            link: Link::default(),
-            value: 3,
-        };
-        unsafe {
-            assert_eq!(cur.replace_with(&mut a2).unwrap(), &mut a as *mut _);
-            assert!(!a.link.is_linked());
-            cur.move_next();
-            assert_eq!(cur.replace_with(&mut b2).unwrap(), &mut b as *mut _);
-            assert!(!b.link.is_linked());
-            cur.move_next();
-            assert_eq!(cur.replace_with(&mut c2).unwrap(), &mut c as *mut _);
-            assert!(!c.link.is_linked());
-            cur.move_next();
-            assert_eq!(cur.replace_with(&mut c), None);
-        }
+        let a2 = make_obj(1);
+        let b2 = make_obj(2);
+        let c2 = make_obj(3);
+        assert_eq!(cur.replace_with(a2).unwrap().as_ref() as *const _,
+                   a.as_ref() as *const _);
+        assert!(!a.link.is_linked());
+        cur.move_next();
+        assert_eq!(cur.replace_with(b2).unwrap().as_ref() as *const _,
+                   b.as_ref() as *const _);
+        assert!(!b.link.is_linked());
+        cur.move_next();
+        assert_eq!(cur.replace_with(c2).unwrap().as_ref() as *const _,
+                   c.as_ref() as *const _);
+        assert!(!c.link.is_linked());
+        cur.move_next();
+        assert!(cur.replace_with(c).is_none());
     }
 
     #[test]
     fn test_insert_remove() {
-        let mut v = (0..100)
-                        .map(|x| {
-                            Obj {
-                                link: Link::new(),
-                                value: x,
-                            }
-                        })
-                        .collect::<Vec<_>>();
+        let v = (0..100)
+                    .map(make_obj)
+                    .collect::<Vec<_>>();
         assert!(v.iter().all(|x| !x.link.is_linked()));
         let mut t = RBTree::new(ObjAdaptor);
         assert!(t.is_empty());
@@ -1656,16 +1660,14 @@ mod tests {
 
         {
             let mut expected = Vec::new();
-            for x in v.iter_mut() {
-                unsafe {
-                    t.insert(x);
-                }
+            for x in v.iter() {
+                t.insert(*x);
                 expected.push(x.value);
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
 
             while let Some(x) = t.front_mut().remove() {
-                assert_eq!(unsafe { (*x).value }, expected.remove(0));
+                assert_eq!(x.value, expected.remove(0));
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
             assert!(expected.is_empty());
@@ -1674,16 +1676,14 @@ mod tests {
 
         {
             let mut expected = Vec::new();
-            for x in v.iter_mut().rev() {
-                unsafe {
-                    t.insert(x);
-                }
+            for x in v.iter().rev() {
+                t.insert(*x);
                 expected.insert(0, x.value);
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
 
             while let Some(x) = t.back_mut().remove() {
-                assert_eq!(unsafe { (*x).value }, expected.pop().unwrap());
+                assert_eq!(x.value, expected.pop().unwrap());
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
             assert!(expected.is_empty());
@@ -1695,9 +1695,7 @@ mod tests {
             rng.shuffle(&mut indices);
             let mut expected = Vec::new();
             for i in indices {
-                unsafe {
-                    t.insert(&mut v[i]);
-                }
+                t.insert(v[i]);
                 expected.push(v[i].value);
                 expected[..].sort();
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
@@ -1710,8 +1708,7 @@ mod tests {
                     for _ in 0..(index + 1) {
                         c.move_next();
                     }
-                    assert_eq!(unsafe { (*c.remove().unwrap()).value },
-                               expected.remove(index));
+                    assert_eq!(c.remove().unwrap().value, expected.remove(index));
                 }
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
@@ -1731,9 +1728,7 @@ mod tests {
                         }
                         c.move_next();
                     }
-                    unsafe {
-                        c.insert_before(&mut v[i]);
-                    }
+                    c.insert_before(v[i]);
                 }
                 expected.push(v[i].value);
                 expected[..].sort();
@@ -1757,9 +1752,7 @@ mod tests {
                         }
                         c.move_prev();
                     }
-                    unsafe {
-                        c.insert_after(&mut v[i]);
-                    }
+                    c.insert_after(v[i]);
                 }
                 expected.push(v[i].value);
                 expected[..].sort();
@@ -1770,19 +1763,12 @@ mod tests {
 
     #[test]
     fn test_iter() {
-        let mut v = (0..10)
-                        .map(|x| {
-                            Obj {
-                                link: Link::new(),
-                                value: x * 10,
-                            }
-                        })
-                        .collect::<Vec<_>>();
+        let v = (0..10)
+                    .map(|x| make_obj(x * 10))
+                    .collect::<Vec<_>>();
         let mut t = RBTree::new(ObjAdaptor);
-        for x in v.iter_mut() {
-            unsafe {
-                t.insert(x);
-            }
+        for x in v.iter() {
+            t.insert(*x);
         }
 
         assert_eq!(format!("{:?}", t),
@@ -1790,16 +1776,20 @@ mod tests {
 
         assert_eq!(t.iter().clone().map(|x| x.value).collect::<Vec<_>>(),
                    vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
-        assert_eq!(t.iter_mut().map(|x| x.value).collect::<Vec<_>>(),
-                   vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
+        unsafe {
+            assert_eq!(t.iter_mut().map(|x| x.value).collect::<Vec<_>>(),
+                       vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
+            assert_eq!(t.iter_mut().rev().map(|x| x.value).collect::<Vec<_>>(),
+                       vec![90, 80, 70, 60, 50, 40, 30, 20, 10, 0]);
+        }
         assert_eq!((&t).into_iter().rev().map(|x| x.value).collect::<Vec<_>>(),
-                   vec![90, 80, 70, 60, 50, 40, 30, 20, 10, 0]);
-        assert_eq!((&mut t).into_iter().rev().map(|x| x.value).collect::<Vec<_>>(),
                    vec![90, 80, 70, 60, 50, 40, 30, 20, 10, 0]);
         assert_eq!(t.range(Unbounded, Unbounded).map(|x| x.value).collect::<Vec<_>>(),
                    vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
-        assert_eq!(t.range_mut(Unbounded, Unbounded).map(|x| x.value).collect::<Vec<_>>(),
-                   vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
+        unsafe {
+            assert_eq!(t.range_mut(Unbounded, Unbounded).map(|x| x.value).collect::<Vec<_>>(),
+                       vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
+        }
 
         assert_eq!(t.range(Included(&0), Unbounded).map(|x| x.value).collect::<Vec<_>>(),
                    vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
@@ -1876,7 +1866,7 @@ mod tests {
 
         let mut v2 = Vec::new();
         t2.drain(|x| {
-            v2.push(unsafe { (*x).value });
+            v2.push(x.value);
         });
         assert_eq!(v2, vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
         assert!(t2.is_empty());
@@ -1884,19 +1874,12 @@ mod tests {
 
     #[test]
     fn test_find() {
-        let mut v = (0..10)
-                        .map(|x| {
-                            Obj {
-                                link: Link::new(),
-                                value: x * 10,
-                            }
-                        })
-                        .collect::<Vec<_>>();
+        let v = (0..10)
+                    .map(|x| make_obj(x * 10))
+                    .collect::<Vec<_>>();
         let mut t = RBTree::new(ObjAdaptor);
-        for x in v.iter_mut() {
-            unsafe {
-                t.insert(x);
-            }
+        for x in v.iter() {
+            t.insert(*x);
         }
 
         for i in -9..100 {
@@ -2019,23 +2002,14 @@ mod tests {
     #[test]
     fn test_unsafe_unlink() {
         let mut t = RBTree::new(ObjAdaptor);
-        let mut a = Obj {
-            link: Link::new(),
-            value: 1,
-        };
-        let mut b = Obj {
-            link: Link::new(),
-            value: 2,
-        };
-        let mut c = Obj {
-            link: Link::new(),
-            value: 3,
-        };
-        unsafe {
-            t.insert(&mut a);
-            t.insert(&mut b);
-            t.insert(&mut c);
+        let a = make_obj(1);
+        let b = make_obj(2);
+        let c = make_obj(3);
+        t.insert(a);
+        t.insert(b);
+        t.insert(c);
 
+        unsafe {
             t.fast_clear();
             a.link.unsafe_unlink();
             b.link.unsafe_unlink();
@@ -2050,33 +2024,16 @@ mod tests {
     #[test]
     #[cfg(feature = "nightly")]
     fn test_panic() {
-        use std::panic::{recover, AssertRecoverSafe};
+        use std::panic::{catch_unwind, AssertUnwindSafe};
         let mut t = RBTree::new(ObjAdaptor);
-        let mut a = Obj {
-            link: Link::new(),
-            value: 1,
-        };
-        let mut b = Obj {
-            link: Link::new(),
-            value: 2,
-        };
-        let mut c = Obj {
-            link: Link::new(),
-            value: 3,
-        };
-        unsafe {
-            t.insert(&mut a);
-            t.insert(&mut b);
-            t.insert(&mut c);
-        }
+        let a = make_obj(1);
+        let b = make_obj(2);
+        let c = make_obj(3);
+        t.insert(a);
+        t.insert(b);
+        t.insert(c);
 
-        {
-            let mut wrapper = AssertRecoverSafe::new(&mut t);
-            recover(move || {
-                (*wrapper).drain(|_| panic!("test"));
-            })
-                .unwrap_err();
-        }
+        catch_unwind(AssertUnwindSafe(|| t.drain(|_| panic!("test")))).unwrap_err();
 
         assert!(t.is_empty());
         assert!(!a.link.is_linked());
@@ -2086,6 +2043,7 @@ mod tests {
 
     #[test]
     fn test_non_static() {
+        #[derive(Clone)]
         struct Obj<'a> {
             link: Link,
             value: &'a i32,
@@ -2094,7 +2052,7 @@ mod tests {
         unsafe impl<'a> ::Adaptor<Link> for ObjAdaptor<'a> {
             type Container = Obj<'a>;
             unsafe fn get_container(&self, link: *const Link) -> *const Self::Container {
-                container_of!(link, Self::Container, link)
+                container_of!(link, Obj<'a>, link)
             }
             unsafe fn get_link(&self, container: *const Self::Container) -> *const Link {
                 &(*container).link
@@ -2109,18 +2067,14 @@ mod tests {
 
         let v = 5;
         let mut l = RBTree::new(ObjAdaptor(::std::marker::PhantomData));
-        let mut a = Obj {
-            link: Link::new(),
+        let o = Obj {
+            link: Link::default(),
             value: &v,
         };
-        let mut b = Obj {
-            link: Link::new(),
-            value: &v,
-        };
-        unsafe {
-            l.insert(&mut a);
-            l.insert(&mut b);
-        }
+        let a = IntrusiveRef::from_box(Box::new(o.clone()));
+        let b = IntrusiveRef::from_box(Box::new(o.clone()));
+        l.insert(a);
+        l.insert(b);
         assert_eq!(*l.front().get().unwrap().value, 5);
         assert_eq!(*l.back().get().unwrap().value, 5);
     }

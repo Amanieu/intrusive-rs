@@ -23,6 +23,11 @@ and this to your crate root:
 extern crate intrusive_collections;
 ```
 
+This crate has two Cargo features:
+
+- `nightly`: Enables nightly-only features: `const fn` constructors and `NonZero` support for `IntrusiveRef`.
+- `box` (enabled by default): Enables `IntrusiveRef::{from_box,into_box}`. This requires `libstd` on stable, but only `liballoc` if the `nightly` feature is enabled. 
+
 ## License
 
 Licensed under either of
