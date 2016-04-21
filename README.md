@@ -13,7 +13,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-intrusive-collections = "0.1"
+intrusive-collections = "0.2"
 ```
 
 and this to your crate root:
