@@ -787,6 +787,11 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// A pointer to the element that was removed is returned, and the cursor is
     /// modified to point to the newly added element.
     ///
+    /// When using this function you must ensure that the elements in the
+    /// collection are maintained in increasing order. Failure to do this may
+    /// lead to `find`, `upper_bound`, `lower_bound` and `range` returning
+    /// incorrect results.
+    ///
     /// If the cursor is currently pointing to the null object then no element
     /// is added or removed and `None` is returned.
     ///
@@ -816,8 +821,8 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     ///
     /// When using this function you must ensure that the elements in the
     /// collection are maintained in increasing order. Failure to do this may
-    /// lead to `find`, `upper_bound` and `lower_bound` returning incorrect
-    /// results.
+    /// lead to `find`, `upper_bound`, `lower_bound` and `range` returning
+    /// incorrect results.
     ///
     /// If the cursor is pointing at the null object then the new element is
     /// inserted at the start of the `RBTree`.
@@ -848,8 +853,8 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     ///
     /// When using this function you must ensure that the elements in the
     /// collection are maintained in increasing order. Failure to do this may
-    /// lead to `find`, `upper_bound` and `lower_bound` returning incorrect
-    /// results.
+    /// lead to `find`, `upper_bound`, `lower_bound` and `range` returning
+    /// incorrect results.
     ///
     /// If the cursor is pointing at the null object then the new element is
     /// inserted at the end of the `RBTree`.
