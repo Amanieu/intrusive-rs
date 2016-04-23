@@ -1285,7 +1285,8 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
         }
     }
 
-    /// Gets an iterator over the objects in the `RBTree`.
+    /// Gets an iterator over the objects in the `RBTree`, in ascending key
+    /// order.
     #[inline]
     pub fn iter(&self) -> Iter<A> {
         Iter {
@@ -1294,7 +1295,8 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
         }
     }
 
-    /// Gets a mutable iterator over the objects in the `RBTree`.
+    /// Gets a mutable iterator over the objects in the `RBTree`, in ascending
+    /// key order.
     ///
     /// # Safety
     ///
@@ -1348,7 +1350,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     }
 
     /// Calls the given function for each element in the `RBTree` and
-    /// removes it from the tree.
+    /// removes it from the tree, in ascending key order.
     ///
     /// This will unlink all objects currently in the tree.
     ///
