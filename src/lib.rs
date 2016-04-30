@@ -343,10 +343,12 @@ macro_rules! intrusive_adaptor {
     };
 }
 
+pub mod singly_linked_list;
 pub mod linked_list;
 pub mod rbtree;
 mod intrusive_ref;
 
+pub use singly_linked_list::SinglyLinkedList;
 pub use linked_list::LinkedList;
 pub use rbtree::{RBTree, TreeAdaptor};
 pub use intrusive_ref::IntrusiveRef;

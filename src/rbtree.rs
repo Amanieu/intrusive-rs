@@ -1261,8 +1261,8 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
         }
     }
 
-    /// Calls the given function for each element in the `RBTree` and
-    /// removes it from the tree, in ascending key order.
+    /// Calls the given function for each element in the `RBTree` before
+    /// removing it from the tree, in ascending key order.
     ///
     /// This will unlink all objects currently in the tree.
     ///
