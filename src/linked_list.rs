@@ -880,6 +880,34 @@ impl<A: Adaptor<Link>> LinkedList<A> {
         self.tail = NodePtr::null();
         list
     }
+
+    /// Inserts a new element at the start of the `LinkedList`.
+    #[inline]
+    pub fn push_front(&mut self, val: IntrusiveRef<A::Container>) {
+        self.cursor_mut().insert_after(val);
+    }
+
+    /// Inserts a new element at the end of the `LinkedList`.
+    #[inline]
+    pub fn push_back(&mut self, val: IntrusiveRef<A::Container>) {
+        self.cursor_mut().insert_before(val);
+    }
+
+    /// Removes the first element of the `LinkedList`.
+    ///
+    /// This returns `None` if the `LinkedList` is empty.
+    #[inline]
+    pub fn pop_front(&mut self) -> Option<IntrusiveRef<A::Container>> {
+        self.front_mut().remove()
+    }
+
+    /// Removes the last element of the `LinkedList`.
+    ///
+    /// This returns `None` if the `LinkedList` is empty.
+    #[inline]
+    pub fn pop_back(&mut self) -> Option<IntrusiveRef<A::Container>> {
+        self.back_mut().remove()
+    }
 }
 
 // Allow read-only access from multiple threads
@@ -1130,6 +1158,31 @@ mod tests {
         assert!(!b.link1.is_linked());
         assert!(c.link1.is_linked());
         assert_eq!(cur.get_raw().unwrap() as *const _, c.as_ref() as *const _);
+    }
+
+    #[test]
+    fn test_push_pop() {
+        let a = make_obj(1);
+        let b = make_obj(2);
+        let c = make_obj(3);
+
+        let mut l = LinkedList::new(ObjAdaptor1);
+        l.push_front(a);
+        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1]);
+        l.push_front(b);
+        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [2, 1]);
+        l.push_back(c);
+        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [2, 1, 3]);
+        assert_eq!(l.pop_front().unwrap().value, 2);
+        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3]);
+        assert_eq!(l.pop_back().unwrap().value, 3);
+        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1]);
+        assert_eq!(l.pop_front().unwrap().value, 1);
+        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+        assert!(l.pop_front().is_none());
+        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+        assert!(l.pop_back().is_none());
+        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), []);
     }
 
     #[test]
