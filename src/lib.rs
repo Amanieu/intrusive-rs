@@ -24,11 +24,12 @@
 //! #[macro_use]
 //! extern crate intrusive_collections;
 //! use intrusive_collections::{IntrusiveRef, LinkedList, linked_list};
+//! use std::cell::Cell;
 //!
 //! // Define a struct containing an intrusive link, and an adaptor for it
 //! struct Test {
 //!     link: linked_list::Link,
-//!     value: i32,
+//!     value: Cell<i32>,
 //! }
 //! intrusive_adaptor!(TestAdaptor = Test { link: linked_list::Link });
 //!
@@ -37,32 +38,29 @@
 //!     let mut list = LinkedList::new(TestAdaptor);
 //!     let a = IntrusiveRef::from_box(Box::new(Test {
 //!         link: linked_list::Link::new(),
-//!         value: 1,
+//!         value: Cell::new(1),
 //!     }));
 //!     let b = IntrusiveRef::from_box(Box::new(Test {
 //!         link: linked_list::Link::new(),
-//!         value: 2,
+//!         value: Cell::new(2),
 //!     }));
-//!     let mut c = IntrusiveRef::from_box(Box::new(Test {
+//!     let c = IntrusiveRef::from_box(Box::new(Test {
 //!         link: linked_list::Link::new(),
-//!         value: 3,
+//!         value: Cell::new(3),
 //!     }));
 //!
-//!     // Insert the objects at the front of the list.
-//!     list.cursor_mut().insert_after(a);
-//!     list.cursor_mut().insert_after(b);
-//!     list.cursor_mut().insert_after(c);
-//!     assert_eq!(list.iter().map(|x| x.value).collect::<Vec<_>>(), [3, 2, 1]);
+//!     // Insert the objects at the front of the list. We use clone here to
+//!     // send a copy of the IntrusiveRef to the list, rather than completely
+//!     // relinquishing ownership.
+//!     list.push_front(a.clone());
+//!     list.push_front(b.clone());
+//!     list.push_front(c.clone());
+//!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [3, 2, 1]);
 //!
 //!     // We can modify the objects and the changes will be reflected in the
-//!     // collection since it references the existing objects. Note that we
-//!     // need an unsafe block here because we need to ensure we do not create
-//!     // multiple mutable references to the object. Alternatively a Cell could
-//!     // be used instead to avoid the unsafe block.
-//!     unsafe {
-//!         c.as_mut().value = 4;
-//!     }
-//!     assert_eq!(list.iter().map(|x| x.value).collect::<Vec<_>>(), [4, 2, 1]);
+//!     // collection since it references the existing objects.
+//!     c.value.set(4);
+//!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [4, 2, 1]);
 //!
 //!     // Once we remove objects from one collection, we are free to drop them
 //!     // or insert them into another collection. Note that this isn't checked
@@ -72,7 +70,7 @@
 //!     unsafe {
 //!         drop(a.into_box());
 //!     }
-//!     assert_eq!(list.iter().map(|x| x.value).collect::<Vec<_>>(), [4, 2]);
+//!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [4, 2]);
 //!
 //!     // We can drop the collection at any time, even if it still contains
 //!     // objects. This is safe because the links in an object are only
@@ -126,8 +124,8 @@
 //!     let mut c = RBTree::new(MyAdaptor3);
 //!
 //!     let test = IntrusiveRef::from_box(Box::new(Test::default()));
-//!     a.cursor_mut().insert_after(test);
-//!     b.cursor_mut().insert_after(test);
+//!     a.cursor_mut().insert_after(test.clone());
+//!     b.cursor_mut().insert_after(test.clone());
 //!     c.insert(test);
 //! }
 //! ```
@@ -214,7 +212,7 @@ extern crate std;
 /// # Safety
 ///
 /// It must be possible to get back a reference to the container by passing a
-/// pointer returned by `get_link` to `get_container` or `get_container_mut`.
+/// pointer returned by `get_link` to `get_container`.
 pub unsafe trait Adaptor<Link> {
     /// Type containing the intrusive link
     type Container: ?Sized;

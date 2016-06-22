@@ -25,9 +25,9 @@ use core::borrow::Borrow;
 /// one `IntrusiveRef` is pointing to it.
 pub struct IntrusiveRef<T: ?Sized> {
     #[cfg(feature = "nightly")]
-    ptr: NonZero<*mut T>,
+    ptr: NonZero<*const T>,
     #[cfg(not(feature = "nightly"))]
-    ptr: *mut T,
+    ptr: *const T,
 }
 
 #[cfg(feature = "nightly")]
@@ -38,26 +38,14 @@ impl<T: ?Sized> IntrusiveRef<T> {
     ///
     /// You must ensure that the `IntrusiveRef` guarantees are upheld.
     #[inline]
-    pub unsafe fn from_raw(val: *mut T) -> IntrusiveRef<T> {
+    pub unsafe fn from_raw(val: *const T) -> IntrusiveRef<T> {
         IntrusiveRef { ptr: NonZero::new(val) }
-    }
-
-    /// Creates an `IntrusiveRef` from a raw pointer
-    ///
-    /// # Safety
-    ///
-    /// This yields a `&mut` reference but makes no guarantee that these
-    /// references are not aliased. You must ensure that there are no live
-    /// references (mutable or immutable) to this object.
-    #[inline]
-    pub unsafe fn as_mut(&mut self) -> &mut T {
-        &mut **self.ptr
     }
 
     /// Converts an `IntrusiveRef` into a raw pointer
     #[inline]
     pub unsafe fn into_raw(self) -> *mut T {
-        *self.ptr
+        *self.ptr as *mut _
     }
 }
 
@@ -69,26 +57,14 @@ impl<T: ?Sized> IntrusiveRef<T> {
     ///
     /// You must ensure that the `IntrusiveRef` guarantees are upheld.
     #[inline]
-    pub unsafe fn from_raw(val: *mut T) -> IntrusiveRef<T> {
+    pub unsafe fn from_raw(val: *const T) -> IntrusiveRef<T> {
         IntrusiveRef { ptr: val }
-    }
-
-    /// Creates an `IntrusiveRef` from a raw pointer
-    ///
-    /// # Safety
-    ///
-    /// This yields a `&mut` reference but makes no guarantee that these
-    /// references are not aliased. You must ensure that there are no live
-    /// references (mutable or immutable) to this object.
-    #[inline]
-    pub unsafe fn as_mut(&mut self) -> &mut T {
-        &mut *self.ptr
     }
 
     /// Converts an `IntrusiveRef` into a raw pointer
     #[inline]
     pub fn into_raw(self) -> *mut T {
-        self.ptr
+        self.ptr as *mut _
     }
 }
 
@@ -114,11 +90,10 @@ impl<T: ?Sized> IntrusiveRef<T> {
     }
 }
 
-impl<T: ?Sized> Copy for IntrusiveRef<T> {}
 impl<T: ?Sized> Clone for IntrusiveRef<T> {
     #[inline]
     fn clone(&self) -> IntrusiveRef<T> {
-        *self
+        IntrusiveRef { ptr: self.ptr }
     }
 }
 impl<T: ?Sized> Deref for IntrusiveRef<T> {

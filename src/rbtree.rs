@@ -597,11 +597,13 @@ pub struct Cursor<'a, A: for<'b> TreeAdaptor<'b> + 'a> {
     tree: &'a RBTree<A>,
 }
 
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Copy for Cursor<'a, A> {}
 impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Clone for Cursor<'a, A> {
     #[inline]
     fn clone(&self) -> Cursor<'a, A> {
-        *self
+        Cursor {
+            current: self.current,
+            tree: self.tree,
+        }
     }
 }
 
@@ -684,11 +686,11 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get_raw(&self) -> Option<*mut A::Container> {
+    pub fn get_raw(&self) -> Option<*const A::Container> {
         if self.is_null() {
             None
         } else {
-            Some(unsafe { self.tree.adaptor.get_container(self.current.0) } as *mut _)
+            Some(unsafe { self.tree.adaptor.get_container(self.current.0) })
         }
     }
 
@@ -700,23 +702,6 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     #[inline]
     pub fn get(&self) -> Option<&'a A::Container> {
         self.get_raw().map(|x| unsafe { &*x })
-    }
-
-    /// Returns a mutable reference to the object that the cursor is currently
-    /// pointing to.
-    ///
-    /// This returns None if the cursor is currently pointing to the null
-    /// object.
-    ///
-    /// # Safety
-    ///
-    /// This function returns a `&mut` reference but makes no guarantee that
-    /// this references is not aliased. You must ensure that there are no live
-    /// references (mutable or immutable) to this object when calling this
-    /// function.
-    #[inline]
-    pub unsafe fn get_mut(&mut self) -> Option<&'a mut A::Container> {
-        self.get_raw().map(|x| &mut *x)
     }
 
     /// Returns a read-only cursor pointing to the current element.
@@ -777,7 +762,7 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
             let result = self.current.0;
             self.current.remove(&mut self.tree.root);
             self.current = next;
-            Some(IntrusiveRef::from_raw(self.tree.adaptor.get_container(result) as *mut _))
+            Some(IntrusiveRef::from_raw(self.tree.adaptor.get_container(result)))
         }
     }
 
@@ -813,7 +798,7 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
             let result = self.current.0;
             self.current.replace_with(new, &mut self.tree.root);
             self.current = new;
-            Some(IntrusiveRef::from_raw(self.tree.adaptor.get_container(result) as *mut _))
+            Some(IntrusiveRef::from_raw(self.tree.adaptor.get_container(result)))
         }
     }
 
@@ -1197,34 +1182,6 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
         }
     }
 
-    #[inline]
-    fn range_internal<'a, Min: ?Sized + Ord, Max: ?Sized + Ord>(&self,
-                                                                min: Bound<&Min>,
-                                                                max: Bound<&Max>)
-                                                                -> RawIter
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Min> + Borrow<Max>,
-              A::Container: 'a
-    {
-        let lower = self.lower_bound_internal(min);
-        let upper = self.upper_bound_internal(max);
-        if !lower.is_null() && !upper.is_null() {
-            let lower_key = unsafe { self.adaptor.get_key(&*self.adaptor.get_container(lower.0)) };
-            let upper_key = unsafe { self.adaptor.get_key(&*self.adaptor.get_container(upper.0)) };
-            if upper_key >= lower_key {
-                return RawIter {
-                    root: self.root,
-                    head: lower,
-                    tail: upper,
-                };
-            }
-        }
-        RawIter {
-            root: NodePtr::null(),
-            head: NodePtr::null(),
-            tail: NodePtr::null(),
-        }
-    }
-
     /// Constructs a double-ended iterator over a sub-range of elements in the
     /// tree, starting at min, and ending at max. If min is `Unbounded`, then it
     /// will be treated as "negative infinity", and if max is `Unbounded`, then
@@ -1237,51 +1194,27 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
                                                            -> Iter<'a, A>
         where <A as TreeAdaptor<'a>>::Key: Borrow<Min> + Borrow<Max>
     {
+        let lower = self.lower_bound_internal(min);
+        let upper = self.upper_bound_internal(max);
+        if !lower.is_null() && !upper.is_null() {
+            let lower_key = unsafe { self.adaptor.get_key(&*self.adaptor.get_container(lower.0)) };
+            let upper_key = unsafe { self.adaptor.get_key(&*self.adaptor.get_container(upper.0)) };
+            if upper_key >= lower_key {
+                return Iter {
+                    raw: RawIter {
+                        head: lower,
+                        tail: upper,
+                    },
+                    tree: self,
+                };
+            }
+        }
         Iter {
-            raw: self.range_internal(min, max),
-            tree: self,
-        }
-    }
-
-    /// Constructs a double-ended mutable iterator over a sub-range of elements
-    /// in the tree, starting at min, and ending at max. If min is `Unbounded`,
-    /// then it will be treated as "negative infinity", and if max is
-    /// `Unbounded`, then it will be treated as "positive infinity". Thus
-    /// `range_mut(Unbounded, Unbounded)` will yield the whole collection.
-    ///
-    /// # Safety
-    ///
-    /// This iterator yields `&mut` references to objects in the `RBTree`
-    /// but makes no guarantee that these references are not aliased. You must
-    /// ensure that there are no live references (mutable or immutable) to any
-    /// object in the `RBTree` while the iterator is in use.
-    #[inline]
-    pub unsafe fn range_mut<'a, Min: ?Sized + Ord, Max: ?Sized + Ord>(&'a mut self,
-                                                                      min: Bound<&Min>,
-                                                                      max: Bound<&Max>)
-                                                                      -> IterMut<'a, A>
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Min> + Borrow<Max>
-    {
-        IterMut {
-            raw: self.range_internal(min, max),
-            tree: self,
-        }
-    }
-
-    #[inline]
-    fn iter_internal(&self) -> RawIter {
-        if self.root.is_null() {
-            RawIter {
-                root: NodePtr::null(),
+            raw: RawIter {
                 head: NodePtr::null(),
                 tail: NodePtr::null(),
-            }
-        } else {
-            RawIter {
-                root: self.root,
-                head: unsafe { self.root.first_child() },
-                tail: unsafe { self.root.last_child() },
-            }
+            },
+            tree: self,
         }
     }
 
@@ -1289,26 +1222,22 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// order.
     #[inline]
     pub fn iter(&self) -> Iter<A> {
-        Iter {
-            raw: self.iter_internal(),
-            tree: self,
-        }
-    }
-
-    /// Gets a mutable iterator over the objects in the `RBTree`, in ascending
-    /// key order.
-    ///
-    /// # Safety
-    ///
-    /// This iterator yields `&mut` references to objects in the `RBTree`
-    /// but makes no guarantee that these references are not aliased. You must
-    /// ensure that there are no live references (mutable or immutable) to any
-    /// object in the `RBTree` while the iterator is in use.
-    #[inline]
-    pub unsafe fn iter_mut(&mut self) -> IterMut<A> {
-        IterMut {
-            raw: self.iter_internal(),
-            tree: self,
+        if self.root.is_null() {
+            Iter {
+                raw: RawIter {
+                    head: NodePtr::null(),
+                    tail: NodePtr::null(),
+                },
+                tree: self,
+            }
+        } else {
+            Iter {
+                raw: RawIter {
+                    head: unsafe { self.root.first_child() },
+                    tail: unsafe { self.root.last_child() },
+                },
+                tree: self,
+            }
         }
     }
 
@@ -1342,7 +1271,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
                 current.unlink();
                 let guard = PanicGuard(current.right());
                 self.drain_recurse(f, current.left());
-                f(IntrusiveRef::from_raw(self.adaptor.get_container(current.0) as *mut _));
+                f(IntrusiveRef::from_raw(self.adaptor.get_container(current.0)));
                 mem::forget(guard);
                 self.drain_recurse(f, current.right());
             }
@@ -1407,7 +1336,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
 unsafe impl<A: for<'a> TreeAdaptor<'a> + Sync> Sync for RBTree<A> where A::Container: Sync {}
 
 // We require Sync on objects here because they may belong to multiple collections
-unsafe impl<A: for<'a> TreeAdaptor<'a> + Send> Send for RBTree<A> where A::Container: Send {}
+unsafe impl<A: for<'a> TreeAdaptor<'a> + Send> Send for RBTree<A> where A::Container: Send + Sync {}
 
 impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> IntoIterator for &'a RBTree<A> {
     type Item = &'a A::Container;
@@ -1434,14 +1363,13 @@ impl<A: for<'a> TreeAdaptor<'a>> fmt::Debug for RBTree<A>
 }
 
 // =============================================================================
-// RawIter, Iter, IterMut
+// RawIter, Iter
 // =============================================================================
 
 #[derive(Copy, Clone)]
 struct RawIter {
     head: NodePtr,
     tail: NodePtr,
-    root: NodePtr,
 }
 impl Iterator for RawIter {
     type Item = NodePtr;
@@ -1497,33 +1425,13 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> DoubleEndedIterator for Iter<'a, A> {
         self.raw.next_back().map(|x| unsafe { &*self.tree.adaptor.get_container(x.0) })
     }
 }
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Copy for Iter<'a, A> {}
 impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Clone for Iter<'a, A> {
     #[inline]
     fn clone(&self) -> Iter<'a, A> {
-        *self
-    }
-}
-
-/// An iterator over mutable references to the items of a `RBTree`.
-pub struct IterMut<'a, A: for<'b> TreeAdaptor<'b> + 'a> {
-    raw: RawIter,
-    tree: &'a mut RBTree<A>,
-}
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Iterator for IterMut<'a, A> {
-    type Item = &'a mut A::Container;
-
-    #[inline]
-    fn next(&mut self) -> Option<&'a mut A::Container> {
-        self.raw.next().map(|x| unsafe { &mut *(self.tree.adaptor.get_container(x.0) as *mut _) })
-    }
-}
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> DoubleEndedIterator for IterMut<'a, A> {
-    #[inline]
-    fn next_back(&mut self) -> Option<&'a mut A::Container> {
-        self.raw
-            .next_back()
-            .map(|x| unsafe { &mut *(self.tree.adaptor.get_container(x.0) as *mut _) })
+        Iter {
+            raw: self.raw,
+            tree: self.tree,
+        }
     }
 }
 
@@ -1575,7 +1483,7 @@ mod tests {
         let mut b = RBTree::<ObjAdaptor>::default();
         assert!(b.is_empty());
 
-        b.insert(a);
+        b.insert(a.clone());
         assert!(!b.is_empty());
         assert!(a.link.is_linked());
         assert_eq!(format!("{:?}", a.link), "linked");
@@ -1604,15 +1512,12 @@ mod tests {
         assert!(cur.is_null());
         assert!(cur.get_raw().is_none());
         assert!(cur.get().is_none());
-        unsafe {
-            assert!(cur.get_mut().is_none());
-        }
         assert!(cur.remove().is_none());
 
-        cur.insert_before(a);
-        cur.insert_before(c);
+        cur.insert_before(a.clone());
+        cur.insert_before(c.clone());
         cur.move_prev();
-        cur.insert_before(b);
+        cur.insert_before(b.clone());
         cur.move_next();
         assert!(cur.is_null());
 
@@ -1640,26 +1545,26 @@ mod tests {
         let a2 = make_obj(1);
         let b2 = make_obj(2);
         let c2 = make_obj(3);
-        assert_eq!(cur.replace_with(a2).unwrap().as_ref() as *const _,
+        assert_eq!(cur.replace_with(a2.clone()).unwrap().as_ref() as *const _,
                    a.as_ref() as *const _);
         assert!(!a.link.is_linked());
         cur.move_next();
-        assert_eq!(cur.replace_with(b2).unwrap().as_ref() as *const _,
+        assert_eq!(cur.replace_with(b2.clone()).unwrap().as_ref() as *const _,
                    b.as_ref() as *const _);
         assert!(!b.link.is_linked());
         cur.move_next();
-        assert_eq!(cur.replace_with(c2).unwrap().as_ref() as *const _,
+        assert_eq!(cur.replace_with(c2.clone()).unwrap().as_ref() as *const _,
                    c.as_ref() as *const _);
         assert!(!c.link.is_linked());
         cur.move_next();
-        assert!(cur.replace_with(c).is_none());
+        assert!(cur.replace_with(c.clone()).is_none());
     }
 
     #[test]
     fn test_insert_remove() {
         let v = (0..100)
-                    .map(make_obj)
-                    .collect::<Vec<_>>();
+            .map(make_obj)
+            .collect::<Vec<_>>();
         assert!(v.iter().all(|x| !x.link.is_linked()));
         let mut t = RBTree::new(ObjAdaptor);
         assert!(t.is_empty());
@@ -1668,7 +1573,7 @@ mod tests {
         {
             let mut expected = Vec::new();
             for x in v.iter() {
-                t.insert(*x);
+                t.insert(x.clone());
                 expected.push(x.value);
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
@@ -1684,7 +1589,7 @@ mod tests {
         {
             let mut expected = Vec::new();
             for x in v.iter().rev() {
-                t.insert(*x);
+                t.insert(x.clone());
                 expected.insert(0, x.value);
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
@@ -1702,7 +1607,7 @@ mod tests {
             rng.shuffle(&mut indices);
             let mut expected = Vec::new();
             for i in indices {
-                t.insert(v[i]);
+                t.insert(v[i].clone());
                 expected.push(v[i].value);
                 expected[..].sort();
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
@@ -1735,7 +1640,7 @@ mod tests {
                         }
                         c.move_next();
                     }
-                    c.insert_before(v[i]);
+                    c.insert_before(v[i].clone());
                 }
                 expected.push(v[i].value);
                 expected[..].sort();
@@ -1759,7 +1664,7 @@ mod tests {
                         }
                         c.move_prev();
                     }
-                    c.insert_after(v[i]);
+                    c.insert_after(v[i].clone());
                 }
                 expected.push(v[i].value);
                 expected[..].sort();
@@ -1771,11 +1676,11 @@ mod tests {
     #[test]
     fn test_iter() {
         let v = (0..10)
-                    .map(|x| make_obj(x * 10))
-                    .collect::<Vec<_>>();
+            .map(|x| make_obj(x * 10))
+            .collect::<Vec<_>>();
         let mut t = RBTree::new(ObjAdaptor);
         for x in v.iter() {
-            t.insert(*x);
+            t.insert(x.clone());
         }
 
         assert_eq!(format!("{:?}", t),
@@ -1783,20 +1688,10 @@ mod tests {
 
         assert_eq!(t.iter().clone().map(|x| x.value).collect::<Vec<_>>(),
                    vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
-        unsafe {
-            assert_eq!(t.iter_mut().map(|x| x.value).collect::<Vec<_>>(),
-                       vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
-            assert_eq!(t.iter_mut().rev().map(|x| x.value).collect::<Vec<_>>(),
-                       vec![90, 80, 70, 60, 50, 40, 30, 20, 10, 0]);
-        }
         assert_eq!((&t).into_iter().rev().map(|x| x.value).collect::<Vec<_>>(),
                    vec![90, 80, 70, 60, 50, 40, 30, 20, 10, 0]);
         assert_eq!(t.range(Unbounded, Unbounded).map(|x| x.value).collect::<Vec<_>>(),
                    vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
-        unsafe {
-            assert_eq!(t.range_mut(Unbounded, Unbounded).map(|x| x.value).collect::<Vec<_>>(),
-                       vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
-        }
 
         assert_eq!(t.range(Included(&0), Unbounded).map(|x| x.value).collect::<Vec<_>>(),
                    vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
@@ -1882,11 +1777,11 @@ mod tests {
     #[test]
     fn test_find() {
         let v = (0..10)
-                    .map(|x| make_obj(x * 10))
-                    .collect::<Vec<_>>();
+            .map(|x| make_obj(x * 10))
+            .collect::<Vec<_>>();
         let mut t = RBTree::new(ObjAdaptor);
         for x in v.iter() {
-            t.insert(*x);
+            t.insert(x.clone());
         }
 
         for i in -9..100 {
@@ -2012,9 +1907,9 @@ mod tests {
         let a = make_obj(1);
         let b = make_obj(2);
         let c = make_obj(3);
-        t.insert(a);
-        t.insert(b);
-        t.insert(c);
+        t.insert(a.clone());
+        t.insert(b.clone());
+        t.insert(c.clone());
 
         unsafe {
             t.fast_clear();
@@ -2036,9 +1931,9 @@ mod tests {
         let a = make_obj(1);
         let b = make_obj(2);
         let c = make_obj(3);
-        t.insert(a);
-        t.insert(b);
-        t.insert(c);
+        t.insert(a.clone());
+        t.insert(b.clone());
+        t.insert(c.clone());
 
         catch_unwind(AssertUnwindSafe(|| t.drain(|_| panic!("test")))).unwrap_err();
 
