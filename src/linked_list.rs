@@ -46,31 +46,14 @@ impl Link {
     }
 
     /// Checks whether the `Link` is linked into a `LinkedList`.
-    ///
-    /// Note that this function is only thread-safe if the "nightly" feature
-    /// is enabled.
     #[inline]
-    #[cfg(feature = "nightly")]
     pub fn is_linked(&self) -> bool {
-        use core::ptr;
         unsafe {
             // The link might be concurrently modified by another thread,
             // so make sure we read the value only once. Normally we would just
             // make the links atomic but this significantly hurts optimization.
             ptr::read_volatile(&self.next).get() != UNLINKED_MARKER
         }
-    }
-
-    /// Checks whether the `Link` is linked into a `LinkedList`.
-    ///
-    /// Note that this function is only thread-safe if the "nightly" feature
-    /// is enabled.
-    #[inline]
-    #[cfg(not(feature = "nightly"))]
-    pub fn is_linked(&self) -> bool {
-        // If we don't have read_volatile then there's not much we can do, so
-        // just hope the compiler does the right thing.
-        self.next.get() != UNLINKED_MARKER
     }
 
 
