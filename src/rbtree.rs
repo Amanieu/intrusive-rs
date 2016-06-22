@@ -777,8 +777,8 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// lead to `find`, `upper_bound`, `lower_bound` and `range` returning
     /// incorrect results.
     ///
-    /// If the cursor is currently pointing to the null object then no element
-    /// is added or removed and `None` is returned.
+    /// If the cursor is currently pointing to the null object then an error is
+    /// returned containing the given `val` parameter.
     ///
     /// # Panics
     ///
@@ -787,18 +787,18 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     #[inline]
     pub fn replace_with(&mut self,
                         val: IntrusiveRef<A::Container>)
-                        -> Option<IntrusiveRef<A::Container>> {
+                        -> Result<IntrusiveRef<A::Container>, IntrusiveRef<A::Container>> {
+        if self.is_null() {
+            return Err(val);
+        }
         unsafe {
             let new = NodePtr(self.tree.adaptor.get_link(val.into_raw()));
             assert!(!new.is_linked(),
                     "attempted to insert an object that is already linked");
-            if self.is_null() {
-                return None;
-            }
             let result = self.current.0;
             self.current.replace_with(new, &mut self.tree.root);
             self.current = new;
-            Some(IntrusiveRef::from_raw(self.tree.adaptor.get_container(result)))
+            Ok(IntrusiveRef::from_raw(self.tree.adaptor.get_container(result)))
         }
     }
 
@@ -1557,7 +1557,8 @@ mod tests {
                    c.as_ref() as *const _);
         assert!(!c.link.is_linked());
         cur.move_next();
-        assert!(cur.replace_with(c.clone()).is_none());
+        assert_eq!(cur.replace_with(c.clone()).unwrap_err().as_ref() as *const _,
+                   c.as_ref() as *const _);
     }
 
     #[test]

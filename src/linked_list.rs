@@ -431,8 +431,8 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
     /// A pointer to the element that was removed is returned, and the cursor is
     /// modified to point to the newly added element.
     ///
-    /// If the cursor is currently pointing to the null object then no element
-    /// is added or removed and `None` is returned.
+    /// If the cursor is currently pointing to the null object then an error is
+    /// returned containing the given `val` parameter.
     ///
     /// # Panics
     ///
@@ -441,14 +441,14 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
     #[inline]
     pub fn replace_with(&mut self,
                         val: IntrusiveRef<A::Container>)
-                        -> Option<IntrusiveRef<A::Container>> {
+                        -> Result<IntrusiveRef<A::Container>, IntrusiveRef<A::Container>> {
+        if self.is_null() {
+            return Err(val);
+        }
         unsafe {
             let new = NodePtr(self.list.adaptor.get_link(val.into_raw()));
             assert!(!new.is_linked(),
                     "attempted to insert an object that is already linked");
-            if self.is_null() {
-                return None;
-            }
             if self.list.head == self.current {
                 self.list.head = new;
             }
@@ -458,7 +458,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
             let result = self.current.0;
             self.current.replace_with(new);
             self.current = new;
-            Some(IntrusiveRef::from_raw(self.list.adaptor.get_container(result)))
+            Ok(IntrusiveRef::from_raw(self.list.adaptor.get_container(result)))
         }
     }
 
@@ -1047,7 +1047,8 @@ mod tests {
         assert!(cur.get_raw().is_none());
         assert!(cur.get().is_none());
         assert!(cur.remove().is_none());
-        assert!(cur.replace_with(a.clone()).is_none());
+        assert_eq!(cur.replace_with(a.clone()).unwrap_err().as_ref() as *const _,
+                   a.as_ref() as *const _);
 
         cur.insert_before(a.clone());
         cur.insert_before(c.clone());
