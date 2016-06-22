@@ -14,9 +14,10 @@ extern crate alloc;
 #[cfg(feature = "box")]
 use self::alloc::boxed::Box;
 #[cfg(feature = "nightly")]
-use core::nonzero::NonZero;
+use core::ptr::Shared;
 use core::ops::Deref;
 use core::borrow::Borrow;
+use core::fmt;
 
 /// Pointer to an object that may be part of one or more intrusive colllections
 ///
@@ -25,9 +26,9 @@ use core::borrow::Borrow;
 /// one `IntrusiveRef` is pointing to it.
 pub struct IntrusiveRef<T: ?Sized> {
     #[cfg(feature = "nightly")]
-    ptr: NonZero<*const T>,
+    ptr: Shared<T>,
     #[cfg(not(feature = "nightly"))]
-    ptr: *const T,
+    ptr: *mut T,
 }
 
 #[cfg(feature = "nightly")]
@@ -39,13 +40,13 @@ impl<T: ?Sized> IntrusiveRef<T> {
     /// You must ensure that the `IntrusiveRef` guarantees are upheld.
     #[inline]
     pub unsafe fn from_raw(val: *const T) -> IntrusiveRef<T> {
-        IntrusiveRef { ptr: NonZero::new(val) }
+        IntrusiveRef { ptr: Shared::new(val as *mut _) }
     }
 
     /// Converts an `IntrusiveRef` into a raw pointer
     #[inline]
     pub unsafe fn into_raw(self) -> *mut T {
-        *self.ptr as *mut _
+        *self.ptr
     }
 }
 
@@ -58,13 +59,13 @@ impl<T: ?Sized> IntrusiveRef<T> {
     /// You must ensure that the `IntrusiveRef` guarantees are upheld.
     #[inline]
     pub unsafe fn from_raw(val: *const T) -> IntrusiveRef<T> {
-        IntrusiveRef { ptr: val }
+        IntrusiveRef { ptr: val as *mut _ }
     }
 
     /// Converts an `IntrusiveRef` into a raw pointer
     #[inline]
     pub fn into_raw(self) -> *mut T {
-        self.ptr as *mut _
+        self.ptr
     }
 }
 
@@ -121,5 +122,11 @@ impl<T: ?Sized> Borrow<T> for IntrusiveRef<T> {
     #[inline]
     fn borrow(&self) -> &T {
         self.as_ref()
+    }
+}
+impl<T: fmt::Debug + ?Sized> fmt::Debug for IntrusiveRef<T> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(self.as_ref(), f)
     }
 }

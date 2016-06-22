@@ -186,7 +186,7 @@
 
 #![warn(missing_docs)]
 #![no_std]
-#![cfg_attr(feature = "nightly", feature(const_fn, nonzero))]
+#![cfg_attr(feature = "nightly", feature(const_fn, shared))]
 #![cfg_attr(all(feature = "nightly", feature = "box"), feature(alloc))]
 
 #[cfg(test)]
