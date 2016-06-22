@@ -193,6 +193,10 @@
 #[macro_use]
 extern crate std;
 
+// Re-export core for use by macros
+#[doc(hidden)]
+pub extern crate core as __core;
+
 /// Trait representing a mapping between an object and an intrusive link type
 /// which is a member of that object.
 ///
@@ -232,15 +236,18 @@ pub unsafe trait Adaptor<Link> {
 #[macro_export]
 macro_rules! offset_of_unsafe {
     ($container:path, $field:ident) => {{
-        // Make sure the field exists, otherwise this could result in UB if the
-        // field is accessed through Deref. This will cause a null dereference
-        // at runtime since the offset can't be reduced to a constant.
+        // Make sure the field actually exists. This line ensures that a
+        // compile-time error is generated if $field is accessed through a
+        // Deref impl.
         let $container { $field : _, .. };
 
-        // Yes, this is technically derefencing a null pointer. However, Rust
-        // currently accepts this and reduces it to a constant, even in debug
-        // builds!
-        &(*(0 as *const $container)).$field as *const _ as isize
+        // Create an instance of the container and calculate the offset to its
+        // field. Although we are creating references to uninitialized data this
+        // is fine since we are not dereferencing them.
+        let val: $container = $crate::__core::mem::uninitialized();
+        let result = &val.$field as *const _ as isize - &val as *const _ as isize;
+        $crate::__core::mem::forget(val);
+        result
     }};
 }
 
