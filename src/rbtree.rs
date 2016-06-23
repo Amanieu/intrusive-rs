@@ -25,6 +25,13 @@ use core::cmp::Ordering;
 /// This key is used to maintain all elements in the tree in increasing order.
 /// The key can be returned either as a reference or as a value.
 ///
+/// Note that you are responsible for ensuring that the elements in a `RBTree`
+/// remain in ascending key order. This property can be violated, either because
+/// the key of an element was modified, or because the
+/// `insert_before`/`insert_after` methods of `CursorMut` were incorrectly used.
+/// If this situation occurs, memory safety will not be violated but the `find`,
+/// `upper_bound`, `lower_bound` and `range` may return incorrect results.
+///
 /// # Examples
 ///
 /// ```
