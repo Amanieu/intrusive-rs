@@ -23,29 +23,29 @@
 //! ```
 //! #[macro_use]
 //! extern crate intrusive_collections;
-//! use intrusive_collections::{IntrusiveRef, LinkedList, linked_list};
+//! use intrusive_collections::{IntrusiveRef, LinkedList, LinkedListLink};
 //! use std::cell::Cell;
 //!
 //! // Define a struct containing an intrusive link, and an adaptor for it
 //! struct Test {
-//!     link: linked_list::Link,
+//!     link: LinkedListLink,
 //!     value: Cell<i32>,
 //! }
-//! intrusive_adaptor!(TestAdaptor = Test { link: linked_list::Link });
+//! intrusive_adaptor!(TestAdaptor = Test { link: LinkedListLink });
 //!
 //! fn main() {
 //!     // Create a list and some objects
 //!     let mut list = LinkedList::new(TestAdaptor);
 //!     let a = IntrusiveRef::from_box(Box::new(Test {
-//!         link: linked_list::Link::new(),
+//!         link: LinkedListLink::new(),
 //!         value: Cell::new(1),
 //!     }));
 //!     let b = IntrusiveRef::from_box(Box::new(Test {
-//!         link: linked_list::Link::new(),
+//!         link: LinkedListLink::new(),
 //!         value: Cell::new(2),
 //!     }));
 //!     let c = IntrusiveRef::from_box(Box::new(Test {
-//!         link: linked_list::Link::new(),
+//!         link: LinkedListLink::new(),
 //!         value: Cell::new(3),
 //!     }));
 //!
@@ -99,20 +99,21 @@
 //! ```
 //! #[macro_use]
 //! extern crate intrusive_collections;
-//! use intrusive_collections::{IntrusiveRef, linked_list, LinkedList, rbtree, RBTree, TreeAdaptor};
+//! use intrusive_collections::{IntrusiveRef, LinkedListLink, LinkedList};
+//! use intrusive_collections::{RBTreeLink, RBTree, TreeAdaptor};
 //!
 //! // This struct can be inside two lists and one tree simultaneously
 //! #[derive(Default)]
 //! struct Test {
-//!     link: linked_list::Link,
-//!     link2: linked_list::Link,
-//!     link3: rbtree::Link,
+//!     link: LinkedListLink,
+//!     link2: LinkedListLink,
+//!     link3: RBTreeLink,
 //!     value: i32,
 //! }
 //!
-//! intrusive_adaptor!(MyAdaptor = Test { link: linked_list::Link });
-//! intrusive_adaptor!(MyAdaptor2 = Test { link2: linked_list::Link });
-//! intrusive_adaptor!(MyAdaptor3 = Test { link3: rbtree::Link });
+//! intrusive_adaptor!(MyAdaptor = Test { link: LinkedListLink });
+//! intrusive_adaptor!(MyAdaptor2 = Test { link2: LinkedListLink });
+//! intrusive_adaptor!(MyAdaptor3 = Test { link3: RBTreeLink });
 //! impl<'a> TreeAdaptor<'a> for MyAdaptor3 {
 //!     type Key = i32;
 //!     fn get_key(&self, x: &'a Test) -> i32 { x.value }
@@ -298,14 +299,14 @@ macro_rules! container_of {
 /// ```
 /// #[macro_use]
 /// extern crate intrusive_collections;
-/// use intrusive_collections::{linked_list, rbtree};
+/// use intrusive_collections::{LinkedListLink, RBTreeLink};
 ///
 /// pub struct Test {
-///     link: linked_list::Link,
-///     link2: rbtree::Link,
+///     link: LinkedListLink,
+///     link2: RBTreeLink,
 /// }
-/// intrusive_adaptor!(MyAdaptor = Test { link: linked_list::Link });
-/// intrusive_adaptor!(pub MyAdaptor2 = Test { link2: rbtree::Link });
+/// intrusive_adaptor!(MyAdaptor = Test { link: LinkedListLink });
+/// intrusive_adaptor!(pub MyAdaptor2 = Test { link2: RBTreeLink });
 /// # fn main() {}
 /// ```
 #[macro_export]
@@ -349,8 +350,11 @@ pub mod rbtree;
 mod intrusive_ref;
 
 pub use singly_linked_list::SinglyLinkedList;
+pub use singly_linked_list::Link as SinglyLinkedListLink;
 pub use linked_list::LinkedList;
+pub use linked_list::Link as LinkedListLink;
 pub use rbtree::{RBTree, TreeAdaptor};
+pub use rbtree::Link as RBTreeLink;
 pub use intrusive_ref::IntrusiveRef;
 
 /// An endpoint of a range of keys.
