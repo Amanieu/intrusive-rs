@@ -1430,6 +1430,7 @@ mod tests {
     use Bound::*;
     use super::{RBTree, TreeAdaptor, Link};
     use std::fmt;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
     extern crate rand;
     use self::rand::{XorShiftRng, Rng};
 
@@ -1908,9 +1909,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "nightly")]
     fn test_panic() {
-        use std::panic::{catch_unwind, AssertUnwindSafe};
         let mut t = RBTree::new(ObjAdaptor);
         let a = make_obj(1);
         let b = make_obj(2);

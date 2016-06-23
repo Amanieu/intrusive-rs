@@ -973,6 +973,7 @@ mod tests {
     use IntrusiveRef;
     use super::{LinkedList, Link};
     use std::fmt;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
     #[derive(Clone)]
     struct Obj {
@@ -1288,9 +1289,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "nightly")]
     fn test_panic() {
-        use std::panic::{catch_unwind, AssertUnwindSafe};
         let mut l = LinkedList::new(ObjAdaptor1);
         let a = make_obj(1);
         let b = make_obj(2);
