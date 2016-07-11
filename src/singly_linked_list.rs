@@ -724,11 +724,13 @@ impl<'a, A: Adaptor<Link> + 'a> Iterator for Iter<'a, A> {
         self.raw.next().map(|x| unsafe { &*self.list.adaptor.get_container(x.0) })
     }
 }
-impl<'a, A: Adaptor<Link> + 'a> Copy for Iter<'a, A> {}
 impl<'a, A: Adaptor<Link> + 'a> Clone for Iter<'a, A> {
     #[inline]
     fn clone(&self) -> Iter<'a, A> {
-        *self
+        Iter {
+            raw: self.raw,
+            list: self.list,
+        }
     }
 }
 
