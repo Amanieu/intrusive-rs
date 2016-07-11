@@ -1114,12 +1114,14 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// The new element will be inserted at the correct position in the tree
     /// based on its key.
     ///
+    /// Returns a mutable cursor pointing to the newly added element.
+    ///
     /// # Panics
     ///
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert(&mut self, val: IntrusiveRef<A::Container>) {
+    pub fn insert(&mut self, val: IntrusiveRef<A::Container>) -> CursorMut<A> {
         unsafe {
             let raw = val.into_raw();
             let new = NodePtr(self.adaptor.get_link(raw));
@@ -1148,6 +1150,10 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
                         }
                     }
                 }
+            }
+            CursorMut {
+                current: new,
+                tree: self,
             }
         }
     }
@@ -1454,7 +1460,7 @@ mod tests {
         let mut b = RBTree::<ObjAdaptor>::default();
         assert!(b.is_empty());
 
-        b.insert(a.clone());
+        assert_eq!(b.insert(a.clone()).get().unwrap().value, 1);
         assert!(!b.is_empty());
         assert!(a.link.is_linked());
         assert_eq!(format!("{:?}", a.link), "linked");
