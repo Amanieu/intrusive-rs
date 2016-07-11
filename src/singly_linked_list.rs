@@ -213,20 +213,6 @@ impl<'a, A: Adaptor<Link>> Cursor<'a, A> {
         self.current.is_null()
     }
 
-    /// Returns a raw pointer to the object that the cursor is currently
-    /// pointing to.
-    ///
-    /// This returns None if the cursor is currently pointing to the null
-    /// object.
-    #[inline]
-    pub fn get_raw(&self) -> Option<*const A::Container> {
-        if self.is_null() {
-            None
-        } else {
-            Some(unsafe { self.list.adaptor.get_container(self.current.0) })
-        }
-    }
-
     /// Returns a reference to the object that the cursor is currently
     /// pointing to.
     ///
@@ -234,7 +220,11 @@ impl<'a, A: Adaptor<Link>> Cursor<'a, A> {
     /// object.
     #[inline]
     pub fn get(&self) -> Option<&'a A::Container> {
-        self.get_raw().map(|x| unsafe { &*x })
+        if self.is_null() {
+            None
+        } else {
+            Some(unsafe { &*self.list.adaptor.get_container(self.current.0) })
+        }
     }
 
     /// Moves the cursor to the next element of the `SinglyLinkedList`.
@@ -266,20 +256,6 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
         self.current.is_null()
     }
 
-    /// Returns a raw pointer to the object that the cursor is currently
-    /// pointing to.
-    ///
-    /// This returns None if the cursor is currently pointing to the null
-    /// object.
-    #[inline]
-    pub fn get_raw(&self) -> Option<*const A::Container> {
-        if self.is_null() {
-            None
-        } else {
-            Some(unsafe { self.list.adaptor.get_container(self.current.0) })
-        }
-    }
-
     /// Returns a reference to the object that the cursor is currently
     /// pointing to.
     ///
@@ -287,7 +263,11 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
     /// object.
     #[inline]
     pub fn get(&self) -> Option<&'a A::Container> {
-        self.get_raw().map(|x| unsafe { &*x })
+        if self.is_null() {
+            None
+        } else {
+            Some(unsafe { &*self.list.adaptor.get_container(self.current.0) })
+        }
     }
 
     /// Returns a read-only cursor pointing to the current element.
@@ -818,7 +798,6 @@ mod tests {
         let mut l = SinglyLinkedList::new(ObjAdaptor1);
         let mut cur = l.cursor_mut();
         assert!(cur.is_null());
-        assert!(cur.get_raw().is_none());
         assert!(cur.get().is_none());
         assert!(cur.remove_next().is_none());
         assert_eq!(cur.replace_next_with(a.clone()).unwrap_err().as_ref() as *const _,
@@ -835,33 +814,33 @@ mod tests {
 
         cur.move_next();
         assert!(!cur.is_null());
-        assert_eq!(cur.get_raw().unwrap() as *const _, a.as_ref() as *const _);
+        assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
 
         {
             let mut cur2 = cur.as_cursor();
-            assert_eq!(cur2.get_raw().unwrap(), a.as_ref() as *const _);
+            assert_eq!(cur2.get().unwrap() as *const _, a.as_ref() as *const _);
             cur2.move_next();
             assert_eq!(cur2.get().unwrap().value, 2);
             cur2.move_next();
-            assert_eq!(cur2.get_raw().unwrap(), c.as_ref() as *const _);
+            assert_eq!(cur2.get().unwrap() as *const _, c.as_ref() as *const _);
             cur2.move_next();
             assert!(cur2.is_null());
-            assert_eq!(cur2.clone().get_raw(), cur2.get_raw());
+            assert!(cur2.clone().get().is_none());
         }
-        assert_eq!(cur.get_raw().unwrap() as *const _, a.as_ref() as *const _);
+        assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
 
         assert_eq!(cur.remove_next().unwrap().as_ref() as *const _,
                    b.as_ref() as *const _);
-        assert_eq!(cur.get_raw().unwrap() as *const _, a.as_ref() as *const _);
+        assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
         cur.insert_after(b.clone());
-        assert_eq!(cur.get_raw().unwrap() as *const _, a.as_ref() as *const _);
+        assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
         cur.move_next();
-        assert_eq!(cur.get_raw().unwrap() as *const _, b.as_ref() as *const _);
+        assert_eq!(cur.get().unwrap() as *const _, b.as_ref() as *const _);
         assert_eq!(cur.remove_next().unwrap().as_ref() as *const _,
                    c.as_ref() as *const _);
         assert!(!c.link1.is_linked());
         assert!(a.link1.is_linked());
-        assert_eq!(cur.get_raw().unwrap() as *const _, b.as_ref() as *const _);
+        assert_eq!(cur.get().unwrap() as *const _, b.as_ref() as *const _);
         cur.move_next();
         assert!(cur.is_null());
         assert_eq!(cur.replace_next_with(c.clone()).unwrap().as_ref() as *const _,
@@ -870,13 +849,13 @@ mod tests {
         assert!(c.link1.is_linked());
         assert!(cur.is_null());
         cur.move_next();
-        assert_eq!(cur.get_raw().unwrap() as *const _, c.as_ref() as *const _);
+        assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
         assert_eq!(cur.replace_next_with(a.clone()).unwrap().as_ref() as *const _,
                    b.as_ref() as *const _);
         assert!(a.link1.is_linked());
         assert!(!b.link1.is_linked());
         assert!(c.link1.is_linked());
-        assert_eq!(cur.get_raw().unwrap() as *const _, c.as_ref() as *const _);
+        assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
     }
 
     #[test]
