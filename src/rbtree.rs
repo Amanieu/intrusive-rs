@@ -1158,6 +1158,66 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
         }
     }
 
+    /// Returns an `Entry` for the given key which contains a `CursorMut` to an
+    /// element with the given key or an `InsertCursor` which points to a place
+    /// in which to insert a new element with the given key.
+    ///
+    /// This is more efficient than calling `find` followed by `insert` since
+    /// the tree does not have to be searched a second time to find a place to
+    /// insert the new element.
+    ///
+    /// If multiple elements with an identical key are found then an arbitrary
+    /// one is returned.
+    #[inline]
+    pub fn entry<'a, Q: ?Sized + Ord>(&'a mut self, key: &Q) -> Entry<'a, A>
+        where <A as TreeAdaptor<'a>>::Key: Borrow<Q>
+    {
+        unsafe {
+            if self.is_empty() {
+                Entry::Vacant(InsertCursor {
+                    parent: NodePtr::null(),
+                    insert_left: false,
+                    tree: self,
+                })
+            } else {
+                let mut tree = self.root;
+                loop {
+                    let current = &*self.adaptor.get_container(tree.0);
+                    match key.cmp(self.adaptor.get_key(current).borrow()) {
+                        Ordering::Less => {
+                            if tree.left().is_null() {
+                                return Entry::Vacant(InsertCursor {
+                                    parent: tree,
+                                    insert_left: true,
+                                    tree: self,
+                                });
+                            } else {
+                                tree = tree.left();
+                            }
+                        }
+                        Ordering::Equal => {
+                            return Entry::Occupied(CursorMut {
+                                current: tree,
+                                tree: self,
+                            });
+                        }
+                        Ordering::Greater => {
+                            if tree.right().is_null() {
+                                return Entry::Vacant(InsertCursor {
+                                    parent: tree,
+                                    insert_left: false,
+                                    tree: self,
+                                });
+                            } else {
+                                tree = tree.right();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Constructs a double-ended iterator over a sub-range of elements in the
     /// tree, starting at min, and ending at max. If min is `Unbounded`, then it
     /// will be treated as "negative infinity", and if max is `Unbounded`, then
@@ -1339,6 +1399,93 @@ impl<A: for<'a> TreeAdaptor<'a>> fmt::Debug for RBTree<A>
 }
 
 // =============================================================================
+// InsertCursor, Entry
+// =============================================================================
+
+/// A cursor pointing to a slot in which an element can be inserted into a
+/// `RBTree`.
+pub struct InsertCursor<'a, A: for<'b> TreeAdaptor<'b> + 'a> {
+    parent: NodePtr,
+    insert_left: bool,
+    tree: &'a mut RBTree<A>,
+}
+
+impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> InsertCursor<'a, A> {
+    /// Inserts a new element into the `RBTree` at the location indicated by
+    /// this `InsertCursor`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    pub fn insert(self, val: IntrusiveRef<A::Container>) -> CursorMut<'a, A> {
+        unsafe {
+            let raw = val.into_raw();
+            let new = NodePtr(self.tree.adaptor.get_link(raw));
+            assert!(!new.is_linked(),
+                    "attempted to insert an object that is already linked");
+            if self.parent.is_null() {
+                self.tree.insert_root(new);
+            } else if self.insert_left {
+                self.parent.insert_left(new, &mut self.tree.root);
+            } else {
+                self.parent.insert_right(new, &mut self.tree.root);
+            }
+            CursorMut {
+                current: new,
+                tree: self.tree,
+            }
+        }
+    }
+}
+
+/// An entry in a `RBTree`.
+///
+/// See the documentation for `RBTree::entry`.
+pub enum Entry<'a, A: for<'b> TreeAdaptor<'b> + 'a> {
+    /// An occupied entry.
+    Occupied(CursorMut<'a, A>),
+
+    /// A vacant entry.
+    Vacant(InsertCursor<'a, A>),
+}
+
+impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Entry<'a, A> {
+    /// Inserts an element into the `RBTree` if the entry is vacant, returning
+    /// a `CursorMut` to the resulting value. If the entry is occupied then a
+    /// `CursorMut` pointing to the element is returned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `Entry` is vacant and the new element is already linked to
+    /// a different intrusive collection.
+    pub fn or_insert(self, val: IntrusiveRef<A::Container>) -> CursorMut<'a, A> {
+        match self {
+            Entry::Occupied(entry) => entry,
+            Entry::Vacant(entry) => entry.insert(val),
+        }
+    }
+
+    /// Calls the given function and inserts the result into the `RBTree` if the
+    /// entry is vacant, returning a `CursorMut` to the resulting value. If the
+    /// entry is occupied then a `CursorMut` pointing to the element is
+    /// returned and the function is not executed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `Entry` is vacant and the new element is already linked to
+    /// a different intrusive collection.
+    pub fn or_insert_with<F>(self, default: F) -> CursorMut<'a, A>
+        where F: FnOnce() -> IntrusiveRef<A::Container>
+    {
+        match self {
+            Entry::Occupied(entry) => entry,
+            Entry::Vacant(entry) => entry.insert(default()),
+        }
+    }
+}
+
+// =============================================================================
 // RawIter, Iter
 // =============================================================================
 
@@ -1421,7 +1568,7 @@ mod tests {
     use std::boxed::Box;
     use IntrusiveRef;
     use Bound::*;
-    use super::{RBTree, TreeAdaptor, Link};
+    use super::{RBTree, TreeAdaptor, Link, Entry};
     use std::fmt;
     use std::panic::{catch_unwind, AssertUnwindSafe};
     extern crate rand;
@@ -1898,6 +2045,40 @@ mod tests {
         assert!(!a.link.is_linked());
         assert!(!b.link.is_linked());
         assert!(!c.link.is_linked());
+    }
+
+    #[test]
+    fn test_entry() {
+        let mut t = RBTree::new(ObjAdaptor);
+        let a = make_obj(1);
+        let b = make_obj(2);
+        let c = make_obj(3);
+        let d = make_obj(4);
+        let e = make_obj(5);
+        let f = make_obj(6);
+        t.entry(&3).or_insert(c.clone());
+        t.entry(&2).or_insert(b.clone());
+        t.entry(&1).or_insert(a.clone());
+
+        match t.entry(&2) {
+            Entry::Vacant(_) => unreachable!(),
+            Entry::Occupied(c) => assert_eq!(c.get().unwrap().value, 2),
+
+        }
+        assert_eq!(t.entry(&2).or_insert(b.clone()).get().unwrap().value, 2);
+        assert_eq!(t.entry(&2).or_insert_with(|| b.clone()).get().unwrap().value,
+                   2);
+
+        match t.entry(&5) {
+            Entry::Vacant(c) => assert_eq!(c.insert(e.clone()).get().unwrap().value, 5),
+            Entry::Occupied(_) => unreachable!(),
+        }
+        assert!(e.link.is_linked());
+        assert_eq!(t.entry(&4).or_insert(d.clone()).get().unwrap().value, 4);
+        assert!(d.link.is_linked());
+        assert_eq!(t.entry(&6).or_insert_with(|| f.clone()).get().unwrap().value,
+                   6);
+        assert!(f.link.is_linked());
     }
 
     #[test]
