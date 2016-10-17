@@ -246,9 +246,9 @@ macro_rules! offset_of_unsafe {
         // field. Although we are creating references to uninitialized data this
         // is fine since we are not dereferencing them.
         let val: $container = $crate::__core::mem::uninitialized();
-        let result = &val.$field as *const _ as isize - &val as *const _ as isize;
+        let result = &val.$field as *const _ as usize - &val as *const _ as usize;
         $crate::__core::mem::forget(val);
-        result
+        result as isize
     }};
 }
 
