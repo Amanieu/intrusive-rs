@@ -7,7 +7,7 @@
 
 //! Intrusive collections for Rust.
 //!
-//! Unlike normal colletions, an intrusive collection does not own the objects
+//! Unlike normal collections, an intrusive collection does not own the objects
 //! inside it. Instead it just tracks a set of already-existing objects. Such a
 //! collection is called intrusive because it requires explicit support in
 //! objects to allow them to be inserted into the collection. However, this
