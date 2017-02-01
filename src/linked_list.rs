@@ -7,11 +7,10 @@
 
 //! Intrusive doubly-linked list.
 
-use Adaptor;
-use intrusive_ref::IntrusiveRef;
+use Adapter;
+use IntrusivePointer;
 use core::ptr;
 use core::fmt;
-use core::mem;
 use core::cell::Cell;
 
 // =============================================================================
@@ -48,38 +47,25 @@ impl Link {
     /// Checks whether the `Link` is linked into a `LinkedList`.
     #[inline]
     pub fn is_linked(&self) -> bool {
-        unsafe {
-            // The link might be concurrently modified by another thread,
-            // so make sure we read the value only once. Normally we would just
-            // make the links atomic but this significantly hurts optimization.
-            ptr::read_volatile(&self.next).get() != UNLINKED_MARKER
-        }
+        self.next.get() != UNLINKED_MARKER
     }
 
-
-    /// Unlinks the object from the `LinkedList` without invalidating the rest
-    /// of the list.
+    /// Forcibly unlinks an object from a `LinkedList`.
     ///
     /// # Safety
     ///
-    /// The `LinkedList` is left in an invalid state after this function is
-    /// called. To continue using the `LinkedList`, it must be manually reset by
-    /// calling the `fast_clear` function on it. Any other operations on the
-    /// affected list will result in undefined behavior.
+    /// It is undefined behavior to call this function while still linked into a
+    /// `LinkedList`. The only situation where this function is useful is
+    /// after calling `fast_clear` on a `LinkedList`, since this clears
+    /// the collection without marking the nodes as unlinked.
     #[inline]
-    pub unsafe fn unsafe_unlink(&self) {
+    pub unsafe fn force_unlink(&self) {
         self.next.set(UNLINKED_MARKER);
     }
 }
 
 // An object containing a link can be sent to another thread if it is unlinked.
 unsafe impl Send for Link {}
-
-// The cells are only accessed indirectly through `LinkedList` and are not
-// accessible directly, so a `&Link` is always safe to access from multiple
-// threads. The check in is_linked uses a volatile read and is therefore
-// thread-safe.
-unsafe impl Sync for Link {}
 
 // Provide an implementation of Clone which simply initializes the new link as
 // unlinked. This allows structs containing a link to derive Clone.
@@ -228,12 +214,12 @@ impl NodePtr {
 // =============================================================================
 
 /// A cursor which provides read-only access to a `LinkedList`.
-pub struct Cursor<'a, A: Adaptor<Link> + 'a> {
+pub struct Cursor<'a, A: Adapter<Link = Link> + 'a> {
     current: NodePtr,
     list: &'a LinkedList<A>,
 }
 
-impl<'a, A: Adaptor<Link> + 'a> Clone for Cursor<'a, A> {
+impl<'a, A: Adapter<Link = Link> + 'a> Clone for Cursor<'a, A> {
     #[inline]
     fn clone(&self) -> Cursor<'a, A> {
         Cursor {
@@ -243,7 +229,7 @@ impl<'a, A: Adaptor<Link> + 'a> Clone for Cursor<'a, A> {
     }
 }
 
-impl<'a, A: Adaptor<Link>> Cursor<'a, A> {
+impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
@@ -256,11 +242,11 @@ impl<'a, A: Adaptor<Link>> Cursor<'a, A> {
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a A::Container> {
+    pub fn get(&self) -> Option<&'a A::Value> {
         if self.is_null() {
             None
         } else {
-            Some(unsafe { &*self.list.adaptor.get_container(self.current.0) })
+            Some(unsafe { &*self.list.adapter.get_value(self.current.0) })
         }
     }
 
@@ -294,12 +280,12 @@ impl<'a, A: Adaptor<Link>> Cursor<'a, A> {
 }
 
 /// A cursor which provides mutable access to a `LinkedList`.
-pub struct CursorMut<'a, A: Adaptor<Link> + 'a> {
+pub struct CursorMut<'a, A: Adapter<Link = Link> + 'a> {
     current: NodePtr,
     list: &'a mut LinkedList<A>,
 }
 
-impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
+impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
@@ -312,11 +298,11 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a A::Container> {
+    pub fn get(&self) -> Option<&'a A::Value> {
         if self.is_null() {
             None
         } else {
-            Some(unsafe { &*self.list.adaptor.get_container(self.current.0) })
+            Some(unsafe { &*self.list.adapter.get_value(self.current.0) })
         }
     }
 
@@ -369,7 +355,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
     /// If the cursor is currently pointing to the null object then no element
     /// is removed and `None` is returned.
     #[inline]
-    pub fn remove(&mut self) -> Option<IntrusiveRef<A::Container>> {
+    pub fn remove(&mut self) -> Option<A::Pointer> {
         unsafe {
             if self.is_null() {
                 return None;
@@ -384,7 +370,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
             let result = self.current.0;
             self.current.remove();
             self.current = next;
-            Some(IntrusiveRef::from_raw(self.list.adaptor.get_container(result)))
+            Some(A::Pointer::from_raw(self.list.adapter.get_value(result)))
         }
     }
 
@@ -402,14 +388,12 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn replace_with(&mut self,
-                        val: IntrusiveRef<A::Container>)
-                        -> Result<IntrusiveRef<A::Container>, IntrusiveRef<A::Container>> {
+    pub fn replace_with(&mut self, val: A::Pointer) -> Result<A::Pointer, A::Pointer> {
         if self.is_null() {
             return Err(val);
         }
         unsafe {
-            let new = NodePtr(self.list.adaptor.get_link(val.into_raw()));
+            let new = NodePtr(self.list.adapter.get_link(val.into_raw()));
             assert!(!new.is_linked(),
                     "attempted to insert an object that is already linked");
             if self.list.head == self.current {
@@ -421,7 +405,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
             let result = self.current.0;
             self.current.replace_with(new);
             self.current = new;
-            Ok(IntrusiveRef::from_raw(self.list.adaptor.get_container(result)))
+            Ok(A::Pointer::from_raw(self.list.adapter.get_value(result)))
         }
     }
 
@@ -435,9 +419,9 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert_after(&mut self, val: IntrusiveRef<A::Container>) {
+    pub fn insert_after(&mut self, val: A::Pointer) {
         unsafe {
-            let new = NodePtr(self.list.adaptor.get_link(val.into_raw()));
+            let new = NodePtr(self.list.adapter.get_link(val.into_raw()));
             assert!(!new.is_linked(),
                     "attempted to insert an object that is already linked");
             if self.is_null() {
@@ -462,9 +446,9 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert_before(&mut self, val: IntrusiveRef<A::Container>) {
+    pub fn insert_before(&mut self, val: A::Pointer) {
         unsafe {
-            let new = NodePtr(self.list.adaptor.get_link(val.into_raw()));
+            let new = NodePtr(self.list.adapter.get_link(val.into_raw()));
             assert!(!new.is_linked(),
                     "attempted to insert an object that is already linked");
             if self.is_null() {
@@ -484,7 +468,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
     /// If the cursor is pointing at the null object then the new elements are
     /// inserted at the start of the `LinkedList`.
     #[inline]
-    pub fn splice_after(&mut self, list: LinkedList<A>) {
+    pub fn splice_after(&mut self, mut list: LinkedList<A>) {
         if !list.is_empty() {
             unsafe {
                 if self.is_null() {
@@ -496,6 +480,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
                 if self.list.tail == self.current {
                     self.list.tail = list.tail;
                 }
+                list.head = NodePtr::null();
             }
         }
     }
@@ -505,7 +490,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
     /// If the cursor is pointing at the null object then the new elements are
     /// inserted at the end of the `LinkedList`.
     #[inline]
-    pub fn splice_before(&mut self, list: LinkedList<A>) {
+    pub fn splice_before(&mut self, mut list: LinkedList<A>) {
         if !list.is_empty() {
             unsafe {
                 if self.is_null() {
@@ -517,6 +502,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
                 if self.list.head == self.current {
                     self.list.head = list.head;
                 }
+                list.head = NodePtr::null();
             }
         }
     }
@@ -535,7 +521,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
             let list = LinkedList {
                 head: self.list.head,
                 tail: self.list.tail,
-                adaptor: self.list.adaptor.clone(),
+                adapter: self.list.adapter.clone(),
             };
             self.list.head = NodePtr::null();
             self.list.tail = NodePtr::null();
@@ -545,7 +531,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
                 let list = LinkedList {
                     head: self.current.next(),
                     tail: self.list.tail,
-                    adaptor: self.list.adaptor.clone(),
+                    adapter: self.list.adapter.clone(),
                 };
                 if !list.head.is_null() {
                     list.head.set_prev(NodePtr::null());
@@ -571,7 +557,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
             let list = LinkedList {
                 head: self.list.head,
                 tail: self.list.tail,
-                adaptor: self.list.adaptor.clone(),
+                adapter: self.list.adapter.clone(),
             };
             self.list.head = NodePtr::null();
             self.list.tail = NodePtr::null();
@@ -581,7 +567,7 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
                 let list = LinkedList {
                     head: self.list.head,
                     tail: self.current.prev(),
-                    adaptor: self.list.adaptor.clone(),
+                    adapter: self.list.adapter.clone(),
                 };
                 if !list.tail.is_null() {
                     list.tail.set_next(NodePtr::null());
@@ -599,32 +585,35 @@ impl<'a, A: Adaptor<Link>> CursorMut<'a, A> {
 // =============================================================================
 
 /// An intrusive doubly-linked list.
-pub struct LinkedList<A: Adaptor<Link>> {
+///
+/// When this collection is dropped, all elements linked into it will be
+/// converted back to owned pointers and dropped.
+pub struct LinkedList<A: Adapter<Link = Link>> {
     head: NodePtr,
     tail: NodePtr,
-    adaptor: A,
+    adapter: A,
 }
 
-impl<A: Adaptor<Link>> LinkedList<A> {
+impl<A: Adapter<Link = Link>> LinkedList<A> {
     /// Creates an empty `LinkedList`.
     #[cfg(feature = "nightly")]
     #[inline]
-    pub const fn new(adaptor: A) -> LinkedList<A> {
+    pub const fn new(adapter: A) -> LinkedList<A> {
         LinkedList {
             head: NodePtr(ptr::null()),
             tail: NodePtr(ptr::null()),
-            adaptor: adaptor,
+            adapter: adapter,
         }
     }
 
     /// Creates an empty `LinkedList`.
     #[cfg(not(feature = "nightly"))]
     #[inline]
-    pub fn new(adaptor: A) -> LinkedList<A> {
+    pub fn new(adapter: A) -> LinkedList<A> {
         LinkedList {
             head: NodePtr::null(),
             tail: NodePtr::null(),
-            adaptor: adaptor,
+            adapter: adapter,
         }
     }
 
@@ -658,9 +647,9 @@ impl<A: Adaptor<Link>> LinkedList<A> {
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
     #[inline]
-    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Container) -> Cursor<A> {
+    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Value) -> Cursor<A> {
         Cursor {
-            current: NodePtr(self.adaptor.get_link(ptr)),
+            current: NodePtr(self.adapter.get_link(ptr)),
             list: self,
         }
     }
@@ -671,9 +660,9 @@ impl<A: Adaptor<Link>> LinkedList<A> {
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
     #[inline]
-    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Container) -> CursorMut<A> {
+    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Value) -> CursorMut<A> {
         CursorMut {
-            current: NodePtr(self.adaptor.get_link(ptr)),
+            current: NodePtr(self.adapter.get_link(ptr)),
             list: self,
         }
     }
@@ -718,43 +707,19 @@ impl<A: Adaptor<Link>> LinkedList<A> {
     #[inline]
     pub fn iter(&self) -> Iter<A> {
         Iter {
-            raw: RawIter {
-                head: self.head,
-                tail: self.tail,
-            },
+            head: self.head,
+            tail: self.tail,
             list: self,
         }
     }
 
-    /// Calls the given function for each element in the `LinkedList` before
-    /// removing it from the list.
+    /// Removes all elements from the `LinkedList`.
     ///
-    /// This will unlink all objects currently in the list.
-    ///
-    /// If the given function panics then all elements in the `LinkedList` will
-    /// still be unlinked, but the function will not be called for any elements
-    /// after the one that panicked.
+    /// This will unlink all object currently in the list, which requires
+    /// iterating through all elements in the `LinkedList`. Each element is
+    /// converted back to an owned pointer and then dropped.
     #[inline]
-    pub fn drain<F>(&mut self, mut f: F)
-        where F: FnMut(IntrusiveRef<A::Container>)
-    {
-        // If the given function panics, we still need to go through the rest of
-        // the list and unlink all remaining links.
-        struct PanicGuard(NodePtr);
-        impl Drop for PanicGuard {
-            #[inline]
-            fn drop(&mut self) {
-                let mut current = self.0;
-                while !current.is_null() {
-                    unsafe {
-                        let next = current.next();
-                        current.unlink();
-                        current = next;
-                    }
-                }
-            }
-        };
-
+    pub fn clear(&mut self) {
         let mut current = self.head;
         self.head = NodePtr::null();
         self.tail = NodePtr::null();
@@ -762,36 +727,21 @@ impl<A: Adaptor<Link>> LinkedList<A> {
             unsafe {
                 let next = current.next();
                 current.unlink();
-                let guard = PanicGuard(next);
-                f(IntrusiveRef::from_raw(self.adaptor.get_container(current.0)));
-                mem::forget(guard);
+                A::Pointer::from_raw(self.adapter.get_value(current.0));
                 current = next;
             }
         }
     }
 
-    /// Removes all elements from the `LinkedList`.
-    ///
-    /// This will unlink all object currently in the list, which requires
-    /// iterating through all elements in the `LinkedList`.
-    #[inline]
-    pub fn clear(&mut self) {
-        self.drain(|_| {});
-    }
-
-    /// Empties the `LinkedList` without unlinking objects in it.
+    /// Empties the `LinkedList` without unlinking or freeing objects in it.
     ///
     /// Since this does not unlink any objects, any attempts to link these
     /// objects into another `LinkedList` will fail but will not cause any
     /// memory unsafety. To unlink those objects manually, you must call the
-    /// `unsafe_unlink` function on them.
-    ///
-    /// This is the only function that can be safely called after an object has
-    /// been moved or dropped while still being linked into this `LinkedList`.
+    /// `force_unlink` function on them.
     #[inline]
     pub fn fast_clear(&mut self) {
         self.head = NodePtr::null();
-        self.tail = NodePtr::null();
     }
 
     /// Takes all the elements out of the `LinkedList`, leaving it empty. The
@@ -803,7 +753,7 @@ impl<A: Adaptor<Link>> LinkedList<A> {
         let list = LinkedList {
             head: self.head,
             tail: self.tail,
-            adaptor: self.adaptor.clone(),
+            adapter: self.adapter.clone(),
         };
         self.head = NodePtr::null();
         self.tail = NodePtr::null();
@@ -812,13 +762,13 @@ impl<A: Adaptor<Link>> LinkedList<A> {
 
     /// Inserts a new element at the start of the `LinkedList`.
     #[inline]
-    pub fn push_front(&mut self, val: IntrusiveRef<A::Container>) {
+    pub fn push_front(&mut self, val: A::Pointer) {
         self.cursor_mut().insert_after(val);
     }
 
     /// Inserts a new element at the end of the `LinkedList`.
     #[inline]
-    pub fn push_back(&mut self, val: IntrusiveRef<A::Container>) {
+    pub fn push_back(&mut self, val: A::Pointer) {
         self.cursor_mut().insert_before(val);
     }
 
@@ -826,7 +776,7 @@ impl<A: Adaptor<Link>> LinkedList<A> {
     ///
     /// This returns `None` if the `LinkedList` is empty.
     #[inline]
-    pub fn pop_front(&mut self) -> Option<IntrusiveRef<A::Container>> {
+    pub fn pop_front(&mut self) -> Option<A::Pointer> {
         self.front_mut().remove()
     }
 
@@ -834,19 +784,38 @@ impl<A: Adaptor<Link>> LinkedList<A> {
     ///
     /// This returns `None` if the `LinkedList` is empty.
     #[inline]
-    pub fn pop_back(&mut self) -> Option<IntrusiveRef<A::Container>> {
+    pub fn pop_back(&mut self) -> Option<A::Pointer> {
         self.back_mut().remove()
     }
 }
 
 // Allow read-only access from multiple threads
-unsafe impl<A: Adaptor<Link> + Sync> Sync for LinkedList<A> where A::Container: Sync {}
+unsafe impl<A: Adapter<Link = Link> + Sync> Sync for LinkedList<A> where A::Value: Sync {}
 
-// We require Sync on objects here because they may belong to multiple collections
-unsafe impl<A: Adaptor<Link> + Send> Send for LinkedList<A> where A::Container: Send + Sync {}
+// Allow sending to another thread if the ownership (represented by the A::Pointer owned
+// pointer type) can be transferred to another thread.
+unsafe impl<A: Adapter<Link = Link> + Send> Send for LinkedList<A> where A::Pointer: Send {}
 
-impl<'a, A: Adaptor<Link> + 'a> IntoIterator for &'a LinkedList<A> {
-    type Item = &'a A::Container;
+// Drop all owned pointers if the collection is dropped
+impl<A: Adapter<Link = Link>> Drop for LinkedList<A> {
+    #[inline]
+    fn drop(&mut self) {
+        self.clear();
+    }
+}
+
+impl<A: Adapter<Link = Link>> IntoIterator for LinkedList<A> {
+    type Item = A::Pointer;
+    type IntoIter = IntoIter<A>;
+
+    #[inline]
+    fn into_iter(self) -> IntoIter<A> {
+        IntoIter { list: self }
+    }
+}
+
+impl<'a, A: Adapter<Link = Link> + 'a> IntoIterator for &'a LinkedList<A> {
+    type Item = &'a A::Value;
     type IntoIter = Iter<'a, A>;
 
     #[inline]
@@ -855,14 +824,14 @@ impl<'a, A: Adaptor<Link> + 'a> IntoIterator for &'a LinkedList<A> {
     }
 }
 
-impl<A: Adaptor<Link> + Default> Default for LinkedList<A> {
+impl<A: Adapter<Link = Link> + Default> Default for LinkedList<A> {
     fn default() -> LinkedList<A> {
         LinkedList::new(A::default())
     }
 }
 
-impl<A: Adaptor<Link>> fmt::Debug for LinkedList<A>
-    where A::Container: fmt::Debug
+impl<A: Adapter<Link = Link>> fmt::Debug for LinkedList<A>
+    where A::Value: fmt::Debug
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
@@ -870,75 +839,82 @@ impl<A: Adaptor<Link>> fmt::Debug for LinkedList<A>
 }
 
 // =============================================================================
-// RawIter, Iter
+// Iter
 // =============================================================================
 
-#[derive(Copy, Clone)]
-struct RawIter {
+/// An iterator over references to the items of a `LinkedList`.
+pub struct Iter<'a, A: Adapter<Link = Link> + 'a> {
     head: NodePtr,
     tail: NodePtr,
+    list: &'a LinkedList<A>,
 }
-impl Iterator for RawIter {
-    type Item = NodePtr;
+impl<'a, A: Adapter<Link = Link> + 'a> Iterator for Iter<'a, A> {
+    type Item = &'a A::Value;
 
     #[inline]
-    fn next(&mut self) -> Option<NodePtr> {
+    fn next(&mut self) -> Option<&'a A::Value> {
         if self.head.is_null() {
             None
         } else {
             let head = self.head;
             if head == self.tail {
                 self.head = NodePtr::null();
+                self.tail = NodePtr::null();
             } else {
                 self.head = unsafe { head.next() };
             }
-            Some(head)
+            Some(unsafe { &*self.list.adapter.get_value(head.0) })
         }
     }
 }
-impl DoubleEndedIterator for RawIter {
+impl<'a, A: Adapter<Link = Link> + 'a> DoubleEndedIterator for Iter<'a, A> {
     #[inline]
-    fn next_back(&mut self) -> Option<NodePtr> {
+    fn next_back(&mut self) -> Option<&'a A::Value> {
         if self.tail.is_null() {
             None
         } else {
             let tail = self.tail;
             if self.head == tail {
                 self.tail = NodePtr::null();
+                self.head = NodePtr::null();
             } else {
                 self.tail = unsafe { tail.prev() };
             }
-            Some(tail)
+            Some(unsafe { &*self.list.adapter.get_value(tail.0) })
         }
     }
 }
-
-/// An iterator over references to the items of a `LinkedList`.
-pub struct Iter<'a, A: Adaptor<Link> + 'a> {
-    raw: RawIter,
-    list: &'a LinkedList<A>,
-}
-impl<'a, A: Adaptor<Link> + 'a> Iterator for Iter<'a, A> {
-    type Item = &'a A::Container;
-
-    #[inline]
-    fn next(&mut self) -> Option<&'a A::Container> {
-        self.raw.next().map(|x| unsafe { &*self.list.adaptor.get_container(x.0) })
-    }
-}
-impl<'a, A: Adaptor<Link> + 'a> DoubleEndedIterator for Iter<'a, A> {
-    #[inline]
-    fn next_back(&mut self) -> Option<&'a A::Container> {
-        self.raw.next_back().map(|x| unsafe { &*self.list.adaptor.get_container(x.0) })
-    }
-}
-impl<'a, A: Adaptor<Link> + 'a> Clone for Iter<'a, A> {
+impl<'a, A: Adapter<Link = Link> + 'a> Clone for Iter<'a, A> {
     #[inline]
     fn clone(&self) -> Iter<'a, A> {
         Iter {
-            raw: self.raw,
+            head: self.head,
+            tail: self.tail,
             list: self.list,
         }
+    }
+}
+
+// =============================================================================
+// IntoIter
+// =============================================================================
+
+/// An iterator which consumes a `LinkedList`.
+pub struct IntoIter<A: Adapter<Link = Link>> {
+    list: LinkedList<A>,
+}
+impl<A: Adapter<Link = Link>> Iterator for IntoIter<A> {
+    type Item = A::Pointer;
+
+    #[inline]
+    fn next(&mut self) -> Option<A::Pointer> {
+        self.list.pop_front()
+    }
+}
+impl<A: Adapter<Link = Link>> DoubleEndedIterator for IntoIter<A> {
+    #[inline]
+    fn next_back(&mut self) -> Option<A::Pointer> {
+        self.list.pop_back()
     }
 }
 
@@ -950,10 +926,10 @@ impl<'a, A: Adaptor<Link> + 'a> Clone for Iter<'a, A> {
 mod tests {
     use std::vec::Vec;
     use std::boxed::Box;
-    use IntrusiveRef;
+    use UnsafeRef;
     use super::{LinkedList, Link};
     use std::fmt;
-    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::marker::PhantomData;
 
     #[derive(Clone)]
     struct Obj {
@@ -966,10 +942,10 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    intrusive_adaptor!(ObjAdaptor1 = Obj { link1: Link });
-    intrusive_adaptor!(ObjAdaptor2 = Obj { link2: Link });
-    fn make_obj(value: u32) -> IntrusiveRef<Obj> {
-        IntrusiveRef::from_box(Box::new(Obj {
+    intrusive_adapter!(ObjAdapter1 = UnsafeRef<Obj>: Obj { link1: Link });
+    intrusive_adapter!(ObjAdapter2 = UnsafeRef<Obj>: Obj { link2: Link });
+    fn make_obj(value: u32) -> UnsafeRef<Obj> {
+        UnsafeRef::from_box(Box::new(Obj {
             link1: Link::new(),
             link2: Link::default(),
             value: value,
@@ -982,7 +958,7 @@ mod tests {
         assert!(!a.link1.is_linked());
         assert!(!a.link2.is_linked());
 
-        let mut b = LinkedList::<ObjAdaptor1>::default();
+        let mut b = LinkedList::<ObjAdapter1>::default();
         assert!(b.is_empty());
 
         b.cursor_mut().insert_after(a.clone());
@@ -1005,7 +981,7 @@ mod tests {
         let b = make_obj(2);
         let c = make_obj(3);
 
-        let mut l = LinkedList::new(ObjAdaptor1);
+        let mut l = LinkedList::new(ObjAdapter1::new());
         let mut cur = l.cursor_mut();
         assert!(cur.is_null());
         assert!(cur.get().is_none());
@@ -1074,7 +1050,7 @@ mod tests {
         let b = make_obj(2);
         let c = make_obj(3);
 
-        let mut l = LinkedList::new(ObjAdaptor1);
+        let mut l = LinkedList::new(ObjAdapter1::new());
         l.push_front(a);
         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1]);
         l.push_front(b);
@@ -1095,9 +1071,9 @@ mod tests {
 
     #[test]
     fn test_split_splice() {
-        let mut l1 = LinkedList::new(ObjAdaptor1);
-        let mut l2 = LinkedList::new(ObjAdaptor1);
-        let mut l3 = LinkedList::new(ObjAdaptor1);
+        let mut l1 = LinkedList::new(ObjAdapter1::new());
+        let mut l2 = LinkedList::new(ObjAdapter1::new());
+        let mut l3 = LinkedList::new(ObjAdapter1::new());
 
         let a = make_obj(1);
         let b = make_obj(2);
@@ -1172,7 +1148,7 @@ mod tests {
 
     #[test]
     fn test_iter() {
-        let mut l = LinkedList::new(ObjAdaptor1);
+        let mut l = LinkedList::new(ObjAdapter1::new());
         let a = make_obj(1);
         let b = make_obj(2);
         let c = make_obj(3);
@@ -1203,9 +1179,9 @@ mod tests {
         assert_eq!(format!("{:?}", l), "[1, 2, 3, 4]");
 
         let mut v = Vec::new();
-        l.drain(|x| {
+        for x in l.take() {
             v.push(x.value);
-        });
+        }
         assert_eq!(v, [1, 2, 3, 4]);
         assert!(l.is_empty());
         assert!(!a.link1.is_linked());
@@ -1223,12 +1199,26 @@ mod tests {
         assert!(!b.link1.is_linked());
         assert!(!c.link1.is_linked());
         assert!(!d.link1.is_linked());
+
+        v.clear();
+        l.cursor_mut().insert_before(a.clone());
+        l.cursor_mut().insert_before(b.clone());
+        l.cursor_mut().insert_before(c.clone());
+        l.cursor_mut().insert_before(d.clone());
+        for x in l.into_iter().rev() {
+            v.push(x.value);
+        }
+        assert_eq!(v, [4, 3, 2, 1]);
+        assert!(!a.link1.is_linked());
+        assert!(!b.link1.is_linked());
+        assert!(!c.link1.is_linked());
+        assert!(!d.link1.is_linked());
     }
 
     #[test]
     fn test_multi_list() {
-        let mut l1 = LinkedList::new(ObjAdaptor1);
-        let mut l2 = LinkedList::new(ObjAdaptor2);
+        let mut l1 = LinkedList::new(ObjAdapter1::new());
+        let mut l2 = LinkedList::new(ObjAdapter2::new());
         let a = make_obj(1);
         let b = make_obj(2);
         let c = make_obj(3);
@@ -1246,8 +1236,8 @@ mod tests {
     }
 
     #[test]
-    fn test_unsafe_unlink() {
-        let mut l = LinkedList::new(ObjAdaptor1);
+    fn test_force_unlink() {
+        let mut l = LinkedList::new(ObjAdapter1::new());
         let a = make_obj(1);
         let b = make_obj(2);
         let c = make_obj(3);
@@ -1255,30 +1245,16 @@ mod tests {
         l.cursor_mut().insert_before(b.clone());
         l.cursor_mut().insert_before(c.clone());
 
-        unsafe {
-            l.fast_clear();
-            a.link1.unsafe_unlink();
-            b.link1.unsafe_unlink();
-            c.link1.unsafe_unlink();
-        }
+        l.fast_clear();
         assert!(l.is_empty());
-        assert!(!a.link1.is_linked());
-        assert!(!b.link1.is_linked());
-        assert!(!c.link1.is_linked());
-    }
-
-    #[test]
-    fn test_panic() {
-        let mut l = LinkedList::new(ObjAdaptor1);
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
-        l.cursor_mut().insert_before(a.clone());
-        l.cursor_mut().insert_before(b.clone());
-        l.cursor_mut().insert_before(c.clone());
-
-        catch_unwind(AssertUnwindSafe(|| l.drain(|_| panic!("test")))).unwrap_err();
-
+        assert!(a.link1.is_linked());
+        assert!(b.link1.is_linked());
+        assert!(c.link1.is_linked());
+        unsafe {
+            a.link1.force_unlink();
+            b.link1.force_unlink();
+            c.link1.force_unlink();
+        }
         assert!(l.is_empty());
         assert!(!a.link1.is_linked());
         assert!(!b.link1.is_linked());
@@ -1292,27 +1268,17 @@ mod tests {
             link: Link,
             value: &'a u32,
         }
-        struct ObjAdaptor<'a>(::std::marker::PhantomData<*mut Obj<'a>>);
-        unsafe impl<'a> ::Adaptor<Link> for ObjAdaptor<'a> {
-            type Container = Obj<'a>;
-            unsafe fn get_container(&self, link: *const Link) -> *const Self::Container {
-                container_of!(link, Obj<'a>, link)
-            }
-            unsafe fn get_link(&self, container: *const Self::Container) -> *const Link {
-                &(*container).link
-            }
-        }
+        intrusive_adapter!(ObjAdapter['a] = &'a Obj<'a>: Obj<'a> {link: Link});
 
         let v = 5;
-        let mut l = LinkedList::new(ObjAdaptor(::std::marker::PhantomData));
-        let o = Obj {
+        let a = Obj {
             link: Link::new(),
             value: &v,
         };
-        let a = IntrusiveRef::from_box(Box::new(o.clone()));
-        let b = IntrusiveRef::from_box(Box::new(o.clone()));
-        l.cursor_mut().insert_before(a);
-        l.cursor_mut().insert_before(b);
+        let b = a.clone();
+        let mut l = LinkedList::new(ObjAdapter(PhantomData));
+        l.cursor_mut().insert_before(&a);
+        l.cursor_mut().insert_before(&b);
         assert_eq!(*l.front().get().unwrap().value, 5);
         assert_eq!(*l.back().get().unwrap().value, 5);
     }

@@ -7,126 +7,122 @@
 
 //! Intrusive collections for Rust.
 //!
-//! Unlike normal collections, an intrusive collection does not own the objects
-//! inside it. Instead it just tracks a set of already-existing objects. Such a
-//! collection is called intrusive because it requires explicit support in
-//! objects to allow them to be inserted into the collection. However, this
-//! allows intrusive collections to work without needed to allocate any memory.
+//! This library provides a set of high-performance intrusive collections which
+//! can offer better performance and more flexibility than standard collections.
 //!
-//! Semantically, intrusive collections are roughly equivalent to a standard
-//! collection holding a set of `*mut T`. However, since intrusive collections
-//! store data in the objects themselves, the pointers to these objects must
-//! remain valid as long as they are linked into a collection.
+//! The main difference between an intrusive collection and a normal one is that
+//! while normal collections allocate memory behind your back to keep track of a
+//! set of *values*, intrusive collections never allocate memory themselves and
+//! instead keep track of a set of *objects*. Such collections are called
+//! intrusive because they requires explicit support in objects to allow them to
+//! be inserted into a collection.
 //!
 //! # Example
 //!
 //! ```
 //! #[macro_use]
 //! extern crate intrusive_collections;
-//! use intrusive_collections::{IntrusiveRef, LinkedList, LinkedListLink};
+//! use intrusive_collections::{LinkedList, LinkedListLink};
 //! use std::cell::Cell;
 //!
-//! // Define a struct containing an intrusive link, and an adaptor for it
+//! // A simple struct containing an instrusive link and a value
 //! struct Test {
 //!     link: LinkedListLink,
 //!     value: Cell<i32>,
 //! }
-//! intrusive_adaptor!(TestAdaptor = Test { link: LinkedListLink });
+//!
+//! // The adapter describes how an object can be inserted into an intrusive
+//! // collection. This is automatically generated using a macro.
+//! intrusive_adapter!(TestAdapter = Box<Test>: Test { link: LinkedListLink });
 //!
 //! fn main() {
 //!     // Create a list and some objects
-//!     let mut list = LinkedList::new(TestAdaptor);
-//!     let a = IntrusiveRef::from_box(Box::new(Test {
+//!     let mut list = LinkedList::new(TestAdapter::new());
+//!     let a = Box::new(Test {
 //!         link: LinkedListLink::new(),
 //!         value: Cell::new(1),
-//!     }));
-//!     let b = IntrusiveRef::from_box(Box::new(Test {
+//!     });
+//!     let b = Box::new(Test {
 //!         link: LinkedListLink::new(),
 //!         value: Cell::new(2),
-//!     }));
-//!     let c = IntrusiveRef::from_box(Box::new(Test {
+//!     });
+//!     let c = Box::new(Test {
 //!         link: LinkedListLink::new(),
 //!         value: Cell::new(3),
-//!     }));
+//!     });
 //!
-//!     // Insert the objects at the front of the list. We use clone here to
-//!     // send a copy of the IntrusiveRef to the list, rather than completely
-//!     // relinquishing ownership.
-//!     list.push_front(a.clone());
-//!     list.push_front(b.clone());
-//!     list.push_front(c.clone());
+//!     // Insert the objects at the front of the list
+//!     list.push_front(a);
+//!     list.push_front(b);
+//!     list.push_front(c);
 //!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [3, 2, 1]);
 //!
-//!     // We can modify the objects and the changes will be reflected in the
-//!     // collection since it references the existing objects.
-//!     c.value.set(4);
+//!     // At this point, the objects are owned by the list, and we can modify
+//!     // them through the list.
+//!     list.front().get().unwrap().value.set(4);
 //!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [4, 2, 1]);
 //!
-//!     // Once we remove objects from one collection, we are free to drop them
-//!     // or insert them into another collection. Note that this isn't checked
-//!     // by the compiler: you need to ensure that an object is not dropped
-//!     // while still linked to an intrusive container.
-//!     list.back_mut().remove();
-//!     unsafe {
-//!         drop(a.into_box());
-//!     }
-//!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [4, 2]);
+//!     // Removing an object from an instrusive collection gives us back the
+//!     // Box<Test> that we originally inserted into it.
+//!     let a = list.pop_front().unwrap();
+//!     assert_eq!(a.value.get(), 4);
+//!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [2, 1]);
 //!
-//!     // We can drop the collection at any time, even if it still contains
-//!     // objects. This is safe because the links in an object are only
-//!     // accessed by an intrusive container. However this will leak the
-//!     // objects in the list if they are not freed.
+//!     // Dropping the collection will automatically free b and c by
+//!     // transforming them back into Box<Test> and dropping them.
 //!     drop(list);
 //! }
 //! ```
 //!
-//! # Links and adaptors
+//! # Links and adapters
 //!
 //! Intrusive collections track objects through links which are embedded within
 //! the objects themselves. It also allows a single object to be part of
 //! multiple intrusive collections at once by having multiple links in it.
 //!
 //! The relationship between an object and a link inside it is described by the
-//! `Adaptor` trait. Intrusive collections use an implementation of this trait
+//! `Adapter` trait. Intrusive collections use an implementation of this trait
 //! to determine which link in an object should be used by the collection. In
 //! most cases you do not need to write an implementation manually: the
-//! `intrusive_adaptor!` macro will automatically generate the necessary code.
+//! `intrusive_adapter!` macro will automatically generate the necessary code.
 //!
-//! For red-black trees, the adaptor must also implement the `TreeAdaptor` trait
+//! For red-black trees, the adapter must also implement the `KeyAdapter` trait
 //! which allows a key to be extracted from an object. This key is then used to
 //! keep all elements in the tree in ascending order.
 //!
 //! ```
 //! #[macro_use]
 //! extern crate intrusive_collections;
-//! use intrusive_collections::{IntrusiveRef, LinkedListLink, LinkedList};
-//! use intrusive_collections::{RBTreeLink, RBTree, TreeAdaptor};
+//! use intrusive_collections::{SinglyLinkedListLink, SinglyLinkedList};
+//! use intrusive_collections::{LinkedListLink, LinkedList};
+//! use intrusive_collections::{RBTreeLink, RBTree, KeyAdapter};
+//! use std::rc::Rc;
 //!
 //! // This struct can be inside two lists and one tree simultaneously
 //! #[derive(Default)]
 //! struct Test {
 //!     link: LinkedListLink,
-//!     link2: LinkedListLink,
+//!     link2: SinglyLinkedListLink,
 //!     link3: RBTreeLink,
 //!     value: i32,
 //! }
 //!
-//! intrusive_adaptor!(MyAdaptor = Test { link: LinkedListLink });
-//! intrusive_adaptor!(MyAdaptor2 = Test { link2: LinkedListLink });
-//! intrusive_adaptor!(MyAdaptor3 = Test { link3: RBTreeLink });
-//! impl<'a> TreeAdaptor<'a> for MyAdaptor3 {
+//! intrusive_adapter!(MyAdapter = Rc<Test>: Test { link: LinkedListLink });
+//! intrusive_adapter!(MyAdapter2 = Rc<Test>: Test { link2: SinglyLinkedListLink });
+//! intrusive_adapter!(MyAdapter3 = Rc<Test>: Test { link3: RBTreeLink });
+//! impl<'a> KeyAdapter<'a> for MyAdapter3 {
 //!     type Key = i32;
 //!     fn get_key(&self, x: &'a Test) -> i32 { x.value }
 //! }
 //!
 //! fn main() {
-//!     let mut a = LinkedList::new(MyAdaptor);
-//!     let mut b = LinkedList::new(MyAdaptor2);
-//!     let mut c = RBTree::new(MyAdaptor3);
+//!     let mut a = LinkedList::new(MyAdapter::new());
+//!     let mut b = SinglyLinkedList::new(MyAdapter2::new());
+//!     let mut c = RBTree::new(MyAdapter3::new());
 //!
-//!     let test = IntrusiveRef::from_box(Box::new(Test::default()));
-//!     a.cursor_mut().insert_after(test.clone());
-//!     b.cursor_mut().insert_after(test.clone());
+//!     let test = Rc::new(Test::default());
+//!     a.push_front(test.clone());
+//!     b.push_front(test.clone());
 //!     c.insert(test);
 //! }
 //! ```
@@ -149,46 +145,146 @@
 //! `CursorMut` can be used to mutate the collection, but you may only use one
 //! of them at a time.
 //!
+//! Cursors are a very powerful abstraction since they allow a collection to be
+//! mutated safely while it is being iterated on. For example, here is a
+//! function which removes all values within a given range from a `RBTree`:
+//!
+//! ```
+//! #[macro_use]
+//! extern crate intrusive_collections;
+//! use intrusive_collections::{RBTreeLink, RBTree, KeyAdapter, Bound};
+//!
+//! struct Element {
+//!     link: RBTreeLink,
+//!     value: i32,
+//! }
+//!
+//! intrusive_adapter!(ElementAdapter = Box<Element>: Element { link: RBTreeLink });
+//! impl<'a> KeyAdapter<'a> for ElementAdapter {
+//!     type Key = i32;
+//!     fn get_key(&self, e: &'a Element) -> i32 { e.value }
+//! }
+//!
+//! fn remove_range(tree: &mut RBTree<ElementAdapter>, min: i32, max: i32) {
+//!     // Find the first element which is greater than or equal to min
+//!     let mut cursor = tree.lower_bound_mut(Bound::Included(&min));
+//!
+//!     // Iterate over all elements in the range [min, max]
+//!     while cursor.get().map_or(false, |e| e.value <= max) {
+//!         // CursorMut::remove will return a Some(<Box<Element>), which we
+//!         // simply drop here.
+//!         cursor.remove();
+//!
+//!         // Advance to the next element
+//!         cursor.move_next();
+//!     }
+//! }
+//! # fn main() {}
+//! ```
+//!
+//! # Scoped collections
+//!
+//! Instead of taking ownership of objects inserted into them, intrusive
+//! collections can also work with borrowed values. This works by using
+//! lifetimes and the borrow checker to ensure that any objects inserted into an
+//! intrusive collection will outlive the collection itself.
+//!
+//! ```
+//! #[macro_use]
+//! extern crate intrusive_collections;
+//! extern crate typed_arena;
+//!
+//! use intrusive_collections::{LinkedListLink, LinkedList};
+//! use typed_arena::Arena;
+//! use std::cell::Cell;
+//!
+//! struct Value {
+//!     link: LinkedListLink,
+//!     value: Cell<i32>,
+//! }
+//!
+//! // Note that we use a plain reference as the pointer type for the collection.
+//! // The lifetime is specified using ['a] instead of <'a> due to limitations in
+//! // the Rust macro system.
+//! intrusive_adapter!(ValueAdapter['a] = &'a Value: Value { link: LinkedListLink });
+//!
+//! fn main() {
+//!     // Create an arena and a list. Note that since stack objects are dropped in
+//!     // reverse order, the Arena must be created before the LinkedList. This
+//!     // ensures that the list is dropped before the values are freed by the
+//!     // arena. This is enforced by the Rust lifetime system.
+//!     let arena = Arena::new();
+//!     let mut list = LinkedList::new(ValueAdapter::new());
+//!
+//!     // We can now insert values allocated from the arena into the linked list
+//!     list.push_back(arena.alloc(Value {
+//!         link: LinkedListLink::new(),
+//!         value: Cell::new(1),
+//!     }));
+//!     list.push_back(arena.alloc(Value {
+//!         link: LinkedListLink::new(),
+//!         value: Cell::new(2),
+//!     }));
+//!     list.push_back(arena.alloc(Value {
+//!         link: LinkedListLink::new(),
+//!         value: Cell::new(3),
+//!     }));
+//!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [1, 2, 3]);
+//!
+//!     // We can also insert stack allocated values into an intrusive list.
+//!     // Again, the values must outlive the LinkedList.
+//!     let a = Value {
+//!         link: LinkedListLink::new(),
+//!         value: Cell::new(4),
+//!     };
+//!     let b = Value {
+//!         link: LinkedListLink::new(),
+//!         value: Cell::new(5),
+//!     };
+//!     let c = Value {
+//!         link: LinkedListLink::new(),
+//!         value: Cell::new(6),
+//!     };
+//!     let mut list2 = LinkedList::new(ValueAdapter::new());
+//!     list2.push_back(&a);
+//!     list2.push_back(&b);
+//!     list2.push_back(&c);
+//!     assert_eq!(list2.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [4, 5, 6]);
+//!
+//!     // Since these are shared references, any changes in the values are reflected in
+//!     // the list.
+//!     a.value.set(7);
+//!     assert_eq!(list2.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [7, 5, 6]);
+//! }
+//! ```
+//!
 //! # Safety
 //!
-//! Guaranteeing safety in intrusive collections is tricky becauses they do
-//! not integrate well with Rust's ownership system, especially in cases where
-//! an object is a member of multiple intrusive collections. This library
-//! encapsulates all safety concerns using the `IntrusiveRef` type. An
-//! `IntrusiveRef` is a pointer type that provides several guarantees which must
-//! be maintained by unsafe code:
+//! While it is possible to use intrusive collections without any unsafe code,
+//! this crate also exposes a few unsafe features.
 //!
-//! - An object managed by an `IntrusiveRef` must not be moved, dropped or
-//!   accessed through a mutable reference as long as at least one
-//!   `IntrusiveRef` is pointing to it.
+//! The `cursor_from_ptr` and `cursor_mut_from_ptr` allow you to create a
+//! cursor pointing to a specific element in the collection from a pointer to
+//! that element. This is unsafe because it assumes that the objected pointed to
+//! is currently inserted in the collection.
 //!
-//! The only safe way to create a `IntrusiveRef` is by using the
-//! `IntrusiveRef::from_box` which takes ownership of a boxed object. An
-//! `IntrusiveRef` can also be created using the unsafe `IntrusiveRef::from_raw`
-//! function, however you must ensure that the invariants listed above are
-//! maintained.
-//!
-//! Destroying an object that is managed by an `IntrusiveRef` can only be done
-//! using unsafe code because you must manually ensure that the object is no
-//! longer a member of any intrusive collection and that there are no other
-//! `IntrusiveRef` pointing to it. The object managed by an `IntrusiveRef` can
-//! be retrieved through the `IntrusiveRef::into_box` and
-//! `IntrusiveRef::into_raw` functions.
-//!
-//! Note that while moving an object that is linked into a collection is
-//! disallowed, moving the collection itself is perfectly fine. This is possible
-//! because the linked objects do not contain any pointers back to the
-//! collection object itself.
-//!
-//! If an intrusive collection is dropped while still containing objects then
-//! the links in those objects are not reset. Attempting to insert one of these
-//! objects into another intrusive collection will fail unless its link is
-//! manually reset by calling `unsafe_unlink` on it.
+//! The `UnsafeRef` type acts like `Rc`, except without the reference count.
+//! Instead, you are responsible for keeping track of the number of active
+//! references to an object and for freeing it once the last reference is
+//! dropped. The advantage of `UnsafeRef` over `Rc` is that it reduces the size
+//! of the allocation by two `usize` and avoids the overhead of maintaining
+//! reference counts.
 
 #![warn(missing_docs)]
 #![no_std]
-#![cfg_attr(feature = "nightly", feature(const_fn, shared))]
-#![cfg_attr(all(feature = "nightly", feature = "box"), feature(alloc))]
+#![cfg_attr(feature = "nightly", feature(const_fn, drop_types_in_const, nonzero))]
+#![cfg_attr(all(feature = "nightly", feature = "alloc"), feature(alloc))]
+
+// Use liballoc on nightly to avoid a dependency on libstd
+#[cfg(all(not(feature = "nightly"), feature = "alloc"))]
+extern crate std as alloc;
+#[cfg(all(feature = "nightly", feature = "alloc"))]
+extern crate alloc;
 
 #[cfg(test)]
 #[macro_use]
@@ -198,164 +294,25 @@ extern crate std;
 #[doc(hidden)]
 pub extern crate core as __core;
 
-/// Trait representing a mapping between an object and an intrusive link type
-/// which is a member of that object.
-///
-/// A single object type may have multiple adaptors, which allows it to be part
-/// of multiple intrusive collections simultaneously.
-///
-/// In most cases you do not need to implement this trait manually: the
-/// `intrusive_adaptor!` macro will generate the necessary implementation for a
-/// given object and link field. However it is possible to implement it manually
-/// if the intrusive link is not a direct field of the object, or if you want
-/// to create an adaptor with generic and/or lifetime parameters.
-///
-/// It is also possible to create stateful adaptors. This allows links and
-/// containers to be separated and avoids the need for objects to be modified to
-/// contain a link.
-///
-/// # Safety
-///
-/// It must be possible to get back a reference to the container by passing a
-/// pointer returned by `get_link` to `get_container`.
-pub unsafe trait Adaptor<Link> {
-    /// Type containing the intrusive link
-    type Container: ?Sized;
-
-    /// Gets a reference to the containing object from a reference to a link.
-    unsafe fn get_container(&self, link: *const Link) -> *const Self::Container;
-
-    /// Gets a reference to the link for the given container object.
-    unsafe fn get_link(&self, container: *const Self::Container) -> *const Link;
-}
-
-/// Macro to get the offset of a struct field in bytes from the address of the
-/// struct.
-///
-/// This macro is identical to `offset_of!` but doesn't give a warning about
-/// unnecessary unsafe blocks when invoked from unsafe code.
-#[macro_export]
-macro_rules! offset_of_unsafe {
-    ($container:path, $field:ident) => {{
-        // Make sure the field actually exists. This line ensures that a
-        // compile-time error is generated if $field is accessed through a
-        // Deref impl.
-        let $container { $field : _, .. };
-
-        // Create an instance of the container and calculate the offset to its
-        // field. Although we are creating references to uninitialized data this
-        // is fine since we are not dereferencing them.
-        let val: $container = $crate::__core::mem::uninitialized();
-        let result = &val.$field as *const _ as usize - &val as *const _ as usize;
-        $crate::__core::mem::forget(val);
-        result as isize
-    }};
-}
-
-/// Macro to get the offset of a struct field in bytes from the address of the
-/// struct.
-///
-/// This macro will cause a warning if it is invoked in an unsafe block. Use the
-/// `offset_of_unsafe` macro instead to avoid this warning.
-#[macro_export]
-macro_rules! offset_of {
-    ($container:path, $field:ident) => {
-        unsafe { offset_of_unsafe!($container, $field) }
-    };
-}
-
-/// Unsafe macro to get a raw pointer to an outer object from a pointer to one
-/// of its fields.
-///
-/// # Examples
-///
-/// ```
-/// # #[macro_use] extern crate intrusive_collections;
-/// # fn main() {
-/// struct S { x: u32, y: u32 };
-/// let container = S { x: 1, y: 2 };
-/// let field = &container.x;
-/// let container2: *const S = unsafe { container_of!(field, S, x) };
-/// assert_eq!(&container as *const _, container2);
-/// # }
-/// ```
-///
-/// # Safety
-///
-/// This is unsafe because it assumes that the given expression is a valid
-/// pointer to the specified field of some container type.
-#[macro_export]
-macro_rules! container_of {
-    ($ptr:expr, $container:path, $field:ident) => {
-        ($ptr as *const _ as *const u8).offset(-offset_of_unsafe!($container, $field)) as *mut $container
-    };
-}
-
-/// Macro to generate an empty type implementing the Adaptor trait for the given
-/// container object and field.
-///
-/// # Examples
-///
-/// ```
-/// #[macro_use]
-/// extern crate intrusive_collections;
-/// use intrusive_collections::{LinkedListLink, RBTreeLink};
-///
-/// pub struct Test {
-///     link: LinkedListLink,
-///     link2: RBTreeLink,
-/// }
-/// intrusive_adaptor!(MyAdaptor = Test { link: LinkedListLink });
-/// intrusive_adaptor!(pub MyAdaptor2 = Test { link2: RBTreeLink });
-/// # fn main() {}
-/// ```
-#[macro_export]
-macro_rules! intrusive_adaptor {
-    ($name:ident = $container:path { $field:ident: $link:ty }) => {
-        #[derive(Clone, Default)]
-        struct $name;
-        intrusive_adaptor!(_impl $name = $container { $field: $link });
-    };
-    (pub $name:ident = $container:path { $field:ident: $link:ty }) => {
-        #[derive(Clone, Default)]
-        pub struct $name;
-        intrusive_adaptor!(_impl $name = $container { $field: $link });
-    };
-    (_impl $name:ident = $container:path { $field:ident: $link:ty }) => {
-        #[allow(dead_code)]
-        unsafe impl $crate::Adaptor<$link> for $name {
-            type Container = $container;
-            #[inline]
-            unsafe fn get_container(&self, link: *const $link) -> *const $container {
-                container_of!(link, $container, $field)
-            }
-            #[inline]
-            unsafe fn get_link(&self, container: *const $container) -> *const $link {
-                &(*container).$field
-            }
-        }
-    };
-    // Versions accepting a trailing comma
-    ($name:ident = $container:path { $field:ident: $link:ty, }) => {
-        intrusive_adaptor!($name = $container { $field: $link });
-    };
-    (pub $name:ident = $container:path { $field:ident: $link:ty, }) => {
-        intrusive_adaptor!($name = $container { $field: $link });
-    };
-}
-
+mod unsafe_ref;
+mod intrusive_pointer;
+#[macro_use]
+mod adapter;
+mod key_adapter;
 pub mod singly_linked_list;
 pub mod linked_list;
 pub mod rbtree;
-mod intrusive_ref;
 
 pub use singly_linked_list::SinglyLinkedList;
 pub use singly_linked_list::Link as SinglyLinkedListLink;
 pub use linked_list::LinkedList;
 pub use linked_list::Link as LinkedListLink;
-pub use rbtree::{RBTree, TreeAdaptor};
+pub use rbtree::RBTree;
 pub use rbtree::Link as RBTreeLink;
-pub use intrusive_ref::IntrusiveRef;
+pub use unsafe_ref::UnsafeRef;
+pub use intrusive_pointer::IntrusivePointer;
+pub use adapter::Adapter;
+pub use key_adapter::KeyAdapter;
 
 /// An endpoint of a range of keys.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]

@@ -11,8 +11,9 @@ keywords = ["intrusive", "no_std", "list", "rbtree"]
 
 [features]
 nightly = []
-box = []
-default = ["box"]
+alloc = []
+default = ["alloc"]
 
 [dev-dependencies]
 rand = "0.3"
+typed-arena = "1.2"

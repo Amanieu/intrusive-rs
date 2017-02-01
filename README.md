@@ -5,7 +5,15 @@ intrusive-collections
 
 A Rust library for creating intrusive collections. Currently supports singly-linked and doubly-linked lists, as well as red-black trees.
 
-[Documentation](https://amanieu.github.io/intrusive-rs/intrusive_collections/index.html)
+## Features
+
+- Compatible with `#[no_std]`.
+- Intrusive collections don't require any dynamic memory allocation since they simply keep track of existing objects rather than allocating new ones.
+- You can safely manipulate intrusive collections without any unsafe code.
+- A single object can be a member of multiple intrusive collections simultaneously.
+- Intrusive collections provide a `Cursor`-based interface, which allows safe mutation while iterating.
+
+For examples and more information, see the [documentation](https://amanieu.github.io/intrusive-rs/intrusive_collections/index.html).
 
 ## Usage
 
@@ -25,8 +33,8 @@ extern crate intrusive_collections;
 
 This crate has two Cargo features:
 
-- `nightly`: Enables nightly-only features: `const fn` constructors and `NonZero` support for `IntrusiveRef`.
-- `box` (enabled by default): Enables `IntrusiveRef::{from_box,into_box}`. This requires `libstd` on stable, but only `liballoc` if the `nightly` feature is enabled. 
+- `nightly`: Enables nightly-only features: `const fn` constructors, `NonZero` support for `UnsafeRef`.
+- `alloc` (enabled by default): Implements `IntrusivePointer` for `Box`, `Rc` and `Arc`. This requires `libstd` on stable, but only `liballoc` if the `nightly` feature is enabled.
 
 ## License
 

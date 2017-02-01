@@ -7,8 +7,8 @@
 
 //! Intrusive red-black tree.
 
-use Adaptor;
-use intrusive_ref::IntrusiveRef;
+use {Adapter, KeyAdapter};
+use IntrusivePointer;
 use Bound::{self, Included, Excluded, Unbounded};
 use core::ptr;
 use core::fmt;
@@ -16,56 +16,6 @@ use core::mem;
 use core::cell::Cell;
 use core::borrow::Borrow;
 use core::cmp::Ordering;
-
-// =============================================================================
-// TreeAdaptor
-// =============================================================================
-
-/// Trait which provides a way of extracting a key from an intrusive object.
-/// This key is used to maintain all elements in the tree in increasing order.
-/// The key can be returned either as a reference or as a value.
-///
-/// Note that you are responsible for ensuring that the elements in a `RBTree`
-/// remain in ascending key order. This property can be violated, either because
-/// the key of an element was modified, or because the
-/// `insert_before`/`insert_after` methods of `CursorMut` were incorrectly used.
-/// If this situation occurs, memory safety will not be violated but the `find`,
-/// `upper_bound`, `lower_bound` and `range` may return incorrect results.
-///
-/// # Examples
-///
-/// ```
-/// #[macro_use]
-/// extern crate intrusive_collections;
-/// use intrusive_collections::{rbtree, TreeAdaptor};
-///
-/// struct S {
-///     link: rbtree::Link,
-///     key: u32,
-///     value: u64,
-/// }
-///
-/// intrusive_adaptor!(MyAdaptor = S { link : rbtree::Link });
-/// impl<'a> TreeAdaptor<'a> for MyAdaptor {
-///     type Key = u32;
-///     fn get_key(&self, s: &'a S) -> u32 { s.key }
-/// }
-///
-/// // Alternative implementation returning the key by reference
-/// intrusive_adaptor!(MyAdaptor2 = S { link : rbtree::Link });
-/// impl<'a> TreeAdaptor<'a> for MyAdaptor2 {
-///     type Key = &'a u32;
-///     fn get_key(&self, s: &'a S) -> &'a u32 { &s.key }
-/// }
-/// # fn main() {}
-/// ```
-pub trait TreeAdaptor<'a>: Adaptor<Link> {
-    /// Type of the key returned by `get_key`.
-    type Key: Ord;
-
-    /// Gets the key for the given object.
-    fn get_key(&self, container: &'a Self::Container) -> Self::Key;
-}
 
 // =============================================================================
 // Link
@@ -104,37 +54,25 @@ impl Link {
     /// Checks whether the `Link` is linked into a `LinkedList`.
     #[inline]
     pub fn is_linked(&self) -> bool {
-        unsafe {
-            // The link might be concurrently modified by another thread,
-            // so make sure we read the value only once. Normally we would just
-            // make the links atomic but this significantly hurts optimization.
-            ptr::read_volatile(&self.parent_color).get() != UNLINKED_MARKER
-        }
+        self.parent_color.get() != UNLINKED_MARKER
     }
 
-    /// Unlinks the object from the `RBTree` without invalidating the rest
-    /// of the tree.
+    /// Forcibly unlinks an object from a `RBTree`.
     ///
     /// # Safety
     ///
-    /// The `RBTree` is left in an invalid state after this function is called.
-    /// To continue using the `RBTree`, it must be manually reset by calling the
-    /// `fast_clear` function on it. Any other operations on the affected tree
-    /// will result in undefined behavior.
+    /// It is undefined behavior to call this function while still linked into a
+    /// `RBTree`. The only situation where this function is useful is
+    /// after calling `fast_clear` on a `RBTree`, since this clears
+    /// the collection without marking the nodes as unlinked.
     #[inline]
-    pub unsafe fn unsafe_unlink(&self) {
+    pub unsafe fn force_unlink(&self) {
         self.parent_color.set(UNLINKED_MARKER);
     }
 }
 
 // An object containing a link can be sent to another thread if it is unlinked.
 unsafe impl Send for Link {}
-
-// The cells are only accessed indirectly through `LinkedList` and are not
-// accessible directly, so a `&Link` is always safe to access from multiple
-// threads. The check in is_linked uses a volatile read and is therefore
-// thread-safe.
-unsafe impl Sync for Link {}
 
 // Provide an implementation of Clone which simply initializes the new link as
 // unlinked. This allows structs containing a link to derive Clone.
@@ -222,7 +160,7 @@ impl NodePtr {
 
     #[inline]
     unsafe fn set_parent_color(self, parent: NodePtr, color: Color) {
-        assert_eq!(parent.0 as usize & 1, 0);
+        assert!(mem::align_of::<Link>() >= 2);
         let bit = match color {
             Color::Red => 0,
             Color::Black => 1,
@@ -582,12 +520,12 @@ impl NodePtr {
 // =============================================================================
 
 /// A cursor which provides read-only access to a `RBTree`.
-pub struct Cursor<'a, A: for<'b> TreeAdaptor<'b> + 'a> {
+pub struct Cursor<'a, A: Adapter<Link = Link> + 'a> {
     current: NodePtr,
     tree: &'a RBTree<A>,
 }
 
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Clone for Cursor<'a, A> {
+impl<'a, A: Adapter<Link = Link> + 'a> Clone for Cursor<'a, A> {
     #[inline]
     fn clone(&self) -> Cursor<'a, A> {
         Cursor {
@@ -597,7 +535,7 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Clone for Cursor<'a, A> {
     }
 }
 
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Cursor<'a, A> {
+impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
@@ -610,11 +548,11 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Cursor<'a, A> {
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a A::Container> {
+    pub fn get(&self) -> Option<&'a A::Value> {
         if self.is_null() {
             None
         } else {
-            Some(unsafe { &*self.tree.adaptor.get_container(self.current.0) })
+            Some(unsafe { &*self.tree.adapter.get_value(self.current.0) })
         }
     }
 
@@ -648,12 +586,12 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Cursor<'a, A> {
 }
 
 /// A cursor which provides mutable access to a `RBTree`.
-pub struct CursorMut<'a, A: for<'b> TreeAdaptor<'b> + 'a> {
+pub struct CursorMut<'a, A: Adapter<Link = Link> + 'a> {
     current: NodePtr,
     tree: &'a mut RBTree<A>,
 }
 
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
+impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
@@ -666,11 +604,11 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a A::Container> {
+    pub fn get(&self) -> Option<&'a A::Value> {
         if self.is_null() {
             None
         } else {
-            Some(unsafe { &*self.tree.adaptor.get_container(self.current.0) })
+            Some(unsafe { &*self.tree.adapter.get_value(self.current.0) })
         }
     }
 
@@ -723,7 +661,7 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// If the cursor is currently pointing to the null object then no element
     /// is removed and `None` is returned.
     #[inline]
-    pub fn remove(&mut self) -> Option<IntrusiveRef<A::Container>> {
+    pub fn remove(&mut self) -> Option<A::Pointer> {
         unsafe {
             if self.is_null() {
                 return None;
@@ -732,7 +670,7 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
             let result = self.current.0;
             self.current.remove(&mut self.tree.root);
             self.current = next;
-            Some(IntrusiveRef::from_raw(self.tree.adaptor.get_container(result)))
+            Some(A::Pointer::from_raw(self.tree.adapter.get_value(result)))
         }
     }
 
@@ -755,20 +693,18 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn replace_with(&mut self,
-                        val: IntrusiveRef<A::Container>)
-                        -> Result<IntrusiveRef<A::Container>, IntrusiveRef<A::Container>> {
+    pub fn replace_with(&mut self, val: A::Pointer) -> Result<A::Pointer, A::Pointer> {
         if self.is_null() {
             return Err(val);
         }
         unsafe {
-            let new = NodePtr(self.tree.adaptor.get_link(val.into_raw()));
+            let new = NodePtr(self.tree.adapter.get_link(val.into_raw()));
             assert!(!new.is_linked(),
                     "attempted to insert an object that is already linked");
             let result = self.current.0;
             self.current.replace_with(new, &mut self.tree.root);
             self.current = new;
-            Ok(IntrusiveRef::from_raw(self.tree.adaptor.get_container(result)))
+            Ok(A::Pointer::from_raw(self.tree.adapter.get_value(result)))
         }
     }
 
@@ -787,9 +723,9 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert_after(&mut self, val: IntrusiveRef<A::Container>) {
+    pub fn insert_after(&mut self, val: A::Pointer) {
         unsafe {
-            let new = NodePtr(self.tree.adaptor.get_link(val.into_raw()));
+            let new = NodePtr(self.tree.adapter.get_link(val.into_raw()));
             assert!(!new.is_linked(),
                     "attempted to insert an object that is already linked");
             if self.tree.is_empty() {
@@ -819,9 +755,9 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert_before(&mut self, val: IntrusiveRef<A::Container>) {
+    pub fn insert_before(&mut self, val: A::Pointer) {
         unsafe {
-            let new = NodePtr(self.tree.adaptor.get_link(val.into_raw()));
+            let new = NodePtr(self.tree.adapter.get_link(val.into_raw()));
             assert!(!new.is_linked(),
                     "attempted to insert an object that is already linked");
             if self.tree.is_empty() {
@@ -837,34 +773,64 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> CursorMut<'a, A> {
     }
 }
 
+impl<'a, A: for<'b> KeyAdapter<'b, Link = Link>> CursorMut<'a, A> {
+    /// Inserts a new element into the `RBTree`.
+    ///
+    /// The new element will be inserted at the correct position in the tree
+    /// based on its key, regardless of the current cursor position.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn insert(&'a mut self, val: A::Pointer)
+        where <A as KeyAdapter<'a>>::Key: Ord
+    {
+        // We explicitly drop the returned CursorMut here, otherwise we would
+        // end up with multiple CursorMut in the same collection.
+        self.tree.insert(val);
+    }
+}
+
 // =============================================================================
 // RBTree
 // =============================================================================
 
 /// An intrusive red-black tree.
-pub struct RBTree<A: for<'a> TreeAdaptor<'a>> {
+///
+/// When this collection is dropped, all elements linked into it will be
+/// converted back to owned pointers and dropped.
+///
+/// Note that you are responsible for ensuring that the elements in a `RBTree`
+/// remain in ascending key order. This property can be violated, either because
+/// the key of an element was modified, or because the
+/// `insert_before`/`insert_after` methods of `CursorMut` were incorrectly used.
+/// If this situation occurs, memory safety will not be violated but the `find`,
+/// `upper_bound`, `lower_bound` and `range` may return incorrect results.
+pub struct RBTree<A: Adapter<Link = Link>> {
     root: NodePtr,
-    adaptor: A,
+    adapter: A,
 }
 
-impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
+impl<A: Adapter<Link = Link>> RBTree<A> {
     /// Creates an empty `RBTree`.
     #[cfg(feature = "nightly")]
     #[inline]
-    pub const fn new(adaptor: A) -> RBTree<A> {
+    pub const fn new(adapter: A) -> RBTree<A> {
         RBTree {
             root: NodePtr(ptr::null()),
-            adaptor: adaptor,
+            adapter: adapter,
         }
     }
 
     /// Creates an empty `RBTree`.
     #[cfg(not(feature = "nightly"))]
     #[inline]
-    pub fn new(adaptor: A) -> RBTree<A> {
+    pub fn new(adapter: A) -> RBTree<A> {
         RBTree {
             root: NodePtr::null(),
-            adaptor: adaptor,
+            adapter: adapter,
         }
     }
 
@@ -898,9 +864,9 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     ///
     /// `ptr` must be a pointer to an object that is part of this tree.
     #[inline]
-    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Container) -> Cursor<A> {
+    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Value) -> Cursor<A> {
         Cursor {
-            current: NodePtr(self.adaptor.get_link(ptr)),
+            current: NodePtr(self.adapter.get_link(ptr)),
             tree: self,
         }
     }
@@ -911,9 +877,9 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     ///
     /// `ptr` must be a pointer to an object that is part of this tree.
     #[inline]
-    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Container) -> CursorMut<A> {
+    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Value) -> CursorMut<A> {
         CursorMut {
-            current: NodePtr(self.adaptor.get_link(ptr)),
+            current: NodePtr(self.adapter.get_link(ptr)),
             tree: self,
         }
     }
@@ -955,14 +921,95 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     }
 
     #[inline]
+    unsafe fn insert_root(&mut self, node: NodePtr) {
+        node.set_parent_color(NodePtr::null(), Color::Black);
+        node.set_left(NodePtr::null());
+        node.set_right(NodePtr::null());
+        self.root = node;
+    }
+
+    /// Gets an iterator over the objects in the `RBTree`, in ascending key
+    /// order.
+    #[inline]
+    pub fn iter(&self) -> Iter<A> {
+        if self.root.is_null() {
+            Iter {
+                head: NodePtr::null(),
+                tail: NodePtr::null(),
+                tree: self,
+            }
+        } else {
+            Iter {
+                head: unsafe { self.root.first_child() },
+                tail: unsafe { self.root.last_child() },
+                tree: self,
+            }
+        }
+    }
+
+    #[inline]
+    fn clear_recurse(&mut self, current: NodePtr) {
+        // If adapter.get_value or Pointer::from_raw panic here, it will leak
+        // the nodes and keep them linked. However this is harmless since there
+        // is nothing you can do with just a Link.
+        if !current.is_null() {
+            unsafe {
+                self.clear_recurse(current.left());
+                self.clear_recurse(current.right());
+                current.unlink();
+                A::Pointer::from_raw(self.adapter.get_value(current.0));
+            }
+        }
+    }
+
+    /// Removes all elements from the `RBTree`.
+    ///
+    /// This will unlink all object currently in the tree, which requires
+    /// iterating through all elements in the `RBTree`. Each element is
+    /// converted back to an owned pointer and then dropped.
+    #[inline]
+    pub fn clear(&mut self) {
+        let root = self.root;
+        self.root = NodePtr::null();
+        self.clear_recurse(root);
+    }
+
+    /// Empties the `RBTree` without unlinking or freeing objects in it.
+    ///
+    /// Since this does not unlink any objects, any attempts to link these
+    /// objects into another `RBTree` will fail but will not cause any
+    /// memory unsafety. To unlink those objects manually, you must call the
+    /// `force_unlink` function on them.
+    #[inline]
+    pub fn fast_clear(&mut self) {
+        self.root = NodePtr::null();
+    }
+
+    /// Takes all the elements out of the `RBTree`, leaving it empty. The
+    /// taken elements are returned as a new `RBTree`.
+    #[inline]
+    pub fn take(&mut self) -> RBTree<A>
+        where A: Clone
+    {
+        let tree = RBTree {
+            root: self.root,
+            adapter: self.adapter.clone(),
+        };
+        self.root = NodePtr::null();
+        tree
+    }
+}
+
+impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
+    #[inline]
     fn find_internal<'a, Q: ?Sized + Ord>(&self, key: &Q) -> NodePtr
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Q>,
-              A::Container: 'a
+        where <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+              A::Value: 'a
     {
         let mut tree = self.root;
         while !tree.is_null() {
-            let current = unsafe { &*self.adaptor.get_container(tree.0) };
-            match key.cmp(self.adaptor.get_key(current).borrow()) {
+            let current = unsafe { &*self.adapter.get_value(tree.0) };
+            match key.cmp(self.adapter.get_key(current).borrow()) {
                 Ordering::Less => tree = unsafe { tree.left() },
                 Ordering::Equal => return tree,
                 Ordering::Greater => tree = unsafe { tree.right() },
@@ -978,7 +1025,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// one is returned.
     #[inline]
     pub fn find<'a, Q: ?Sized + Ord>(&'a self, key: &Q) -> Cursor<'a, A>
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Q>
+        where <A as KeyAdapter<'a>>::Key: Borrow<Q>
     {
         Cursor {
             current: self.find_internal(key),
@@ -993,7 +1040,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// one is returned.
     #[inline]
     pub fn find_mut<'a, Q: ?Sized + Ord>(&'a mut self, key: &Q) -> CursorMut<'a, A>
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Q>
+        where <A as KeyAdapter<'a>>::Key: Borrow<Q>
     {
         CursorMut {
             current: self.find_internal(key),
@@ -1003,17 +1050,17 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
 
     #[inline]
     fn lower_bound_internal<'a, Q: ?Sized + Ord>(&self, bound: Bound<&Q>) -> NodePtr
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Q>,
-              A::Container: 'a
+        where <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+              A::Value: 'a
     {
         let mut tree = self.root;
         let mut result = NodePtr::null();
         while !tree.is_null() {
-            let current = unsafe { &*self.adaptor.get_container(tree.0) };
+            let current = unsafe { &*self.adapter.get_value(tree.0) };
             let cond = match bound {
                 Unbounded => true,
-                Included(key) => key <= self.adaptor.get_key(current).borrow(),
-                Excluded(key) => key < self.adaptor.get_key(current).borrow(),
+                Included(key) => key <= self.adapter.get_key(current).borrow(),
+                Excluded(key) => key < self.adapter.get_key(current).borrow(),
             };
             if cond {
                 result = tree;
@@ -1030,7 +1077,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// returned.
     #[inline]
     pub fn lower_bound<'a, Q: ?Sized + Ord>(&'a self, bound: Bound<&Q>) -> Cursor<'a, A>
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Q>
+        where <A as KeyAdapter<'a>>::Key: Borrow<Q>
     {
         Cursor {
             current: self.lower_bound_internal(bound),
@@ -1043,7 +1090,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// cursor is returned.
     #[inline]
     pub fn lower_bound_mut<'a, Q: ?Sized + Ord>(&'a mut self, bound: Bound<&Q>) -> CursorMut<'a, A>
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Q>
+        where <A as KeyAdapter<'a>>::Key: Borrow<Q>
     {
         CursorMut {
             current: self.lower_bound_internal(bound),
@@ -1053,17 +1100,17 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
 
     #[inline]
     fn upper_bound_internal<'a, Q: ?Sized + Ord>(&self, bound: Bound<&Q>) -> NodePtr
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Q>,
-              A::Container: 'a
+        where <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+              A::Value: 'a
     {
         let mut tree = self.root;
         let mut result = NodePtr::null();
         while !tree.is_null() {
-            let current = unsafe { &*self.adaptor.get_container(tree.0) };
+            let current = unsafe { &*self.adapter.get_value(tree.0) };
             let cond = match bound {
                 Unbounded => false,
-                Included(key) => key < self.adaptor.get_key(current).borrow(),
-                Excluded(key) => key <= self.adaptor.get_key(current).borrow(),
+                Included(key) => key < self.adapter.get_key(current).borrow(),
+                Excluded(key) => key <= self.adapter.get_key(current).borrow(),
             };
             if cond {
                 tree = unsafe { tree.left() };
@@ -1080,7 +1127,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// returned.
     #[inline]
     pub fn upper_bound<'a, Q: ?Sized + Ord>(&'a self, bound: Bound<&Q>) -> Cursor<'a, A>
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Q>
+        where <A as KeyAdapter<'a>>::Key: Borrow<Q>
     {
         Cursor {
             current: self.upper_bound_internal(bound),
@@ -1093,20 +1140,12 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// cursor is returned.
     #[inline]
     pub fn upper_bound_mut<'a, Q: ?Sized + Ord>(&'a mut self, bound: Bound<&Q>) -> CursorMut<'a, A>
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Q>
+        where <A as KeyAdapter<'a>>::Key: Borrow<Q>
     {
         CursorMut {
             current: self.upper_bound_internal(bound),
             tree: self,
         }
-    }
-
-    #[inline]
-    unsafe fn insert_root(&mut self, node: NodePtr) {
-        node.set_parent_color(NodePtr::null(), Color::Black);
-        node.set_left(NodePtr::null());
-        node.set_right(NodePtr::null());
-        self.root = node;
     }
 
     /// Inserts a new element into the `RBTree`.
@@ -1121,20 +1160,22 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert(&mut self, val: IntrusiveRef<A::Container>) -> CursorMut<A> {
+    pub fn insert<'a>(&'a mut self, val: A::Pointer) -> CursorMut<A>
+        where <A as KeyAdapter<'a>>::Key: Ord
+    {
         unsafe {
             let raw = val.into_raw();
-            let new = NodePtr(self.adaptor.get_link(raw));
+            let new = NodePtr(self.adapter.get_link(raw));
             assert!(!new.is_linked(),
                     "attempted to insert an object that is already linked");
             if self.is_empty() {
                 self.insert_root(new);
             } else {
-                let key = self.adaptor.get_key(&*raw);
+                let key = self.adapter.get_key(&*raw);
                 let mut tree = self.root;
                 loop {
-                    let current = &*self.adaptor.get_container(tree.0);
-                    if key < self.adaptor.get_key(current) {
+                    let current = &*self.adapter.get_value(tree.0);
+                    if key < self.adapter.get_key(current) {
                         if tree.left().is_null() {
                             tree.insert_left(new, &mut self.root);
                             break;
@@ -1170,7 +1211,7 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
     /// one is returned.
     #[inline]
     pub fn entry<'a, Q: ?Sized + Ord>(&'a mut self, key: &Q) -> Entry<'a, A>
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Q>
+        where <A as KeyAdapter<'a>>::Key: Borrow<Q>
     {
         unsafe {
             if self.is_empty() {
@@ -1182,8 +1223,8 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
             } else {
                 let mut tree = self.root;
                 loop {
-                    let current = &*self.adaptor.get_container(tree.0);
-                    match key.cmp(self.adaptor.get_key(current).borrow()) {
+                    let current = &*self.adapter.get_value(tree.0);
+                    match key.cmp(self.adapter.get_key(current).borrow()) {
                         Ordering::Less => {
                             if tree.left().is_null() {
                                 return Entry::Vacant(InsertCursor {
@@ -1228,154 +1269,69 @@ impl<A: for<'a> TreeAdaptor<'a>> RBTree<A> {
                                                            min: Bound<&Min>,
                                                            max: Bound<&Max>)
                                                            -> Iter<'a, A>
-        where <A as TreeAdaptor<'a>>::Key: Borrow<Min> + Borrow<Max>
+        where <A as KeyAdapter<'a>>::Key: Borrow<Min> + Borrow<Max>,
+              <A as KeyAdapter<'a>>::Key: Ord
     {
         let lower = self.lower_bound_internal(min);
         let upper = self.upper_bound_internal(max);
         if !lower.is_null() && !upper.is_null() {
-            let lower_key = unsafe { self.adaptor.get_key(&*self.adaptor.get_container(lower.0)) };
-            let upper_key = unsafe { self.adaptor.get_key(&*self.adaptor.get_container(upper.0)) };
+            let lower_key = unsafe { self.adapter.get_key(&*self.adapter.get_value(lower.0)) };
+            let upper_key = unsafe { self.adapter.get_key(&*self.adapter.get_value(upper.0)) };
             if upper_key >= lower_key {
                 return Iter {
-                    raw: RawIter {
-                        head: lower,
-                        tail: upper,
-                    },
+                    head: lower,
+                    tail: upper,
                     tree: self,
                 };
             }
         }
         Iter {
-            raw: RawIter {
-                head: NodePtr::null(),
-                tail: NodePtr::null(),
-            },
+            head: NodePtr::null(),
+            tail: NodePtr::null(),
             tree: self,
         }
-    }
-
-    /// Gets an iterator over the objects in the `RBTree`, in ascending key
-    /// order.
-    #[inline]
-    pub fn iter(&self) -> Iter<A> {
-        if self.root.is_null() {
-            Iter {
-                raw: RawIter {
-                    head: NodePtr::null(),
-                    tail: NodePtr::null(),
-                },
-                tree: self,
-            }
-        } else {
-            Iter {
-                raw: RawIter {
-                    head: unsafe { self.root.first_child() },
-                    tail: unsafe { self.root.last_child() },
-                },
-                tree: self,
-            }
-        }
-    }
-
-    #[inline]
-    fn drain_recurse<F>(&self, f: &mut F, current: NodePtr)
-        where F: FnMut(IntrusiveRef<A::Container>)
-    {
-        // If the recursion down the left side of the tree panics, we should
-        // still go through the right side of the tree and unlink all the nodes,
-        // but without calling the user-supplied function to avoid any further
-        // panics.
-        struct PanicGuard(NodePtr);
-        impl Drop for PanicGuard {
-            #[inline]
-            fn drop(&mut self) {
-                fn recurse(current: NodePtr) {
-                    if !current.is_null() {
-                        unsafe {
-                            current.unlink();
-                            recurse(current.left());
-                            recurse(current.right());
-                        }
-                    }
-                }
-                recurse(self.0);
-            }
-        };
-
-        if !current.is_null() {
-            unsafe {
-                current.unlink();
-                let guard = PanicGuard(current.right());
-                self.drain_recurse(f, current.left());
-                f(IntrusiveRef::from_raw(self.adaptor.get_container(current.0)));
-                mem::forget(guard);
-                self.drain_recurse(f, current.right());
-            }
-        }
-    }
-
-    /// Calls the given function for each element in the `RBTree` before
-    /// removing it from the tree, in ascending key order.
-    ///
-    /// This will unlink all objects currently in the tree.
-    ///
-    /// If the given function panics then all elements in the `RBTree` will
-    /// still be unlinked, but the function will not be called for any elements
-    /// after the one that panicked.
-    #[inline]
-    pub fn drain<F>(&mut self, mut f: F)
-        where F: FnMut(IntrusiveRef<A::Container>)
-    {
-        let root = self.root;
-        self.root = NodePtr::null();
-        self.drain_recurse(&mut f, root);
-    }
-
-    /// Removes all elements from the `RBTree`.
-    ///
-    /// This will unlink all object currently in the tree.
-    #[inline]
-    pub fn clear(&mut self) {
-        self.drain(|_| {});
-    }
-
-    /// Empties the `RBTree` without unlinking objects in it.
-    ///
-    /// Since this does not unlink any objects, any attempts to link these
-    /// objects into another `RBTree` will fail but will not cause any
-    /// memory unsafety. To unlink those objects manually, you must call the
-    /// `unsafe_unlink` function on them.
-    ///
-    /// This is the only function that can be safely called after an object has
-    /// been moved or dropped while still being linked into this `RBTree`.
-    #[inline]
-    pub fn fast_clear(&mut self) {
-        self.root = NodePtr::null();
-    }
-
-    /// Takes all the elements out of the `RBTree`, leaving it empty. The
-    /// taken elements are returned as a new `RBTree`.
-    #[inline]
-    pub fn take(&mut self) -> RBTree<A>
-        where A: Clone
-    {
-        let tree = RBTree {
-            root: self.root,
-            adaptor: self.adaptor.clone(),
-        };
-        self.root = NodePtr::null();
-        tree
     }
 }
 
 // Allow read-only access from multiple threads
-unsafe impl<A: for<'a> TreeAdaptor<'a> + Sync> Sync for RBTree<A> where A::Container: Sync {}
+unsafe impl<A: Adapter<Link = Link> + Sync> Sync for RBTree<A> where A::Value: Sync {}
 
-// We require Sync on objects here because they may belong to multiple collections
-unsafe impl<A: for<'a> TreeAdaptor<'a> + Send> Send for RBTree<A> where A::Container: Send + Sync {}
+// Allow sending to another thread if the ownership (represented by the A::Pointer owned
+// pointer type) can be transferred to another thread.
+unsafe impl<A: Adapter<Link = Link> + Send> Send for RBTree<A> where A::Pointer: Send {}
 
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> IntoIterator for &'a RBTree<A> {
-    type Item = &'a A::Container;
+// Drop all owned pointers if the collection is dropped
+impl<A: Adapter<Link = Link>> Drop for RBTree<A> {
+    #[inline]
+    fn drop(&mut self) {
+        self.clear();
+    }
+}
+
+impl<A: Adapter<Link = Link>> IntoIterator for RBTree<A> {
+    type Item = A::Pointer;
+    type IntoIter = IntoIter<A>;
+
+    #[inline]
+    fn into_iter(self) -> IntoIter<A> {
+        if self.root.is_null() {
+            IntoIter {
+                head: NodePtr::null(),
+                tail: NodePtr::null(),
+                tree: self,
+            }
+        } else {
+            IntoIter {
+                head: unsafe { self.root.first_child() },
+                tail: unsafe { self.root.last_child() },
+                tree: self,
+            }
+        }
+    }
+}
+
+impl<'a, A: Adapter<Link = Link> + 'a> IntoIterator for &'a RBTree<A> {
+    type Item = &'a A::Value;
     type IntoIter = Iter<'a, A>;
 
     #[inline]
@@ -1384,14 +1340,14 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> IntoIterator for &'a RBTree<A> {
     }
 }
 
-impl<A: for<'a> TreeAdaptor<'a> + Default> Default for RBTree<A> {
+impl<A: Adapter<Link = Link> + Default> Default for RBTree<A> {
     fn default() -> RBTree<A> {
         RBTree::new(A::default())
     }
 }
 
-impl<A: for<'a> TreeAdaptor<'a>> fmt::Debug for RBTree<A>
-    where A::Container: fmt::Debug
+impl<A: Adapter<Link = Link>> fmt::Debug for RBTree<A>
+    where A::Value: fmt::Debug
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_set().entries(self.iter()).finish()
@@ -1404,13 +1360,13 @@ impl<A: for<'a> TreeAdaptor<'a>> fmt::Debug for RBTree<A>
 
 /// A cursor pointing to a slot in which an element can be inserted into a
 /// `RBTree`.
-pub struct InsertCursor<'a, A: for<'b> TreeAdaptor<'b> + 'a> {
+pub struct InsertCursor<'a, A: Adapter<Link = Link> + 'a> {
     parent: NodePtr,
     insert_left: bool,
     tree: &'a mut RBTree<A>,
 }
 
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> InsertCursor<'a, A> {
+impl<'a, A: Adapter<Link = Link> + 'a> InsertCursor<'a, A> {
     /// Inserts a new element into the `RBTree` at the location indicated by
     /// this `InsertCursor`.
     ///
@@ -1418,10 +1374,10 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> InsertCursor<'a, A> {
     ///
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
-    pub fn insert(self, val: IntrusiveRef<A::Container>) -> CursorMut<'a, A> {
+    pub fn insert(self, val: A::Pointer) -> CursorMut<'a, A> {
         unsafe {
             let raw = val.into_raw();
-            let new = NodePtr(self.tree.adaptor.get_link(raw));
+            let new = NodePtr(self.tree.adapter.get_link(raw));
             assert!(!new.is_linked(),
                     "attempted to insert an object that is already linked");
             if self.parent.is_null() {
@@ -1442,7 +1398,7 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> InsertCursor<'a, A> {
 /// An entry in a `RBTree`.
 ///
 /// See the documentation for `RBTree::entry`.
-pub enum Entry<'a, A: for<'b> TreeAdaptor<'b> + 'a> {
+pub enum Entry<'a, A: Adapter<Link = Link> + 'a> {
     /// An occupied entry.
     Occupied(CursorMut<'a, A>),
 
@@ -1450,7 +1406,7 @@ pub enum Entry<'a, A: for<'b> TreeAdaptor<'b> + 'a> {
     Vacant(InsertCursor<'a, A>),
 }
 
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Entry<'a, A> {
+impl<'a, A: Adapter<Link = Link> + 'a> Entry<'a, A> {
     /// Inserts an element into the `RBTree` if the entry is vacant, returning
     /// a `CursorMut` to the resulting value. If the entry is occupied then a
     /// `CursorMut` pointing to the element is returned.
@@ -1459,7 +1415,7 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Entry<'a, A> {
     ///
     /// Panics if the `Entry` is vacant and the new element is already linked to
     /// a different intrusive collection.
-    pub fn or_insert(self, val: IntrusiveRef<A::Container>) -> CursorMut<'a, A> {
+    pub fn or_insert(self, val: A::Pointer) -> CursorMut<'a, A> {
         match self {
             Entry::Occupied(entry) => entry,
             Entry::Vacant(entry) => entry.insert(val),
@@ -1476,7 +1432,7 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Entry<'a, A> {
     /// Panics if the `Entry` is vacant and the new element is already linked to
     /// a different intrusive collection.
     pub fn or_insert_with<F>(self, default: F) -> CursorMut<'a, A>
-        where F: FnOnce() -> IntrusiveRef<A::Container>
+        where F: FnOnce() -> A::Pointer
     {
         match self {
             Entry::Occupied(entry) => entry,
@@ -1486,74 +1442,140 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Entry<'a, A> {
 }
 
 // =============================================================================
-// RawIter, Iter
+// Iter
 // =============================================================================
 
-#[derive(Copy, Clone)]
-struct RawIter {
+/// An iterator over references to the items of a `RBTree`.
+pub struct Iter<'a, A: Adapter<Link = Link> + 'a> {
     head: NodePtr,
     tail: NodePtr,
+    tree: &'a RBTree<A>,
 }
-impl Iterator for RawIter {
-    type Item = NodePtr;
+impl<'a, A: Adapter<Link = Link> + 'a> Iterator for Iter<'a, A> {
+    type Item = &'a A::Value;
 
     #[inline]
-    fn next(&mut self) -> Option<NodePtr> {
+    fn next(&mut self) -> Option<&'a A::Value> {
         if self.head.is_null() {
             None
         } else {
             let head = self.head;
             if head == self.tail {
                 self.head = NodePtr::null();
+                self.tail = NodePtr::null();
             } else {
                 self.head = unsafe { head.next() };
             }
-            Some(head)
+            Some(unsafe { &*self.tree.adapter.get_value(head.0) })
         }
     }
 }
-impl DoubleEndedIterator for RawIter {
+impl<'a, A: Adapter<Link = Link> + 'a> DoubleEndedIterator for Iter<'a, A> {
     #[inline]
-    fn next_back(&mut self) -> Option<NodePtr> {
+    fn next_back(&mut self) -> Option<&'a A::Value> {
         if self.tail.is_null() {
             None
         } else {
             let tail = self.tail;
             if self.head == tail {
                 self.tail = NodePtr::null();
+                self.head = NodePtr::null();
             } else {
                 self.tail = unsafe { tail.prev() };
             }
-            Some(tail)
+            Some(unsafe { &*self.tree.adapter.get_value(tail.0) })
+        }
+    }
+}
+impl<'a, A: Adapter<Link = Link> + 'a> Clone for Iter<'a, A> {
+    #[inline]
+    fn clone(&self) -> Iter<'a, A> {
+        Iter {
+            head: self.head,
+            tail: self.tail,
+            tree: self.tree,
         }
     }
 }
 
-/// An iterator over references to the items of a `RBTree`.
-pub struct Iter<'a, A: for<'b> TreeAdaptor<'b> + 'a> {
-    raw: RawIter,
-    tree: &'a RBTree<A>,
+// =============================================================================
+// IntoIter
+// =============================================================================
+
+/// An iterator which consumes a `RBTree`.
+pub struct IntoIter<A: Adapter<Link = Link>> {
+    head: NodePtr,
+    tail: NodePtr,
+    tree: RBTree<A>,
 }
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Iterator for Iter<'a, A> {
-    type Item = &'a A::Container;
+impl<A: Adapter<Link = Link>> Iterator for IntoIter<A> {
+    type Item = A::Pointer;
 
     #[inline]
-    fn next(&mut self) -> Option<&'a A::Container> {
-        self.raw.next().map(|x| unsafe { &*self.tree.adaptor.get_container(x.0) })
+    fn next(&mut self) -> Option<A::Pointer> {
+        if self.head.is_null() {
+            None
+        } else {
+            unsafe {
+                // Remove the node from the tree. Since head is always the
+                // left-most node, we can infer the following:
+                // - head.left is null.
+                // - head is a left child of its parent (or the root node).
+                let head = self.head;
+                let parent = head.parent();
+                let right = head.right();
+                assert!(head.left().is_null());
+                if parent.is_null() {
+                    self.tree.root = right;
+                    if right.is_null() {
+                        self.tail = NodePtr::null();
+                    }
+                } else {
+                    parent.set_left(right);
+                }
+                if right.is_null() {
+                    self.head = parent;
+                } else {
+                    right.set_parent(parent);
+                    self.head = right.first_child();
+                }
+                head.unlink();
+                Some(A::Pointer::from_raw(self.tree.adapter.get_value(head.0)))
+            }
+        }
     }
 }
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> DoubleEndedIterator for Iter<'a, A> {
+impl<A: Adapter<Link = Link>> DoubleEndedIterator for IntoIter<A> {
     #[inline]
-    fn next_back(&mut self) -> Option<&'a A::Container> {
-        self.raw.next_back().map(|x| unsafe { &*self.tree.adaptor.get_container(x.0) })
-    }
-}
-impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Clone for Iter<'a, A> {
-    #[inline]
-    fn clone(&self) -> Iter<'a, A> {
-        Iter {
-            raw: self.raw,
-            tree: self.tree,
+    fn next_back(&mut self) -> Option<A::Pointer> {
+        if self.tail.is_null() {
+            None
+        } else {
+            unsafe {
+                // Remove the node from the tree. Since tail is always the
+                // right-most node, we can infer the following:
+                // - tail.right is null.
+                // - tail is a right child of its parent (or the root node).
+                let tail = self.tail;
+                let parent = tail.parent();
+                let left = tail.left();
+                if parent.is_null() {
+                    self.tree.root = left;
+                    if left.is_null() {
+                        self.head = NodePtr::null();
+                    }
+                } else {
+                    parent.set_right(left);
+                }
+                if left.is_null() {
+                    self.tail = parent;
+                } else {
+                    left.set_parent(parent);
+                    self.tail = left.last_child();
+                }
+                tail.unlink();
+                Some(A::Pointer::from_raw(self.tree.adapter.get_value(tail.0)))
+            }
         }
     }
 }
@@ -1566,11 +1588,11 @@ impl<'a, A: for<'b> TreeAdaptor<'b> + 'a> Clone for Iter<'a, A> {
 mod tests {
     use std::vec::Vec;
     use std::boxed::Box;
-    use IntrusiveRef;
+    use {UnsafeRef, KeyAdapter};
     use Bound::*;
-    use super::{RBTree, TreeAdaptor, Link, Entry};
+    use super::{RBTree, Link, Entry};
     use std::fmt;
-    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::marker::PhantomData;
     extern crate rand;
     use self::rand::{XorShiftRng, Rng};
 
@@ -1584,15 +1606,15 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    intrusive_adaptor!(ObjAdaptor = Obj { link: Link });
-    impl<'a> TreeAdaptor<'a> for ObjAdaptor {
+    intrusive_adapter!(ObjAdapter = UnsafeRef<Obj>: Obj { link: Link });
+    impl<'a> KeyAdapter<'a> for ObjAdapter {
         type Key = i32;
-        fn get_key(&self, container: &'a Self::Container) -> i32 {
-            container.value
+        fn get_key(&self, value: &'a Self::Value) -> i32 {
+            value.value
         }
     }
-    fn make_obj(value: i32) -> IntrusiveRef<Obj> {
-        IntrusiveRef::from_box(Box::new(Obj {
+    fn make_obj(value: i32) -> UnsafeRef<Obj> {
+        UnsafeRef::from_box(Box::new(Obj {
             link: Link::new(),
             value: value,
         }))
@@ -1604,7 +1626,7 @@ mod tests {
         assert!(!a.link.is_linked());
         assert_eq!(format!("{:?}", a.link), "unlinked");
 
-        let mut b = RBTree::<ObjAdaptor>::default();
+        let mut b = RBTree::<ObjAdapter>::default();
         assert!(b.is_empty());
 
         assert_eq!(b.insert(a.clone()).get().unwrap().value, 1);
@@ -1631,7 +1653,7 @@ mod tests {
         let a = make_obj(1);
         let b = make_obj(2);
         let c = make_obj(3);
-        let mut t = RBTree::new(ObjAdaptor);
+        let mut t = RBTree::new(ObjAdapter::new());
         let mut cur = t.cursor_mut();
         assert!(cur.is_null());
         assert!(cur.get().is_none());
@@ -1690,7 +1712,7 @@ mod tests {
             .map(make_obj)
             .collect::<Vec<_>>();
         assert!(v.iter().all(|x| !x.link.is_linked()));
-        let mut t = RBTree::new(ObjAdaptor);
+        let mut t = RBTree::new(ObjAdapter::new());
         assert!(t.is_empty());
         let mut rng = XorShiftRng::new_unseeded();
 
@@ -1802,7 +1824,7 @@ mod tests {
         let v = (0..10)
             .map(|x| make_obj(x * 10))
             .collect::<Vec<_>>();
-        let mut t = RBTree::new(ObjAdaptor);
+        let mut t = RBTree::new(ObjAdapter::new());
         for x in v.iter() {
             t.insert(x.clone());
         }
@@ -1887,15 +1909,24 @@ mod tests {
         assert_eq!(t.range(Excluded(&100), Excluded(&-2)).map(|x| x.value).collect::<Vec<_>>(),
                    vec![]);
 
-        let mut t2 = t.take();
-        assert!(t.is_empty());
-
         let mut v2 = Vec::new();
-        t2.drain(|x| {
+        for x in t.take() {
             v2.push(x.value);
-        });
+        }
         assert_eq!(v2, vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
-        assert!(t2.is_empty());
+        assert!(t.is_empty());
+        for _ in t.take() {
+            unreachable!();
+        }
+
+        for x in v.iter() {
+            t.insert(x.clone());
+        }
+        v2.clear();
+        for x in t.into_iter().rev() {
+            v2.push(x.value);
+        }
+        assert_eq!(v2, vec![90, 80, 70, 60, 50, 40, 30, 20, 10, 0]);
     }
 
     #[test]
@@ -1903,18 +1934,14 @@ mod tests {
         let v = (0..10)
             .map(|x| make_obj(x * 10))
             .collect::<Vec<_>>();
-        let mut t = RBTree::new(ObjAdaptor);
+        let mut t = RBTree::new(ObjAdapter::new());
         for x in v.iter() {
             t.insert(x.clone());
         }
 
         for i in -9..100 {
             fn mod10(x: i32) -> i32 {
-                if x < 0 {
-                    10 + x % 10
-                } else {
-                    x % 10
-                }
+                if x < 0 { 10 + x % 10 } else { x % 10 }
             }
             {
                 let c = t.find(&i);
@@ -2026,8 +2053,8 @@ mod tests {
     }
 
     #[test]
-    fn test_unsafe_unlink() {
-        let mut t = RBTree::new(ObjAdaptor);
+    fn test_fast_clear() {
+        let mut t = RBTree::new(ObjAdapter::new());
         let a = make_obj(1);
         let b = make_obj(2);
         let c = make_obj(3);
@@ -2035,11 +2062,15 @@ mod tests {
         t.insert(b.clone());
         t.insert(c.clone());
 
+        t.fast_clear();
+        assert!(t.is_empty());
+        assert!(a.link.is_linked());
+        assert!(b.link.is_linked());
+        assert!(c.link.is_linked());
         unsafe {
-            t.fast_clear();
-            a.link.unsafe_unlink();
-            b.link.unsafe_unlink();
-            c.link.unsafe_unlink();
+            a.link.force_unlink();
+            b.link.force_unlink();
+            c.link.force_unlink();
         }
         assert!(t.is_empty());
         assert!(!a.link.is_linked());
@@ -2049,7 +2080,7 @@ mod tests {
 
     #[test]
     fn test_entry() {
-        let mut t = RBTree::new(ObjAdaptor);
+        let mut t = RBTree::new(ObjAdapter::new());
         let a = make_obj(1);
         let b = make_obj(2);
         let c = make_obj(3);
@@ -2082,57 +2113,29 @@ mod tests {
     }
 
     #[test]
-    fn test_panic() {
-        let mut t = RBTree::new(ObjAdaptor);
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
-        t.insert(a.clone());
-        t.insert(b.clone());
-        t.insert(c.clone());
-
-        catch_unwind(AssertUnwindSafe(|| t.drain(|_| panic!("test")))).unwrap_err();
-
-        assert!(t.is_empty());
-        assert!(!a.link.is_linked());
-        assert!(!b.link.is_linked());
-        assert!(!c.link.is_linked());
-    }
-
-    #[test]
     fn test_non_static() {
         #[derive(Clone)]
         struct Obj<'a> {
             link: Link,
             value: &'a i32,
         }
-        struct ObjAdaptor<'a>(::std::marker::PhantomData<*mut Obj<'a>>);
-        unsafe impl<'a> ::Adaptor<Link> for ObjAdaptor<'a> {
-            type Container = Obj<'a>;
-            unsafe fn get_container(&self, link: *const Link) -> *const Self::Container {
-                container_of!(link, Obj<'a>, link)
-            }
-            unsafe fn get_link(&self, container: *const Self::Container) -> *const Link {
-                &(*container).link
-            }
-        }
-        impl<'a, 'b> TreeAdaptor<'a> for ObjAdaptor<'b> {
+        intrusive_adapter!(ObjAdapter['a] = &'a Obj<'a>: Obj<'a> {link: Link});
+        impl<'a, 'b> KeyAdapter<'a> for ObjAdapter<'b> {
             type Key = &'a i32;
-            fn get_key(&self, container: &'a Obj) -> &'a i32 {
-                container.value
+            fn get_key(&self, value: &'a Obj) -> &'a i32 {
+                value.value
             }
         }
 
         let v = 5;
-        let mut l = RBTree::new(ObjAdaptor(::std::marker::PhantomData));
-        let o = Obj {
+        let a = Obj {
             link: Link::default(),
             value: &v,
         };
-        let a = IntrusiveRef::from_box(Box::new(o.clone()));
-        let b = IntrusiveRef::from_box(Box::new(o.clone()));
-        l.insert(a);
-        l.insert(b);
+        let b = a.clone();
+        let mut l = RBTree::new(ObjAdapter(PhantomData));
+        l.insert(&a);
+        l.insert(&b);
         assert_eq!(*l.front().get().unwrap().value, 5);
         assert_eq!(*l.back().get().unwrap().value, 5);
     }
