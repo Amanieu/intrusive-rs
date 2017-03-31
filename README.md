@@ -13,7 +13,7 @@ A Rust library for creating intrusive collections. Currently supports singly-lin
 - A single object can be a member of multiple intrusive collections simultaneously.
 - Intrusive collections provide a `Cursor`-based interface, which allows safe mutation while iterating.
 
-For examples and more information, see the [documentation](https://amanieu.github.io/intrusive-rs/intrusive_collections/index.html).
+For examples and more information, see the documentation ([crates.io](https://docs.rs/intrusive-collections), [master](https://amanieu.github.io/intrusive-rs/intrusive_collections/index.html)).
 
 ## Usage
 
