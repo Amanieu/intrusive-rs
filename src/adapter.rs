@@ -127,10 +127,9 @@ macro_rules! container_of {
 ///
 /// # Generics
 ///
-/// This macro supports generic arguments, but uses a slightly different syntax
-/// from the usual due to limitations in the Rust macro system:
+/// This macro supports generic arguments:
 /// ```rust,ignore
-/// intrusive_adapter!(Adapter['lifetime, Type, Type2: ?Sized] = Pointer: Value { link_field: LinkType } where Type: Copy, Type2: 'lifetiem);
+/// intrusive_adapter!(Adapter<'lifetime, Type, Type2: ?Sized> = Pointer: Value { link_field: LinkType } where Type: Copy, Type2: 'lifetiem);
 /// ```
 ///
 /// # Examples
@@ -153,12 +152,17 @@ macro_rules! container_of {
 ///     link: LinkedListLink,
 ///     val: T,
 /// }
-/// intrusive_adapter!(MyAdapter3['a, T: ?Sized] = &'a Test2<T>: Test2<T> { link: LinkedListLink } where T: Clone + 'a);
+/// intrusive_adapter!(MyAdapter3<'a, T: ?Sized> = &'a Test2<T>: Test2<T> { link: LinkedListLink } where T: Clone + 'a);
 /// # fn main() {}
 /// ```
 #[macro_export]
 macro_rules! intrusive_adapter {
-    (@impl $name:ident [ $($args:tt $(: ?$bound:tt)*),* ] = $pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*) => {
+    (@impl
+        [($($privacy:tt)*) ($name:ident) ($($args:tt $(: ?$bound:tt)*),*)]
+        ($pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*)
+    ) => {
+        #[derive(Clone, Default)]
+        $($privacy)* struct $name<$($args)*>($crate::__core::marker::PhantomData<$pointer>) where $($where_)*;
         unsafe impl<$($args $(: ?$bound)*),*> Send for $name<$($args),*> $($where_)* {}
         unsafe impl<$($args $(: ?$bound)*),*> Sync for $name<$($args),*> $($where_)* {}
         #[allow(dead_code)]
@@ -182,30 +186,66 @@ macro_rules! intrusive_adapter {
             }
         }
     };
-    ($name:ident [ $($args:tt)* ] = $pointer:ty: $value:path { $field:ident: $link:ty } where $($where_:tt)*) => {
-        #[derive(Clone, Default)]
-        struct $name<$($args)*>($crate::__core::marker::PhantomData<$pointer>) where $($where_)*;
-        intrusive_adapter!(@impl $name[$($args)*] = $pointer: $value { $field: $link } where $($where_)*);
+    (@impl $tokens:tt) => {};
+    (@find_generic
+        [($($privacy:tt)*) ($($name:tt)*) ($($prev:tt)*)]
+        (> = $($rest:tt)*)
+    ) => {
+        intrusive_adapter!(@impl
+            [($($privacy)*) ($($name)*) ($($prev)*)]
+            ($($rest)*)
+        );
     };
-    (pub $name:ident [ $($args:tt)* ] = $pointer:ty: $value:path { $field:ident: $link:ty } where $($where_:tt)*) => {
-        #[derive(Clone, Default)]
-        pub struct $name<$($args)*>($crate::__core::marker::PhantomData<$pointer>) where $($where_)*;
-        intrusive_adapter!(@impl $name[$($args)*] = $pointer: $value { $field: $link } where $($where_)*);
+    (@find_generic
+        [($($privacy:tt)*) ($($name:tt)*) ($($prev:tt)*)]
+        ($cur:tt $($rest:tt)*)
+    ) => {
+        intrusive_adapter!(@find_generic
+            [($($privacy)*) ($($name)*) ($cur $($prev)*)]
+            ($($rest)*)
+        );
     };
-    ($name:ident [ $($args:tt)* ] = $pointer:ty: $value:path { $field:ident: $link:ty }) => {
-        #[derive(Clone, Default)]
-        struct $name<$($args)*>($crate::__core::marker::PhantomData<$pointer>);
-        intrusive_adapter!(@impl $name[$($args)*] = $pointer: $value { $field: $link });
+    (@find_if_generic
+        [($($privacy:tt)*) ($($prev:tt)*)]
+        ()
+    ) => {};
+    (@find_if_generic
+        [($($privacy:tt)*) ($($prev:tt)*)]
+        (= $($rest:tt)*)
+    ) => {
+        intrusive_adapter!(@impl
+            [($($privacy)*) ($($prev)*) ()]
+            ($($rest)*)
+        );
     };
-    (pub $name:ident [ $($args:tt)* ] = $pointer:ty: $value:path { $field:ident: $link:ty }) => {
-        #[derive(Clone, Default)]
-        pub struct $name<$($args)*>($crate::__core::marker::PhantomData<$pointer>);
-        intrusive_adapter!(@impl $name[$($args)*] = $pointer: $value { $field: $link });
+    (@find_if_generic
+        [($($privacy:tt)*) ($($prev:tt)*)]
+        (< $($rest:tt)*)
+    ) => {
+        intrusive_adapter!(@find_generic
+            [($($privacy)*) ($($prev)*) ()]
+            ($($rest)*)
+        );
     };
-    ($name:ident = $pointer:ty: $value:path { $field:ident: $link:ty }) => {
-        intrusive_adapter!($name[] = $pointer: $value { $field: $link });
+    (@find_if_generic
+        [($($privacy:tt)*) ($($prev:tt)*)]
+        ($cur:tt $($rest:tt)*)
+    ) => {
+        intrusive_adapter!(@find_if_generic
+            [($($privacy)*) ($cur $($prev)*)]
+            ($($rest)*)
+        );
     };
-    (pub $name:ident = $pointer:ty: $value:path { $field:ident: $link:ty }) => {
-        intrusive_adapter!($name[] = $pointer: $value { $field: $link });
+    (pub $($rest:tt)*) => {
+        intrusive_adapter!(@find_if_generic
+            [(pub) ()]
+            ($($rest)*)
+        );
+    };
+    ($($rest:tt)*) => {
+        intrusive_adapter!(@find_if_generic
+            [() ()]
+            ($($rest)*)
+        );
     };
 }

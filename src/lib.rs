@@ -206,7 +206,7 @@
 //! // Note that we use a plain reference as the pointer type for the collection.
 //! // The lifetime is specified using ['a] instead of <'a> due to limitations in
 //! // the Rust macro system.
-//! intrusive_adapter!(ValueAdapter['a] = &'a Value: Value { link: LinkedListLink });
+//! intrusive_adapter!(ValueAdapter<'a> = &'a Value: Value { link: LinkedListLink });
 //!
 //! fn main() {
 //!     // Create an arena and a list. Note that since stack objects are dropped in
