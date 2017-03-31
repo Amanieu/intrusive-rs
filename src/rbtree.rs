@@ -2119,7 +2119,7 @@ mod tests {
             link: Link,
             value: &'a i32,
         }
-        intrusive_adapter!(ObjAdapter['a] = &'a Obj<'a>: Obj<'a> {link: Link});
+        intrusive_adapter!(ObjAdapter<'a> = &'a Obj<'a>: Obj<'a> {link: Link});
         impl<'a, 'b> KeyAdapter<'a> for ObjAdapter<'b> {
             type Key = &'a i32;
             fn get_key(&self, value: &'a Obj) -> &'a i32 {

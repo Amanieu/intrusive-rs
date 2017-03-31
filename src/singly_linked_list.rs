@@ -1031,7 +1031,7 @@ mod tests {
             link: Link,
             value: &'a u32,
         }
-        intrusive_adapter!(ObjAdapter['a] = &'a Obj<'a>: Obj<'a> {link: Link});
+        intrusive_adapter!(ObjAdapter<'a> = &'a Obj<'a>: Obj<'a> {link: Link});
 
         let v = 5;
         let a = Obj {
