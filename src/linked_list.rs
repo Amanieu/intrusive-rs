@@ -1264,11 +1264,11 @@ mod tests {
     #[test]
     fn test_non_static() {
         #[derive(Clone)]
-        struct Obj<'a> {
+        struct Obj<'a, T: 'a> {
             link: Link,
-            value: &'a u32,
+            value: &'a T,
         }
-        intrusive_adapter!(ObjAdapter<'a> = &'a Obj<'a>: Obj<'a> {link: Link});
+        intrusive_adapter!(ObjAdapter<'a, T> = &'a Obj<'a, T>: Obj<'a, T> {link: Link} where T: 'a);
 
         let v = 5;
         let a = Obj {

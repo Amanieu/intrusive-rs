@@ -132,6 +132,11 @@ macro_rules! container_of {
 /// intrusive_adapter!(Adapter<'lifetime, Type, Type2: ?Sized> = Pointer: Value { link_field: LinkType } where Type: Copy, Type2: 'lifetiem);
 /// ```
 ///
+/// Note that due to macro parsing limitations, only `?Trait` style bounds are
+/// allowed in the generic argument list. In most cases this is only needed for
+/// `?Sized`. Other bounds can be specified in the `where` clause at the end
+/// the macro.
+///
 /// # Examples
 ///
 /// ```
@@ -158,11 +163,11 @@ macro_rules! container_of {
 #[macro_export]
 macro_rules! intrusive_adapter {
     (@impl
-        [($($privacy:tt)*) ($name:ident) ($($args:tt $(: ?$bound:tt)*),*)]
-        ($pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*)
+        ($($privacy:tt)*) $name:ident ($($args:tt $(: ?$bound:tt)*),*)
+        = $pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*
     ) => {
         #[derive(Clone, Default)]
-        $($privacy)* struct $name<$($args)*>($crate::__core::marker::PhantomData<$pointer>) where $($where_)*;
+        $($privacy)* struct $name<$($args),*>($crate::__core::marker::PhantomData<$pointer>) $($where_)*;
         unsafe impl<$($args $(: ?$bound)*),*> Send for $name<$($args),*> $($where_)* {}
         unsafe impl<$($args $(: ?$bound)*),*> Sync for $name<$($args),*> $($where_)* {}
         #[allow(dead_code)]
@@ -186,66 +191,42 @@ macro_rules! intrusive_adapter {
             }
         }
     };
-    (@impl $tokens:tt) => {};
     (@find_generic
-        [($($privacy:tt)*) ($($name:tt)*) ($($prev:tt)*)]
-        (> = $($rest:tt)*)
+        ($($privacy:tt)*) $name:tt ($($prev:tt)*) > $($rest:tt)*
     ) => {
         intrusive_adapter!(@impl
-            [($($privacy)*) ($($name)*) ($($prev)*)]
-            ($($rest)*)
+            ($($privacy)*) $name ($($prev)*) $($rest)*
         );
     };
     (@find_generic
-        [($($privacy:tt)*) ($($name:tt)*) ($($prev:tt)*)]
-        ($cur:tt $($rest:tt)*)
+        ($($privacy:tt)*) $name:tt ($($prev:tt)*) $cur:tt $($rest:tt)*
     ) => {
         intrusive_adapter!(@find_generic
-            [($($privacy)*) ($($name)*) ($cur $($prev)*)]
-            ($($rest)*)
+            ($($privacy)*) $name ($($prev)* $cur) $($rest)*
         );
     };
     (@find_if_generic
-        [($($privacy:tt)*) ($($prev:tt)*)]
-        ()
-    ) => {};
+        ($($privacy:tt)*) $name:tt < $($rest:tt)*
+    ) => {
+        intrusive_adapter!(@find_generic
+            ($($privacy)*) $name () $($rest)*
+        );
+    };
     (@find_if_generic
-        [($($privacy:tt)*) ($($prev:tt)*)]
-        (= $($rest:tt)*)
+        ($($privacy:tt)*) $name:tt $($rest:tt)*
     ) => {
         intrusive_adapter!(@impl
-            [($($privacy)*) ($($prev)*) ()]
-            ($($rest)*)
+            ($($privacy)*) $name () $($rest)*
         );
     };
-    (@find_if_generic
-        [($($privacy:tt)*) ($($prev:tt)*)]
-        (< $($rest:tt)*)
-    ) => {
-        intrusive_adapter!(@find_generic
-            [($($privacy)*) ($($prev)*) ()]
-            ($($rest)*)
-        );
-    };
-    (@find_if_generic
-        [($($privacy:tt)*) ($($prev:tt)*)]
-        ($cur:tt $($rest:tt)*)
-    ) => {
+    (pub $name:tt $($rest:tt)*) => {
         intrusive_adapter!(@find_if_generic
-            [($($privacy)*) ($cur $($prev)*)]
-            ($($rest)*)
+            (pub) $name $($rest)*
         );
     };
-    (pub $($rest:tt)*) => {
+    ($name:tt $($rest:tt)*) => {
         intrusive_adapter!(@find_if_generic
-            [(pub) ()]
-            ($($rest)*)
-        );
-    };
-    ($($rest:tt)*) => {
-        intrusive_adapter!(@find_if_generic
-            [() ()]
-            ($($rest)*)
+            () $name $($rest)*
         );
     };
 }

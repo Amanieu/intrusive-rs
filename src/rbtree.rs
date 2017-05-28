@@ -2115,14 +2115,14 @@ mod tests {
     #[test]
     fn test_non_static() {
         #[derive(Clone)]
-        struct Obj<'a> {
+        struct Obj<'a, T: 'a> {
             link: Link,
-            value: &'a i32,
+            value: &'a T,
         }
-        intrusive_adapter!(ObjAdapter<'a> = &'a Obj<'a>: Obj<'a> {link: Link});
-        impl<'a, 'b> KeyAdapter<'a> for ObjAdapter<'b> {
-            type Key = &'a i32;
-            fn get_key(&self, value: &'a Obj) -> &'a i32 {
+        intrusive_adapter!(ObjAdapter<'a, T> = &'a Obj<'a, T>: Obj<'a, T> {link: Link} where T: 'a);
+        impl<'a, 'b, T: 'a + 'b> KeyAdapter<'a> for ObjAdapter<'b, T> {
+            type Key = &'a T;
+            fn get_key(&self, value: &'a Obj<'b, T>) -> &'a T {
                 value.value
             }
         }
