@@ -44,7 +44,7 @@ impl<T: ?Sized> UnsafeRef<T> {
     /// Converts an `UnsafeRef` into a raw pointer
     #[inline]
     pub fn into_raw(ptr: Self) -> *mut T {
-        *ptr.ptr
+        ptr.ptr.get()
     }
 }
 
@@ -109,7 +109,7 @@ impl<T: ?Sized> AsRef<T> for UnsafeRef<T> {
     #[cfg(feature = "nightly")]
     #[inline]
     fn as_ref(&self) -> &T {
-        unsafe { &**self.ptr }
+        unsafe { &*self.ptr.get() }
     }
 
     #[cfg(not(feature = "nightly"))]
