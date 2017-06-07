@@ -784,8 +784,8 @@ impl<'a, A: for<'b> KeyAdapter<'b, Link = Link>> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert(&'a mut self, val: A::Pointer)
-        where <A as KeyAdapter<'a>>::Key: Ord
+    pub fn insert<'c>(&'c mut self, val: A::Pointer)
+        where <A as KeyAdapter<'c>>::Key: Ord
     {
         // We explicitly drop the returned CursorMut here, otherwise we would
         // end up with multiple CursorMut in the same collection.
@@ -1662,7 +1662,7 @@ mod tests {
         cur.insert_before(a.clone());
         cur.insert_before(c.clone());
         cur.move_prev();
-        cur.insert_before(b.clone());
+        cur.insert(b.clone());
         cur.move_next();
         assert!(cur.is_null());
 
