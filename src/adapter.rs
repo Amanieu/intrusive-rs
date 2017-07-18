@@ -296,7 +296,12 @@ macro_rules! intrusive_adapter {
         unsafe impl<$($args $(: ?$bound)*),*> Sync for $name<$($args),*> $($where_)* {}
         #[allow(dead_code)]
         impl<$($args $(: ?$bound)*),*> $name<$($args),*> $($where_)* {
+            #[cfg(not(feature = "nightly"))]
             pub fn new() -> Self {
+                $name($crate::__core::marker::PhantomData)
+            }
+            #[cfg(feature = "nightly")]
+            pub const fn new() -> Self {
                 $name($crate::__core::marker::PhantomData)
             }
         }
