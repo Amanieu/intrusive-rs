@@ -38,7 +38,7 @@ impl<T: ?Sized> UnsafeRef<T> {
     /// You must ensure that the `UnsafeRef` guarantees are upheld.
     #[inline]
     pub unsafe fn from_raw(val: *const T) -> UnsafeRef<T> {
-        UnsafeRef { ptr: NonZero::new(val as *mut _) }
+        UnsafeRef { ptr: NonZero::new_unchecked(val as *mut _) }
     }
 
     /// Converts an `UnsafeRef` into a raw pointer
