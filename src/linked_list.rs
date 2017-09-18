@@ -277,6 +277,30 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
             self.current = unsafe { self.current.prev() };
         }
     }
+
+    /// Returns a cursor pointing to the next element of the `LinkedList`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// first element of the `LinkedList`. If it is pointing to the last
+    /// element of the `LinkedList` then this will return a null cursor.
+    #[inline]
+    pub fn peek_next(&self) -> Cursor<A> {
+        let mut next = self.clone();
+        next.move_next();
+        next
+    }
+
+    /// Returns a cursor pointing to the previous element of the `LinkedList`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// last element of the `LinkedList`. If it is pointing to the first
+    /// element of the `LinkedList` then this will return a null cursor.
+    #[inline]
+    pub fn peek_prev(&self) -> Cursor<A> {
+        let mut prev = self.clone();
+        prev.move_prev();
+        prev
+    }
 }
 
 /// A cursor which provides mutable access to a `LinkedList`.
@@ -345,6 +369,30 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
         } else {
             self.current = unsafe { self.current.prev() };
         }
+    }
+
+    /// Returns a cursor pointing to the next element of the `LinkedList`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// first element of the `LinkedList`. If it is pointing to the last
+    /// element of the `LinkedList` then this will return a null cursor.
+    #[inline]
+    pub fn peek_next(&self) -> Cursor<A> {
+        let mut next = self.as_cursor();
+        next.move_next();
+        next
+    }
+
+    /// Returns a cursor pointing to the previous element of the `LinkedList`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// last element of the `LinkedList`. If it is pointing to the first
+    /// element of the `LinkedList` then this will return a null cursor.
+    #[inline]
+    pub fn peek_prev(&self) -> Cursor<A> {
+        let mut prev = self.as_cursor();
+        prev.move_prev();
+        prev
     }
 
     /// Removes the current element from the `LinkedList`.
@@ -993,19 +1041,23 @@ mod tests {
         cur.insert_before(c.clone());
         cur.move_prev();
         cur.insert_before(b.clone());
+        assert!(cur.peek_next().is_null());
         cur.move_next();
         assert!(cur.is_null());
 
         cur.move_next();
+        assert!(cur.peek_prev().is_null());
         assert!(!cur.is_null());
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
 
         {
             let mut cur2 = cur.as_cursor();
             assert_eq!(cur2.get().unwrap() as *const _, a.as_ref() as *const _);
+            assert_eq!(cur2.peek_next().get().unwrap().value, 2);
             cur2.move_next();
             assert_eq!(cur2.get().unwrap().value, 2);
             cur2.move_next();
+            assert_eq!(cur2.peek_prev().get().unwrap().value, 2);
             assert_eq!(cur2.get().unwrap() as *const _, c.as_ref() as *const _);
             cur2.move_prev();
             assert_eq!(cur2.get().unwrap() as *const _, b.as_ref() as *const _);

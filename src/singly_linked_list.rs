@@ -228,6 +228,18 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
             self.current = unsafe { self.current.next() };
         }
     }
+
+    /// Returns a cursor pointing to the next element of the `SinglyLinkedList`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// first element of the `SinglyLinkedList`. If it is pointing to the last
+    /// element of the `SinglyLinkedList` then this will return a null cursor.
+    #[inline]
+    pub fn peek_next(&self) -> Cursor<A> {
+        let mut next = self.clone();
+        next.move_next();
+        next
+    }
 }
 
 /// A cursor which provides mutable access to a `SinglyLinkedList`.
@@ -283,6 +295,18 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
         } else {
             self.current = unsafe { self.current.next() };
         }
+    }
+
+    /// Returns a cursor pointing to the next element of the `SinglyLinkedList`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// first element of the `SinglyLinkedList`. If it is pointing to the last
+    /// element of the `SinglyLinkedList` then this will return a null cursor.
+    #[inline]
+    pub fn peek_next(&self) -> Cursor<A> {
+        let mut next = self.as_cursor();
+        next.move_next();
+        next
     }
 
     /// Removes the next element from the `SinglyLinkedList`.
@@ -784,6 +808,7 @@ mod tests {
         cur.insert_after(b.clone());
         cur.move_next();
         cur.move_next();
+        assert!(cur.peek_next().is_null());
         cur.move_next();
         assert!(cur.is_null());
 
@@ -794,6 +819,7 @@ mod tests {
         {
             let mut cur2 = cur.as_cursor();
             assert_eq!(cur2.get().unwrap() as *const _, a.as_ref() as *const _);
+            assert_eq!(cur2.peek_next().get().unwrap().value, 2);
             cur2.move_next();
             assert_eq!(cur2.get().unwrap().value, 2);
             cur2.move_next();
