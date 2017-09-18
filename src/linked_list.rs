@@ -442,8 +442,10 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
         }
         unsafe {
             let new = NodePtr(self.list.adapter.get_link(val.into_raw()));
-            assert!(!new.is_linked(),
-                    "attempted to insert an object that is already linked");
+            assert!(
+                !new.is_linked(),
+                "attempted to insert an object that is already linked"
+            );
             if self.list.head == self.current {
                 self.list.head = new;
             }
@@ -470,8 +472,10 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     pub fn insert_after(&mut self, val: A::Pointer) {
         unsafe {
             let new = NodePtr(self.list.adapter.get_link(val.into_raw()));
-            assert!(!new.is_linked(),
-                    "attempted to insert an object that is already linked");
+            assert!(
+                !new.is_linked(),
+                "attempted to insert an object that is already linked"
+            );
             if self.is_null() {
                 new.link_between(NodePtr::null(), self.list.head);
                 self.list.head = new;
@@ -497,8 +501,10 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     pub fn insert_before(&mut self, val: A::Pointer) {
         unsafe {
             let new = NodePtr(self.list.adapter.get_link(val.into_raw()));
-            assert!(!new.is_linked(),
-                    "attempted to insert an object that is already linked");
+            assert!(
+                !new.is_linked(),
+                "attempted to insert an object that is already linked"
+            );
             if self.is_null() {
                 new.link_between(self.list.tail, NodePtr::null());
                 self.list.tail = new;
@@ -563,7 +569,8 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// of the `LinkedList` are moved.
     #[inline]
     pub fn split_after(&mut self) -> LinkedList<A>
-        where A: Clone
+    where
+        A: Clone,
     {
         if self.is_null() {
             let list = LinkedList {
@@ -599,7 +606,8 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// of the `LinkedList` are moved.
     #[inline]
     pub fn split_before(&mut self) -> LinkedList<A>
-        where A: Clone
+    where
+        A: Clone,
     {
         if self.is_null() {
             let list = LinkedList {
@@ -796,7 +804,8 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
     /// taken elements are returned as a new `LinkedList`.
     #[inline]
     pub fn take(&mut self) -> LinkedList<A>
-        where A: Clone
+    where
+        A: Clone,
     {
         let list = LinkedList {
             head: self.head,
@@ -838,11 +847,19 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
 }
 
 // Allow read-only access from multiple threads
-unsafe impl<A: Adapter<Link = Link> + Sync> Sync for LinkedList<A> where A::Value: Sync {}
+unsafe impl<A: Adapter<Link = Link> + Sync> Sync for LinkedList<A>
+where
+    A::Value: Sync,
+{
+}
 
 // Allow sending to another thread if the ownership (represented by the A::Pointer owned
 // pointer type) can be transferred to another thread.
-unsafe impl<A: Adapter<Link = Link> + Send> Send for LinkedList<A> where A::Pointer: Send {}
+unsafe impl<A: Adapter<Link = Link> + Send> Send for LinkedList<A>
+where
+    A::Pointer: Send,
+{
+}
 
 // Drop all owned pointers if the collection is dropped
 impl<A: Adapter<Link = Link>> Drop for LinkedList<A> {
@@ -879,7 +896,8 @@ impl<A: Adapter<Link = Link> + Default> Default for LinkedList<A> {
 }
 
 impl<A: Adapter<Link = Link>> fmt::Debug for LinkedList<A>
-    where A::Value: fmt::Debug
+where
+    A::Value: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
@@ -975,7 +993,7 @@ mod tests {
     use std::vec::Vec;
     use std::boxed::Box;
     use UnsafeRef;
-    use super::{LinkedList, Link};
+    use super::{Link, LinkedList};
     use std::fmt;
     use std::marker::PhantomData;
 
@@ -1017,7 +1035,7 @@ mod tests {
         assert_eq!(format!("{:?}", a.link2), "unlinked");
 
         assert_eq!(b.front_mut().remove().unwrap().as_ref() as *const _,
-                   a.as_ref() as *const _);
+        a.as_ref() as *const _);
         assert!(b.is_empty());
         assert!(!a.link1.is_linked());
         assert!(!a.link2.is_linked());
@@ -1035,7 +1053,7 @@ mod tests {
         assert!(cur.get().is_none());
         assert!(cur.remove().is_none());
         assert_eq!(cur.replace_with(a.clone()).unwrap_err().as_ref() as *const _,
-                   a.as_ref() as *const _);
+        a.as_ref() as *const _);
 
         cur.insert_before(a.clone());
         cur.insert_before(c.clone());
@@ -1071,25 +1089,25 @@ mod tests {
 
         cur.move_next();
         assert_eq!(cur.remove().unwrap().as_ref() as *const _,
-                   b.as_ref() as *const _);
+        b.as_ref() as *const _);
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
         cur.insert_after(b.clone());
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
         cur.move_prev();
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
         assert_eq!(cur.remove().unwrap().as_ref() as *const _,
-                   a.as_ref() as *const _);
+        a.as_ref() as *const _);
         assert!(!a.link1.is_linked());
         assert!(c.link1.is_linked());
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
         assert_eq!(cur.replace_with(a.clone()).unwrap().as_ref() as *const _,
-                   c.as_ref() as *const _);
+        c.as_ref() as *const _);
         assert!(a.link1.is_linked());
         assert!(!c.link1.is_linked());
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
         cur.move_next();
         assert_eq!(cur.replace_with(c.clone()).unwrap().as_ref() as *const _,
-                   b.as_ref() as *const _);
+        b.as_ref() as *const _);
         assert!(a.link1.is_linked());
         assert!(!b.link1.is_linked());
         assert!(c.link1.is_linked());
@@ -1223,9 +1241,9 @@ mod tests {
         }
         assert_eq!(v, [1, 2, 3, 4]);
         assert_eq!(l.iter().clone().map(|x| x.value).collect::<Vec<_>>(),
-                   [1, 2, 3, 4]);
+        [1, 2, 3, 4]);
         assert_eq!(l.iter().rev().map(|x| x.value).collect::<Vec<_>>(),
-                   [4, 3, 2, 1]);
+        [4, 3, 2, 1]);
         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
 
         assert_eq!(format!("{:?}", l), "[1, 2, 3, 4]");

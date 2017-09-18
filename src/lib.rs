@@ -275,14 +275,15 @@
 
 #![warn(missing_docs)]
 #![no_std]
-#![cfg_attr(feature = "nightly", feature(const_fn, drop_types_in_const, nonzero, allow_internal_unstable))]
+#![cfg_attr(feature = "nightly",
+           feature(const_fn, drop_types_in_const, nonzero, allow_internal_unstable))]
 #![cfg_attr(all(feature = "nightly", feature = "alloc"), feature(alloc))]
 
 // Use liballoc on nightly to avoid a dependency on libstd
-#[cfg(all(not(feature = "nightly"), feature = "alloc"))]
-extern crate std as alloc;
 #[cfg(all(feature = "nightly", feature = "alloc"))]
 extern crate alloc;
+#[cfg(all(not(feature = "nightly"), feature = "alloc"))]
+extern crate std as alloc;
 
 #[cfg(test)]
 #[macro_use]

@@ -23,10 +23,8 @@ use core::fmt;
 /// moved, dropped or accessed through a mutable reference as long as at least
 /// one `UnsafeRef` is pointing to it.
 pub struct UnsafeRef<T: ?Sized> {
-    #[cfg(feature = "nightly")]
-    ptr: NonZero<*mut T>,
-    #[cfg(not(feature = "nightly"))]
-    ptr: *mut T,
+    #[cfg(feature = "nightly")] ptr: NonZero<*mut T>,
+    #[cfg(not(feature = "nightly"))] ptr: *mut T,
 }
 
 #[cfg(feature = "nightly")]
@@ -38,7 +36,9 @@ impl<T: ?Sized> UnsafeRef<T> {
     /// You must ensure that the `UnsafeRef` guarantees are upheld.
     #[inline]
     pub unsafe fn from_raw(val: *const T) -> UnsafeRef<T> {
-        UnsafeRef { ptr: NonZero::new_unchecked(val as *mut _) }
+        UnsafeRef {
+            ptr: NonZero::new_unchecked(val as *mut _),
+        }
     }
 
     /// Converts an `UnsafeRef` into a raw pointer

@@ -135,7 +135,15 @@ macro_rules! container_of {
 ///
 /// This macro supports generic arguments:
 /// ```rust,ignore
-/// intrusive_adapter!(Adapter<'lifetime, Type, Type2: ?Sized> = Pointer: Value { link_field: LinkType } where Type: Copy, Type2: 'lifetiem);
+/// intrusive_adapter!(
+///     Adapter<'lifetime, Type, Type2: ?Sized> =
+///         Pointer: Value {
+///             link_field: LinkType
+///         }
+///         where
+///             Type: Copy,
+///             Type2: 'lifetime
+///     );
 /// ```
 ///
 /// Note that due to macro parsing limitations, only `?Trait` style bounds are

@@ -28,14 +28,18 @@ impl Link {
     #[cfg(feature = "nightly")]
     #[inline]
     pub const fn new() -> Link {
-        Link { next: Cell::new(UNLINKED_MARKER) }
+        Link {
+            next: Cell::new(UNLINKED_MARKER),
+        }
     }
 
     /// Creates a new `Link`.
     #[cfg(not(feature = "nightly"))]
     #[inline]
     pub fn new() -> Link {
-        Link { next: Cell::new(UNLINKED_MARKER) }
+        Link {
+            next: Cell::new(UNLINKED_MARKER),
+        }
     }
 
     /// Checks whether the `Link` is linked into a `SinglyLinkedList`.
@@ -361,8 +365,10 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
                 return Err(val);
             }
             let new = NodePtr(self.list.adapter.get_link(val.into_raw()));
-            assert!(!new.is_linked(),
-                    "attempted to insert an object that is already linked");
+            assert!(
+                !new.is_linked(),
+                "attempted to insert an object that is already linked"
+            );
             if self.is_null() {
                 self.list.head = new;
             }
@@ -384,8 +390,10 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     pub fn insert_after(&mut self, val: A::Pointer) {
         unsafe {
             let new = NodePtr(self.list.adapter.get_link(val.into_raw()));
-            assert!(!new.is_linked(),
-                    "attempted to insert an object that is already linked");
+            assert!(
+                !new.is_linked(),
+                "attempted to insert an object that is already linked"
+            );
             if self.is_null() {
                 new.link_between(NodePtr::null(), self.list.head);
                 self.list.head = new;
@@ -442,7 +450,8 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// of the `SinglyLinkedList` are moved.
     #[inline]
     pub fn split_after(&mut self) -> SinglyLinkedList<A>
-        where A: Clone
+    where
+        A: Clone,
     {
         if self.is_null() {
             let list = SinglyLinkedList {
@@ -609,7 +618,8 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
     /// The taken elements are returned as a new `SinglyLinkedList`.
     #[inline]
     pub fn take(&mut self) -> SinglyLinkedList<A>
-        where A: Clone
+    where
+        A: Clone,
     {
         let list = SinglyLinkedList {
             head: self.head,
@@ -635,11 +645,19 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
 }
 
 // Allow read-only access to values from multiple threads
-unsafe impl<A: Adapter<Link = Link> + Sync> Sync for SinglyLinkedList<A> where A::Value: Sync {}
+unsafe impl<A: Adapter<Link = Link> + Sync> Sync for SinglyLinkedList<A>
+where
+    A::Value: Sync,
+{
+}
 
 // Allow sending to another thread if the ownership (represented by the A::Pointer owned
 // pointer type) can be transferred to another thread.
-unsafe impl<A: Adapter<Link = Link> + Send> Send for SinglyLinkedList<A> where A::Pointer: Send {}
+unsafe impl<A: Adapter<Link = Link> + Send> Send for SinglyLinkedList<A>
+where
+    A::Pointer: Send,
+{
+}
 
 // Drop all owned pointers if the collection is dropped
 impl<A: Adapter<Link = Link>> Drop for SinglyLinkedList<A> {
@@ -676,7 +694,8 @@ impl<A: Adapter<Link = Link> + Default> Default for SinglyLinkedList<A> {
 }
 
 impl<A: Adapter<Link = Link>> fmt::Debug for SinglyLinkedList<A>
-    where A::Value: fmt::Debug
+where
+    A::Value: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
@@ -742,7 +761,7 @@ mod tests {
     use std::vec::Vec;
     use std::boxed::Box;
     use UnsafeRef;
-    use super::{SinglyLinkedList, Link};
+    use super::{Link, SinglyLinkedList};
     use std::fmt;
 
     struct Obj {
@@ -782,7 +801,7 @@ mod tests {
         assert_eq!(format!("{:?}", a.link2), "unlinked");
 
         assert_eq!(b.pop_front().unwrap().as_ref() as *const _,
-                   a.as_ref() as *const _);
+        a.as_ref() as *const _);
         assert!(b.is_empty());
         assert!(!a.link1.is_linked());
         assert!(!a.link2.is_linked());
@@ -800,7 +819,7 @@ mod tests {
         assert!(cur.get().is_none());
         assert!(cur.remove_next().is_none());
         assert_eq!(cur.replace_next_with(a.clone()).unwrap_err().as_ref() as *const _,
-                   a.as_ref() as *const _);
+        a.as_ref() as *const _);
 
         cur.insert_after(c.clone());
         cur.insert_after(a.clone());
@@ -831,28 +850,28 @@ mod tests {
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
 
         assert_eq!(cur.remove_next().unwrap().as_ref() as *const _,
-                   b.as_ref() as *const _);
+        b.as_ref() as *const _);
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
         cur.insert_after(b.clone());
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
         cur.move_next();
         assert_eq!(cur.get().unwrap() as *const _, b.as_ref() as *const _);
         assert_eq!(cur.remove_next().unwrap().as_ref() as *const _,
-                   c.as_ref() as *const _);
+        c.as_ref() as *const _);
         assert!(!c.link1.is_linked());
         assert!(a.link1.is_linked());
         assert_eq!(cur.get().unwrap() as *const _, b.as_ref() as *const _);
         cur.move_next();
         assert!(cur.is_null());
         assert_eq!(cur.replace_next_with(c.clone()).unwrap().as_ref() as *const _,
-                   a.as_ref() as *const _);
+        a.as_ref() as *const _);
         assert!(!a.link1.is_linked());
         assert!(c.link1.is_linked());
         assert!(cur.is_null());
         cur.move_next();
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
         assert_eq!(cur.replace_next_with(a.clone()).unwrap().as_ref() as *const _,
-                   b.as_ref() as *const _);
+        b.as_ref() as *const _);
         assert!(a.link1.is_linked());
         assert!(!b.link1.is_linked());
         assert!(c.link1.is_linked());
@@ -976,7 +995,7 @@ mod tests {
         }
         assert_eq!(v, [1, 2, 3, 4]);
         assert_eq!(l.iter().clone().map(|x| x.value).collect::<Vec<_>>(),
-                   [1, 2, 3, 4]);
+        [1, 2, 3, 4]);
         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
 
         assert_eq!(format!("{:?}", l), "[1, 2, 3, 4]");
