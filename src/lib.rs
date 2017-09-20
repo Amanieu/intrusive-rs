@@ -172,11 +172,9 @@
 //!     // Iterate over all elements in the range [min, max]
 //!     while cursor.get().map_or(false, |e| e.value <= max) {
 //!         // CursorMut::remove will return a Some(<Box<Element>), which we
-//!         // simply drop here.
+//!         // simply drop here. This will also advance the cursor to the next
+//!         // element.
 //!         cursor.remove();
-//!
-//!         // Advance to the next element
-//!         cursor.move_next();
 //!     }
 //! }
 //! # fn main() {}
