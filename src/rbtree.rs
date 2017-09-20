@@ -1729,8 +1729,10 @@ mod tests {
             assert_eq!(b.cursor_mut_from_ptr(a.as_ref()).get().unwrap().value, 1);
         }
 
-        assert_eq!(b.front_mut().remove().unwrap().as_ref() as *const _,
-        a.as_ref() as *const _);
+        assert_eq!(
+            b.front_mut().remove().unwrap().as_ref() as *const _,
+            a.as_ref() as *const _
+        );
         assert!(b.is_empty());
         assert!(!a.link.is_linked());
     }
@@ -1781,20 +1783,28 @@ mod tests {
         let a2 = make_obj(1);
         let b2 = make_obj(2);
         let c2 = make_obj(3);
-        assert_eq!(cur.replace_with(a2.clone()).unwrap().as_ref() as *const _,
-        a.as_ref() as *const _);
+        assert_eq!(
+            cur.replace_with(a2.clone()).unwrap().as_ref() as *const _,
+            a.as_ref() as *const _
+        );
         assert!(!a.link.is_linked());
         cur.move_next();
-        assert_eq!(cur.replace_with(b2.clone()).unwrap().as_ref() as *const _,
-        b.as_ref() as *const _);
+        assert_eq!(
+            cur.replace_with(b2.clone()).unwrap().as_ref() as *const _,
+            b.as_ref() as *const _
+        );
         assert!(!b.link.is_linked());
         cur.move_next();
-        assert_eq!(cur.replace_with(c2.clone()).unwrap().as_ref() as *const _,
-        c.as_ref() as *const _);
+        assert_eq!(
+            cur.replace_with(c2.clone()).unwrap().as_ref() as *const _,
+            c.as_ref() as *const _
+        );
         assert!(!c.link.is_linked());
         cur.move_next();
-        assert_eq!(cur.replace_with(c.clone()).unwrap_err().as_ref() as *const _,
-        c.as_ref() as *const _);
+        assert_eq!(
+            cur.replace_with(c.clone()).unwrap_err().as_ref() as *const _,
+            c.as_ref() as *const _
+        );
     }
 
     #[test]
@@ -1916,85 +1926,223 @@ mod tests {
             t.insert(x.clone());
         }
 
-        assert_eq!(format!("{:?}", t),
-        "{0, 10, 20, 30, 40, 50, 60, 70, 80, 90}");
+        assert_eq!(
+            format!("{:?}", t),
+            "{0, 10, 20, 30, 40, 50, 60, 70, 80, 90}"
+        );
 
-        assert_eq!(t.iter().clone().map(|x| x.value).collect::<Vec<_>>(),
-        vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
-        assert_eq!((&t).into_iter().rev().map(|x| x.value).collect::<Vec<_>>(),
-        vec![90, 80, 70, 60, 50, 40, 30, 20, 10, 0]);
-        assert_eq!(t.range(Unbounded, Unbounded).map(|x| x.value).collect::<Vec<_>>(),
-        vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
+        assert_eq!(
+            t.iter().clone().map(|x| x.value).collect::<Vec<_>>(),
+            vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]
+        );
+        assert_eq!(
+            (&t).into_iter().rev().map(|x| x.value).collect::<Vec<_>>(),
+            vec![90, 80, 70, 60, 50, 40, 30, 20, 10, 0]
+        );
+        assert_eq!(
+            t.range(Unbounded, Unbounded)
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]
+        );
 
-        assert_eq!(t.range(Included(&0), Unbounded).map(|x| x.value).collect::<Vec<_>>(),
-        vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
-        assert_eq!(t.range(Excluded(&0), Unbounded).map(|x| x.value).collect::<Vec<_>>(),
-        vec![10, 20, 30, 40, 50, 60, 70, 80, 90]);
-        assert_eq!(t.range(Included(&25), Unbounded).map(|x| x.value).collect::<Vec<_>>(),
-        vec![30, 40, 50, 60, 70, 80, 90]);
-        assert_eq!(t.range(Excluded(&25), Unbounded).map(|x| x.value).collect::<Vec<_>>(),
-        vec![30, 40, 50, 60, 70, 80, 90]);
-        assert_eq!(t.range(Included(&70), Unbounded).map(|x| x.value).collect::<Vec<_>>(),
-        vec![70, 80, 90]);
-        assert_eq!(t.range(Excluded(&70), Unbounded).map(|x| x.value).collect::<Vec<_>>(),
-        vec![80, 90]);
-        assert_eq!(t.range(Included(&100), Unbounded).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
-        assert_eq!(t.range(Excluded(&100), Unbounded).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
+        assert_eq!(
+            t.range(Included(&0), Unbounded)
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]
+        );
+        assert_eq!(
+            t.range(Excluded(&0), Unbounded)
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![10, 20, 30, 40, 50, 60, 70, 80, 90]
+        );
+        assert_eq!(
+            t.range(Included(&25), Unbounded)
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![30, 40, 50, 60, 70, 80, 90]
+        );
+        assert_eq!(
+            t.range(Excluded(&25), Unbounded)
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![30, 40, 50, 60, 70, 80, 90]
+        );
+        assert_eq!(
+            t.range(Included(&70), Unbounded)
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![70, 80, 90]
+        );
+        assert_eq!(
+            t.range(Excluded(&70), Unbounded)
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![80, 90]
+        );
+        assert_eq!(
+            t.range(Included(&100), Unbounded)
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
+        assert_eq!(
+            t.range(Excluded(&100), Unbounded)
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
 
-        assert_eq!(t.range(Unbounded, Included(&90)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
-        assert_eq!(t.range(Unbounded, Excluded(&90)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![0, 10, 20, 30, 40, 50, 60, 70, 80]);
-        assert_eq!(t.range(Unbounded, Included(&25)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![0, 10, 20]);
-        assert_eq!(t.range(Unbounded, Excluded(&25)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![0, 10, 20]);
-        assert_eq!(t.range(Unbounded, Included(&70)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![0, 10, 20, 30, 40, 50, 60, 70]);
-        assert_eq!(t.range(Unbounded, Excluded(&70)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![0, 10, 20, 30, 40, 50, 60]);
-        assert_eq!(t.range(Unbounded, Included(&-1)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
-        assert_eq!(t.range(Unbounded, Excluded(&-1)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
+        assert_eq!(
+            t.range(Unbounded, Included(&90))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![0, 10, 20, 30, 40, 50, 60, 70, 80, 90]
+        );
+        assert_eq!(
+            t.range(Unbounded, Excluded(&90))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![0, 10, 20, 30, 40, 50, 60, 70, 80]
+        );
+        assert_eq!(
+            t.range(Unbounded, Included(&25))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![0, 10, 20]
+        );
+        assert_eq!(
+            t.range(Unbounded, Excluded(&25))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![0, 10, 20]
+        );
+        assert_eq!(
+            t.range(Unbounded, Included(&70))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![0, 10, 20, 30, 40, 50, 60, 70]
+        );
+        assert_eq!(
+            t.range(Unbounded, Excluded(&70))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![0, 10, 20, 30, 40, 50, 60]
+        );
+        assert_eq!(
+            t.range(Unbounded, Included(&-1))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
+        assert_eq!(
+            t.range(Unbounded, Excluded(&-1))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
 
-        assert_eq!(t.range(Included(&25), Included(&80)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![30, 40, 50, 60, 70, 80]);
-        assert_eq!(t.range(Included(&25), Excluded(&80)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![30, 40, 50, 60, 70]);
-        assert_eq!(t.range(Excluded(&25), Included(&80)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![30, 40, 50, 60, 70, 80]);
-        assert_eq!(t.range(Excluded(&25), Excluded(&80)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![30, 40, 50, 60, 70]);
+        assert_eq!(
+            t.range(Included(&25), Included(&80))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![30, 40, 50, 60, 70, 80]
+        );
+        assert_eq!(
+            t.range(Included(&25), Excluded(&80))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![30, 40, 50, 60, 70]
+        );
+        assert_eq!(
+            t.range(Excluded(&25), Included(&80))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![30, 40, 50, 60, 70, 80]
+        );
+        assert_eq!(
+            t.range(Excluded(&25), Excluded(&80))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![30, 40, 50, 60, 70]
+        );
 
-        assert_eq!(t.range(Included(&25), Included(&25)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
-        assert_eq!(t.range(Included(&25), Excluded(&25)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
-        assert_eq!(t.range(Excluded(&25), Included(&25)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
-        assert_eq!(t.range(Excluded(&25), Excluded(&25)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
+        assert_eq!(
+            t.range(Included(&25), Included(&25))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
+        assert_eq!(
+            t.range(Included(&25), Excluded(&25))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
+        assert_eq!(
+            t.range(Excluded(&25), Included(&25))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
+        assert_eq!(
+            t.range(Excluded(&25), Excluded(&25))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
 
-        assert_eq!(t.range(Included(&50), Included(&50)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![50]);
-        assert_eq!(t.range(Included(&50), Excluded(&50)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
-        assert_eq!(t.range(Excluded(&50), Included(&50)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
-        assert_eq!(t.range(Excluded(&50), Excluded(&50)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
+        assert_eq!(
+            t.range(Included(&50), Included(&50))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![50]
+        );
+        assert_eq!(
+            t.range(Included(&50), Excluded(&50))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
+        assert_eq!(
+            t.range(Excluded(&50), Included(&50))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
+        assert_eq!(
+            t.range(Excluded(&50), Excluded(&50))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
 
-        assert_eq!(t.range(Included(&100), Included(&-2)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
-        assert_eq!(t.range(Included(&100), Excluded(&-2)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
-        assert_eq!(t.range(Excluded(&100), Included(&-2)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
-        assert_eq!(t.range(Excluded(&100), Excluded(&-2)).map(|x| x.value).collect::<Vec<_>>(),
-        vec![]);
+        assert_eq!(
+            t.range(Included(&100), Included(&-2))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
+        assert_eq!(
+            t.range(Included(&100), Excluded(&-2))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
+        assert_eq!(
+            t.range(Excluded(&100), Included(&-2))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
+        assert_eq!(
+            t.range(Excluded(&100), Excluded(&-2))
+                .map(|x| x.value)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
 
         let mut v2 = Vec::new();
         for x in t.take() {
@@ -2034,21 +2182,17 @@ mod tests {
             }
             {
                 let c = t.find(&i);
-                assert_eq!(c.get().map(|x| x.value),
-                if i % 10 == 0 {
-                    Some(i)
-                } else {
-                    None
-                });
+                assert_eq!(
+                    c.get().map(|x| x.value),
+                    if i % 10 == 0 { Some(i) } else { None }
+                );
             }
             {
                 let c = t.find_mut(&i);
-                assert_eq!(c.get().map(|x| x.value),
-                if i % 10 == 0 {
-                    Some(i)
-                } else {
-                    None
-                });
+                assert_eq!(
+                    c.get().map(|x| x.value),
+                    if i % 10 == 0 { Some(i) } else { None }
+                );
             }
             {
                 let c = t.upper_bound(Unbounded);
@@ -2060,39 +2204,39 @@ mod tests {
             }
             {
                 let c = t.upper_bound(Included(&i));
-                assert_eq!(c.get().map(|x| x.value),
-                if i >= 0 {
-                    Some(i - mod10(i))
-                } else {
-                    None
-                });
+                assert_eq!(
+                    c.get().map(|x| x.value),
+                    if i >= 0 { Some(i - mod10(i)) } else { None }
+                );
             }
             {
                 let c = t.upper_bound_mut(Included(&i));
-                assert_eq!(c.get().map(|x| x.value),
-                if i >= 0 {
-                    Some(i - mod10(i))
-                } else {
-                    None
-                });
+                assert_eq!(
+                    c.get().map(|x| x.value),
+                    if i >= 0 { Some(i - mod10(i)) } else { None }
+                );
             }
             {
                 let c = t.upper_bound(Excluded(&i));
-                assert_eq!(c.get().map(|x| x.value),
-                if i > 0 {
-                    Some(i - 1 - mod10(i - 1))
-                } else {
-                    None
-                });
+                assert_eq!(
+                    c.get().map(|x| x.value),
+                    if i > 0 {
+                        Some(i - 1 - mod10(i - 1))
+                    } else {
+                        None
+                    }
+                );
             }
             {
                 let c = t.upper_bound_mut(Excluded(&i));
-                assert_eq!(c.get().map(|x| x.value),
-                if i > 0 {
-                    Some(i - 1 - mod10(i - 1))
-                } else {
-                    None
-                });
+                assert_eq!(
+                    c.get().map(|x| x.value),
+                    if i > 0 {
+                        Some(i - 1 - mod10(i - 1))
+                    } else {
+                        None
+                    }
+                );
             }
             {
                 let c = t.lower_bound(Unbounded);
@@ -2104,39 +2248,47 @@ mod tests {
             }
             {
                 let c = t.lower_bound(Included(&i));
-                assert_eq!(c.get().map(|x| x.value),
-                if i <= 90 {
-                    Some((i + 9) - mod10(i + 9))
-                } else {
-                    None
-                });
+                assert_eq!(
+                    c.get().map(|x| x.value),
+                    if i <= 90 {
+                        Some((i + 9) - mod10(i + 9))
+                    } else {
+                        None
+                    }
+                );
             }
             {
                 let c = t.lower_bound_mut(Included(&i));
-                assert_eq!(c.get().map(|x| x.value),
-                if i <= 90 {
-                    Some((i + 9) - mod10(i + 9))
-                } else {
-                    None
-                });
+                assert_eq!(
+                    c.get().map(|x| x.value),
+                    if i <= 90 {
+                        Some((i + 9) - mod10(i + 9))
+                    } else {
+                        None
+                    }
+                );
             }
             {
                 let c = t.lower_bound(Excluded(&i));
-                assert_eq!(c.get().map(|x| x.value),
-                if i < 90 {
-                    Some((i + 10) - mod10(i + 10))
-                } else {
-                    None
-                });
+                assert_eq!(
+                    c.get().map(|x| x.value),
+                    if i < 90 {
+                        Some((i + 10) - mod10(i + 10))
+                    } else {
+                        None
+                    }
+                );
             }
             {
                 let c = t.lower_bound_mut(Excluded(&i));
-                assert_eq!(c.get().map(|x| x.value),
-                if i < 90 {
-                    Some((i + 10) - mod10(i + 10))
-                } else {
-                    None
-                });
+                assert_eq!(
+                    c.get().map(|x| x.value),
+                    if i < 90 {
+                        Some((i + 10) - mod10(i + 10))
+                    } else {
+                        None
+                    }
+                );
             }
         }
     }
@@ -2185,8 +2337,14 @@ mod tests {
             Entry::Occupied(c) => assert_eq!(c.get().unwrap().value, 2),
         }
         assert_eq!(t.entry(&2).or_insert(b.clone()).get().unwrap().value, 2);
-        assert_eq!(t.entry(&2).or_insert_with(|| b.clone()).get().unwrap().value,
-        2);
+        assert_eq!(
+            t.entry(&2)
+                .or_insert_with(|| b.clone())
+                .get()
+                .unwrap()
+                .value,
+            2
+        );
 
         match t.entry(&5) {
             Entry::Vacant(c) => assert_eq!(c.insert(e.clone()).get().unwrap().value, 5),
@@ -2195,8 +2353,14 @@ mod tests {
         assert!(e.link.is_linked());
         assert_eq!(t.entry(&4).or_insert(d.clone()).get().unwrap().value, 4);
         assert!(d.link.is_linked());
-        assert_eq!(t.entry(&6).or_insert_with(|| f.clone()).get().unwrap().value,
-        6);
+        assert_eq!(
+            t.entry(&6)
+                .or_insert_with(|| f.clone())
+                .get()
+                .unwrap()
+                .value,
+            6
+        );
         assert!(f.link.is_linked());
     }
 

@@ -1034,8 +1034,10 @@ mod tests {
         assert_eq!(format!("{:?}", a.link1), "linked");
         assert_eq!(format!("{:?}", a.link2), "unlinked");
 
-        assert_eq!(b.front_mut().remove().unwrap().as_ref() as *const _,
-        a.as_ref() as *const _);
+        assert_eq!(
+            b.front_mut().remove().unwrap().as_ref() as *const _,
+            a.as_ref() as *const _
+        );
         assert!(b.is_empty());
         assert!(!a.link1.is_linked());
         assert!(!a.link2.is_linked());
@@ -1052,8 +1054,10 @@ mod tests {
         assert!(cur.is_null());
         assert!(cur.get().is_none());
         assert!(cur.remove().is_none());
-        assert_eq!(cur.replace_with(a.clone()).unwrap_err().as_ref() as *const _,
-        a.as_ref() as *const _);
+        assert_eq!(
+            cur.replace_with(a.clone()).unwrap_err().as_ref() as *const _,
+            a.as_ref() as *const _
+        );
 
         cur.insert_before(a.clone());
         cur.insert_before(c.clone());
@@ -1088,26 +1092,34 @@ mod tests {
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
 
         cur.move_next();
-        assert_eq!(cur.remove().unwrap().as_ref() as *const _,
-        b.as_ref() as *const _);
+        assert_eq!(
+            cur.remove().unwrap().as_ref() as *const _,
+            b.as_ref() as *const _
+        );
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
         cur.insert_after(b.clone());
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
         cur.move_prev();
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
-        assert_eq!(cur.remove().unwrap().as_ref() as *const _,
-        a.as_ref() as *const _);
+        assert_eq!(
+            cur.remove().unwrap().as_ref() as *const _,
+            a.as_ref() as *const _
+        );
         assert!(!a.link1.is_linked());
         assert!(c.link1.is_linked());
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
-        assert_eq!(cur.replace_with(a.clone()).unwrap().as_ref() as *const _,
-        c.as_ref() as *const _);
+        assert_eq!(
+            cur.replace_with(a.clone()).unwrap().as_ref() as *const _,
+            c.as_ref() as *const _
+        );
         assert!(a.link1.is_linked());
         assert!(!c.link1.is_linked());
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
         cur.move_next();
-        assert_eq!(cur.replace_with(c.clone()).unwrap().as_ref() as *const _,
-        b.as_ref() as *const _);
+        assert_eq!(
+            cur.replace_with(c.clone()).unwrap().as_ref() as *const _,
+            b.as_ref() as *const _
+        );
         assert!(a.link1.is_linked());
         assert!(!b.link1.is_linked());
         assert!(c.link1.is_linked());
@@ -1240,10 +1252,14 @@ mod tests {
             v.push(x.value);
         }
         assert_eq!(v, [1, 2, 3, 4]);
-        assert_eq!(l.iter().clone().map(|x| x.value).collect::<Vec<_>>(),
-        [1, 2, 3, 4]);
-        assert_eq!(l.iter().rev().map(|x| x.value).collect::<Vec<_>>(),
-        [4, 3, 2, 1]);
+        assert_eq!(
+            l.iter().clone().map(|x| x.value).collect::<Vec<_>>(),
+            [1, 2, 3, 4]
+        );
+        assert_eq!(
+            l.iter().rev().map(|x| x.value).collect::<Vec<_>>(),
+            [4, 3, 2, 1]
+        );
         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
 
         assert_eq!(format!("{:?}", l), "[1, 2, 3, 4]");
