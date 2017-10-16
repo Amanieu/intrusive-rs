@@ -127,6 +127,7 @@ macro_rules! container_of {
 /// `get_value` and `get_link` methods for a given named field in a struct.
 ///
 /// The basic syntax to create an adapter is:
+///
 /// ```rust,ignore
 /// intrusive_adapter!(Adapter = Pointer: Value { link_field: LinkType });
 /// ```
@@ -134,6 +135,7 @@ macro_rules! container_of {
 /// # Generics
 ///
 /// This macro supports generic arguments:
+///
 /// ```rust,ignore
 /// intrusive_adapter!(
 ///     Adapter<'lifetime, Type, Type2: ?Sized> =
