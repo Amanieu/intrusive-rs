@@ -56,11 +56,8 @@ pub unsafe trait Adapter {
 
 /// Macro to get the offset of a struct field in bytes from the address of the
 /// struct.
-///
-/// This macro is identical to `offset_of!` but doesn't give a warning about
-/// unnecessary unsafe blocks when invoked from unsafe code.
 #[macro_export]
-macro_rules! offset_of_unsafe {
+macro_rules! offset_of {
     ($container:path, $field:ident) => {{
         // Make sure the field actually exists. This line ensures that a
         // compile-time error is generated if $field is accessed through a
@@ -70,23 +67,12 @@ macro_rules! offset_of_unsafe {
         // Create an instance of the container and calculate the offset to its
         // field. Although we are creating references to uninitialized data this
         // is fine since we are not dereferencing them.
-        let val: $container = $crate::__core::mem::uninitialized();
+        #[allow(unused_unsafe)]
+        let val: $container = unsafe { $crate::__core::mem::uninitialized() };
         let result = &val.$field as *const _ as usize - &val as *const _ as usize;
         $crate::__core::mem::forget(val);
         result as isize
     }};
-}
-
-/// Macro to get the offset of a struct field in bytes from the address of the
-/// struct.
-///
-/// This macro will cause a warning if it is invoked in an unsafe block. Use the
-/// `offset_of_unsafe` macro instead to avoid this warning.
-#[macro_export]
-macro_rules! offset_of {
-    ($container:path, $field:ident) => {
-        unsafe { offset_of_unsafe!($container, $field) }
-    };
 }
 
 /// Unsafe macro to get a raw pointer to an outer object from a pointer to one
@@ -112,7 +98,7 @@ macro_rules! offset_of {
 #[macro_export]
 macro_rules! container_of {
     ($ptr:expr, $container:path, $field:ident) => {
-        ($ptr as *const _ as *const u8).offset(-offset_of_unsafe!($container, $field)) as *mut $container
+        ($ptr as *const _ as *const u8).offset(-offset_of!($container, $field)) as *mut $container
     };
 }
 
