@@ -62,6 +62,7 @@ macro_rules! offset_of {
         // Make sure the field actually exists. This line ensures that a
         // compile-time error is generated if $field is accessed through a
         // Deref impl.
+        #[cfg_attr(feature = "cargo-clippy", allow(unneeded_field_pattern))]
         let $container { $field : _, .. };
 
         // Create an instance of the container and calculate the offset to its
