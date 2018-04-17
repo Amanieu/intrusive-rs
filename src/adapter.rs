@@ -63,7 +63,7 @@ macro_rules! offset_of {
         // compile-time error is generated if $field is accessed through a
         // Deref impl.
         #[cfg_attr(feature = "cargo-clippy", allow(unneeded_field_pattern))]
-        let $container { $field : _, .. };
+        let $container { $field: _, .. };
 
         // Create an instance of the container and calculate the offset to its
         // field. Although we are creating references to uninitialized data this
@@ -99,7 +99,11 @@ macro_rules! offset_of {
 #[macro_export]
 macro_rules! container_of {
     ($ptr:expr, $container:path, $field:ident) => {
-        ($ptr as *const _ as *const u8).offset(-offset_of!($container, $field)) as *mut $container
+        #[cfg_attr(feature = "cargo-clippy", allow(cast_ptr_alignment))]
+        {
+            ($ptr as *const _ as *const u8).offset(-offset_of!($container, $field))
+                as *mut $container
+        }
     };
 }
 
