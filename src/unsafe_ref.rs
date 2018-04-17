@@ -10,7 +10,7 @@ use alloc::boxed::Box;
 use core::borrow::Borrow;
 use core::fmt;
 #[cfg(feature = "nightly")]
-use core::nonzero::NonZero;
+use core::ptr::NonNull;
 use core::ops::Deref;
 
 /// Unchecked shared pointer
@@ -24,7 +24,7 @@ use core::ops::Deref;
 /// one `UnsafeRef` is pointing to it.
 pub struct UnsafeRef<T: ?Sized> {
     #[cfg(feature = "nightly")]
-    ptr: NonZero<*mut T>,
+    ptr: NonNull<T>,
     #[cfg(not(feature = "nightly"))]
     ptr: *mut T,
 }
@@ -39,14 +39,14 @@ impl<T: ?Sized> UnsafeRef<T> {
     #[inline]
     pub unsafe fn from_raw(val: *const T) -> UnsafeRef<T> {
         UnsafeRef {
-            ptr: NonZero::new_unchecked(val as *mut _),
+            ptr: NonNull::new_unchecked(val as *mut _),
         }
     }
 
     /// Converts an `UnsafeRef` into a raw pointer
     #[inline]
     pub fn into_raw(ptr: Self) -> *mut T {
-        ptr.ptr.get()
+        ptr.ptr.as_ptr()
     }
 }
 
@@ -111,7 +111,7 @@ impl<T: ?Sized> AsRef<T> for UnsafeRef<T> {
     #[cfg(feature = "nightly")]
     #[inline]
     fn as_ref(&self) -> &T {
-        unsafe { &*self.ptr.get() }
+        unsafe { self.ptr.as_ref() }
     }
 
     #[cfg(not(feature = "nightly"))]
