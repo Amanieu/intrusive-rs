@@ -7,11 +7,11 @@
 
 //! Intrusive doubly-linked list.
 
+use core::cell::Cell;
+use core::fmt;
+use core::ptr;
 use Adapter;
 use IntrusivePointer;
-use core::ptr;
-use core::fmt;
-use core::cell::Cell;
 
 // =============================================================================
 // Link
@@ -658,7 +658,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
         LinkedList {
             head: NodePtr(ptr::null()),
             tail: NodePtr(ptr::null()),
-            adapter: adapter,
+            adapter,
         }
     }
 
@@ -669,7 +669,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
         LinkedList {
             head: NodePtr::null(),
             tail: NodePtr::null(),
-            adapter: adapter,
+            adapter,
         }
     }
 
@@ -990,12 +990,12 @@ impl<A: Adapter<Link = Link>> DoubleEndedIterator for IntoIter<A> {
 
 #[cfg(test)]
 mod tests {
-    use std::vec::Vec;
-    use std::boxed::Box;
-    use UnsafeRef;
     use super::{Link, LinkedList};
+    use std::boxed::Box;
     use std::fmt;
     use std::marker::PhantomData;
+    use std::vec::Vec;
+    use UnsafeRef;
 
     #[derive(Clone)]
     struct Obj {

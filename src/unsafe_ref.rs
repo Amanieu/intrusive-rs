@@ -7,11 +7,11 @@
 
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
+use core::borrow::Borrow;
+use core::fmt;
 #[cfg(feature = "nightly")]
 use core::nonzero::NonZero;
 use core::ops::Deref;
-use core::borrow::Borrow;
-use core::fmt;
 
 /// Unchecked shared pointer
 ///
@@ -23,8 +23,10 @@ use core::fmt;
 /// moved, dropped or accessed through a mutable reference as long as at least
 /// one `UnsafeRef` is pointing to it.
 pub struct UnsafeRef<T: ?Sized> {
-    #[cfg(feature = "nightly")] ptr: NonZero<*mut T>,
-    #[cfg(not(feature = "nightly"))] ptr: *mut T,
+    #[cfg(feature = "nightly")]
+    ptr: NonZero<*mut T>,
+    #[cfg(not(feature = "nightly"))]
+    ptr: *mut T,
 }
 
 #[cfg(feature = "nightly")]

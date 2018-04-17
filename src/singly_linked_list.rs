@@ -7,11 +7,11 @@
 
 //! Intrusive singly-linked list.
 
+use core::cell::Cell;
+use core::fmt;
+use core::ptr;
 use Adapter;
 use IntrusivePointer;
-use core::ptr;
-use core::fmt;
-use core::cell::Cell;
 
 // =============================================================================
 // Link
@@ -493,7 +493,7 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
     pub const fn new(adapter: A) -> SinglyLinkedList<A> {
         SinglyLinkedList {
             head: NodePtr(ptr::null()),
-            adapter: adapter,
+            adapter,
         }
     }
 
@@ -503,7 +503,7 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
     pub fn new(adapter: A) -> SinglyLinkedList<A> {
         SinglyLinkedList {
             head: NodePtr::null(),
-            adapter: adapter,
+            adapter,
         }
     }
 
@@ -758,11 +758,11 @@ impl<A: Adapter<Link = Link>> Iterator for IntoIter<A> {
 
 #[cfg(test)]
 mod tests {
-    use std::vec::Vec;
-    use std::boxed::Box;
-    use UnsafeRef;
     use super::{Link, SinglyLinkedList};
+    use std::boxed::Box;
     use std::fmt;
+    use std::vec::Vec;
+    use UnsafeRef;
 
     struct Obj {
         link1: Link,

@@ -5,16 +5,16 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-#[cfg(feature = "alloc")]
-use core::{mem, ptr};
+#[cfg(all(feature = "nightly", feature = "alloc"))]
+use alloc::arc::Arc;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
 use alloc::rc::Rc;
 #[cfg(all(not(feature = "nightly"), feature = "alloc"))]
 use alloc::sync::Arc;
-#[cfg(all(feature = "nightly", feature = "alloc"))]
-use alloc::arc::Arc;
+#[cfg(feature = "alloc")]
+use core::{mem, ptr};
 use UnsafeRef;
 
 /// Trait representing an owned pointer type which can be converted to and from
@@ -137,12 +137,12 @@ unsafe impl<T: ?Sized> IntrusivePointer<T> for Arc<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-    use std::boxed::Box;
-    use std::sync::Arc;
     use super::IntrusivePointer;
+    use std::boxed::Box;
     use std::fmt::Debug;
     use std::mem;
+    use std::rc::Rc;
+    use std::sync::Arc;
 
     #[test]
     fn test_box() {

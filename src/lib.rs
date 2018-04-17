@@ -273,8 +273,10 @@
 
 #![warn(missing_docs)]
 #![no_std]
-#![cfg_attr(feature = "nightly",
-           feature(const_fn, nonzero, allow_internal_unstable, const_cell_new, const_ptr_null))]
+#![cfg_attr(
+    feature = "nightly",
+    feature(const_fn, nonzero, allow_internal_unstable, const_cell_new, const_ptr_null)
+)]
 #![cfg_attr(all(feature = "nightly", feature = "alloc"), feature(alloc))]
 
 // Use liballoc on nightly to avoid a dependency on libstd
@@ -291,25 +293,25 @@ extern crate std;
 #[doc(hidden)]
 pub extern crate core as __core;
 
-mod unsafe_ref;
 mod intrusive_pointer;
+mod unsafe_ref;
 #[macro_use]
 mod adapter;
 mod key_adapter;
-pub mod singly_linked_list;
 pub mod linked_list;
 pub mod rbtree;
+pub mod singly_linked_list;
 
-pub use singly_linked_list::SinglyLinkedList;
-pub use singly_linked_list::Link as SinglyLinkedListLink;
-pub use linked_list::LinkedList;
-pub use linked_list::Link as LinkedListLink;
-pub use rbtree::RBTree;
-pub use rbtree::Link as RBTreeLink;
-pub use unsafe_ref::UnsafeRef;
-pub use intrusive_pointer::IntrusivePointer;
 pub use adapter::Adapter;
+pub use intrusive_pointer::IntrusivePointer;
 pub use key_adapter::KeyAdapter;
+pub use linked_list::Link as LinkedListLink;
+pub use linked_list::LinkedList;
+pub use rbtree::Link as RBTreeLink;
+pub use rbtree::RBTree;
+pub use singly_linked_list::Link as SinglyLinkedListLink;
+pub use singly_linked_list::SinglyLinkedList;
+pub use unsafe_ref::UnsafeRef;
 
 /// An endpoint of a range of keys.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]

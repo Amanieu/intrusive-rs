@@ -7,15 +7,15 @@
 
 //! Intrusive red-black tree.
 
-use {Adapter, KeyAdapter};
-use IntrusivePointer;
-use Bound::{self, Excluded, Included, Unbounded};
-use core::ptr;
+use core::borrow::Borrow;
+use core::cell::Cell;
+use core::cmp::Ordering;
 use core::fmt;
 use core::mem;
-use core::cell::Cell;
-use core::borrow::Borrow;
-use core::cmp::Ordering;
+use core::ptr;
+use Bound::{self, Excluded, Included, Unbounded};
+use IntrusivePointer;
+use {Adapter, KeyAdapter};
 
 // =============================================================================
 // Link
@@ -448,8 +448,8 @@ impl NodePtr {
                             w.parent().rotate_left(root);
                             w = w.left().right();
                         }
-                        if (w.left().is_null() || w.left().color() == Color::Black) &&
-                            (w.right().is_null() || w.right().color() == Color::Black)
+                        if (w.left().is_null() || w.left().color() == Color::Black)
+                            && (w.right().is_null() || w.right().color() == Color::Black)
                         {
                             w.set_color(Color::Red);
                             x = w.parent();
@@ -482,8 +482,8 @@ impl NodePtr {
                             w.parent().rotate_right(root);
                             w = w.right().left();
                         }
-                        if (w.left().is_null() || w.left().color() == Color::Black) &&
-                            (w.right().is_null() || w.right().color() == Color::Black)
+                        if (w.left().is_null() || w.left().color() == Color::Black)
+                            && (w.right().is_null() || w.right().color() == Color::Black)
                         {
                             w.set_color(Color::Red);
                             x = w.parent();
@@ -883,7 +883,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     pub const fn new(adapter: A) -> RBTree<A> {
         RBTree {
             root: NodePtr(ptr::null()),
-            adapter: adapter,
+            adapter,
         }
     }
 
@@ -893,7 +893,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     pub fn new(adapter: A) -> RBTree<A> {
         RBTree {
             root: NodePtr::null(),
-            adapter: adapter,
+            adapter,
         }
     }
 
@@ -1673,13 +1673,13 @@ impl<A: Adapter<Link = Link>> DoubleEndedIterator for IntoIter<A> {
 
 #[cfg(test)]
 mod tests {
-    use std::vec::Vec;
-    use std::boxed::Box;
-    use {KeyAdapter, UnsafeRef};
-    use Bound::*;
     use super::{Entry, Link, RBTree};
+    use std::boxed::Box;
     use std::fmt;
     use std::marker::PhantomData;
+    use std::vec::Vec;
+    use Bound::*;
+    use {KeyAdapter, UnsafeRef};
     extern crate rand;
     use self::rand::{Rng, XorShiftRng};
 
