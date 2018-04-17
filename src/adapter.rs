@@ -71,6 +71,7 @@ macro_rules! offset_of {
         #[allow(unused_unsafe)]
         let val: $container = unsafe { $crate::__core::mem::uninitialized() };
         let result = &val.$field as *const _ as usize - &val as *const _ as usize;
+        #[cfg_attr(feature = "cargo-clippy", allow(forget_copy))]
         $crate::__core::mem::forget(val);
         result as isize
     }};
@@ -245,6 +246,7 @@ macro_rules! intrusive_adapter {
 /// `get_value` and `get_link` methods for a given named field in a struct.
 ///
 /// The basic syntax to create an adapter is:
+///
 /// ```rust,ignore
 /// intrusive_adapter!(Adapter = Pointer: Value { link_field: LinkType });
 /// ```
@@ -252,6 +254,7 @@ macro_rules! intrusive_adapter {
 /// # Generics
 ///
 /// This macro supports generic arguments:
+///
 /// ```rust,ignore
 /// intrusive_adapter!(Adapter<'lifetime, Type, Type2: ?Sized> = Pointer: Value { link_field: LinkType } where Type: Copy, Type2: 'lifetiem);
 /// ```
