@@ -119,11 +119,6 @@ impl NodePtr {
     }
 
     #[inline]
-    unsafe fn is_linked(self) -> bool {
-        self.next() != UNLINKED_MARKER
-    }
-
-    #[inline]
     unsafe fn next(self) -> NodePtr {
         (*self.0).next.get()
     }
@@ -364,11 +359,7 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
             if next.is_null() {
                 return Err(val);
             }
-            let new = NodePtr(self.list.adapter.get_link(val.into_raw()));
-            assert!(
-                !new.is_linked(),
-                "attempted to insert an object that is already linked"
-            );
+            let new = self.list.node_from_value(val);
             if self.is_null() {
                 self.list.head = new;
             }
@@ -389,11 +380,7 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     #[inline]
     pub fn insert_after(&mut self, val: A::Pointer) {
         unsafe {
-            let new = NodePtr(self.list.adapter.get_link(val.into_raw()));
-            assert!(
-                !new.is_linked(),
-                "attempted to insert an object that is already linked"
-            );
+            let new = self.list.node_from_value(val);
             if self.is_null() {
                 new.link_between(NodePtr::null(), self.list.head);
                 self.list.head = new;
@@ -487,6 +474,17 @@ pub struct SinglyLinkedList<A: Adapter<Link = Link>> {
 }
 
 impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
+    #[inline]
+    fn node_from_value(&self, val: A::Pointer) -> NodePtr {
+        unsafe {
+            assert!(
+                !(*self.adapter.get_link(&*val)).is_linked(),
+                "attempted to insert an object that is already linked"
+            );
+            NodePtr(self.adapter.get_link(val.into_raw()))
+        }
+    }
+
     /// Creates an empty `SinglyLinkedList`.
     #[cfg(feature = "nightly")]
     #[inline]

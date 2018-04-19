@@ -135,11 +135,6 @@ impl NodePtr {
     }
 
     #[inline]
-    unsafe fn is_linked(self) -> bool {
-        (*self.0).parent_color.get() != UNLINKED_MARKER
-    }
-
-    #[inline]
     unsafe fn unlink(self) {
         (*self.0).parent_color.set(UNLINKED_MARKER);
     }
@@ -748,11 +743,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
             return Err(val);
         }
         unsafe {
-            let new = NodePtr(self.tree.adapter.get_link(val.into_raw()));
-            assert!(
-                !new.is_linked(),
-                "attempted to insert an object that is already linked"
-            );
+            let new = self.tree.node_from_value(val);
             let result = self.current.0;
             self.current.replace_with(new, &mut self.tree.root);
             self.current = new;
@@ -777,11 +768,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     #[inline]
     pub fn insert_after(&mut self, val: A::Pointer) {
         unsafe {
-            let new = NodePtr(self.tree.adapter.get_link(val.into_raw()));
-            assert!(
-                !new.is_linked(),
-                "attempted to insert an object that is already linked"
-            );
+            let new = self.tree.node_from_value(val);
             if self.tree.is_empty() {
                 self.tree.insert_root(new);
             } else if self.is_null() {
@@ -814,11 +801,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     #[inline]
     pub fn insert_before(&mut self, val: A::Pointer) {
         unsafe {
-            let new = NodePtr(self.tree.adapter.get_link(val.into_raw()));
-            assert!(
-                !new.is_linked(),
-                "attempted to insert an object that is already linked"
-            );
+            let new = self.tree.node_from_value(val);
             if self.tree.is_empty() {
                 self.tree.insert_root(new);
             } else if self.is_null() {
@@ -877,6 +860,17 @@ pub struct RBTree<A: Adapter<Link = Link>> {
 }
 
 impl<A: Adapter<Link = Link>> RBTree<A> {
+    #[inline]
+    fn node_from_value(&self, val: A::Pointer) -> NodePtr {
+        unsafe {
+            assert!(
+                !(*self.adapter.get_link(&*val)).is_linked(),
+                "attempted to insert an object that is already linked"
+            );
+            NodePtr(self.adapter.get_link(val.into_raw()))
+        }
+    }
+
     /// Creates an empty `RBTree`.
     #[cfg(feature = "nightly")]
     #[inline]
@@ -1238,12 +1232,8 @@ impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
         <A as KeyAdapter<'a>>::Key: Ord,
     {
         unsafe {
-            let raw = val.into_raw();
-            let new = NodePtr(self.adapter.get_link(raw));
-            assert!(
-                !new.is_linked(),
-                "attempted to insert an object that is already linked"
-            );
+            let raw = &*val as *const _;
+            let new = self.node_from_value(val);
             if self.is_empty() {
                 self.insert_root(new);
             } else {
@@ -1460,12 +1450,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> InsertCursor<'a, A> {
     /// collection.
     pub fn insert(self, val: A::Pointer) -> CursorMut<'a, A> {
         unsafe {
-            let raw = val.into_raw();
-            let new = NodePtr(self.tree.adapter.get_link(raw));
-            assert!(
-                !new.is_linked(),
-                "attempted to insert an object that is already linked"
-            );
+            let new = self.tree.node_from_value(val);
             if self.parent.is_null() {
                 self.tree.insert_root(new);
             } else if self.insert_left {
@@ -1611,7 +1596,6 @@ impl<A: Adapter<Link = Link>> Iterator for IntoIter<A> {
                 let head = self.head;
                 let parent = head.parent();
                 let right = head.right();
-                assert!(head.left().is_null());
                 if parent.is_null() {
                     self.tree.root = right;
                     if right.is_null() {

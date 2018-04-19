@@ -9,9 +9,9 @@
 use alloc::boxed::Box;
 use core::borrow::Borrow;
 use core::fmt;
+use core::ops::Deref;
 #[cfg(feature = "nightly")]
 use core::ptr::NonNull;
-use core::ops::Deref;
 
 /// Unchecked shared pointer
 ///

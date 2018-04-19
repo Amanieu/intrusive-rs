@@ -13,6 +13,7 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 #[cfg(all(not(feature = "nightly"), feature = "alloc"))]
 use alloc::sync::Arc;
+use core::ops::Deref;
 #[cfg(feature = "alloc")]
 use core::{mem, ptr};
 use UnsafeRef;
@@ -28,9 +29,15 @@ use UnsafeRef;
 /// because the lifetime of an intrusive collection is limited to that of the
 /// pointer type. This means that a collection of `&'a T` cannot outlive any
 /// objects that are inserted into the collection.
-pub unsafe trait IntrusivePointer<T: ?Sized> {
+pub unsafe trait IntrusivePointer<T: ?Sized>: Deref<Target = T> + Sized {
     /// Consumes the owned pointer and returns a raw pointer to the owned object.
-    fn into_raw(self) -> *const T;
+    ///
+    /// The returned pointer must be the same as the one returned by `Deref`.
+    fn into_raw(self) -> *const T {
+        let ptr = self.deref() as *const _;
+        mem::forget(self);
+        ptr
+    }
 
     /// Constructs an owned pointer from a raw pointer which was previously
     /// returned by `into_raw`.
