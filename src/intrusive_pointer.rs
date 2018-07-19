@@ -5,13 +5,11 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-#[cfg(all(feature = "nightly", feature = "alloc"))]
-use alloc::arc::Arc;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
 use alloc::rc::Rc;
-#[cfg(all(not(feature = "nightly"), feature = "alloc"))]
+#[cfg(feature = "alloc")]
 use alloc::sync::Arc;
 use core::ops::Deref;
 #[cfg(feature = "alloc")]
