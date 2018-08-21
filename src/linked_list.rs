@@ -841,19 +841,11 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
 }
 
 // Allow read-only access from multiple threads
-unsafe impl<A: Adapter<Link = Link> + Sync> Sync for LinkedList<A>
-where
-    A::Value: Sync,
-{
-}
+unsafe impl<A: Adapter<Link = Link> + Sync> Sync for LinkedList<A> where A::Value: Sync {}
 
 // Allow sending to another thread if the ownership (represented by the A::Pointer owned
 // pointer type) can be transferred to another thread.
-unsafe impl<A: Adapter<Link = Link> + Send> Send for LinkedList<A>
-where
-    A::Pointer: Send,
-{
-}
+unsafe impl<A: Adapter<Link = Link> + Send> Send for LinkedList<A> where A::Pointer: Send {}
 
 // Drop all owned pointers if the collection is dropped
 impl<A: Adapter<Link = Link>> Drop for LinkedList<A> {

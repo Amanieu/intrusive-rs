@@ -275,7 +275,7 @@
 #![no_std]
 #![cfg_attr(
     feature = "nightly",
-    feature(const_fn, nonzero, allow_internal_unstable, const_cell_new, const_ptr_null)
+    feature(const_fn, allow_internal_unstable)
 )]
 #![cfg_attr(all(feature = "nightly", feature = "alloc"), feature(alloc))]
 
