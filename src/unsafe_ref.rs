@@ -45,7 +45,7 @@ impl<T: ?Sized> UnsafeRef<T> {
 
     /// Converts an `UnsafeRef` into a raw pointer
     #[inline]
-    pub fn into_raw(ptr: Self) -> *mut T {
+    pub fn into_raw(ptr: &Self) -> *mut T {
         ptr.ptr.as_ptr()
     }
 }
