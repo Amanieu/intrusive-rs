@@ -1248,13 +1248,11 @@ impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
                         } else {
                             tree = tree.left();
                         }
-                    } else {
-                        if tree.right().is_null() {
+                    } else if tree.right().is_null() {
                             tree.insert_right(new, &mut self.root);
                             break;
-                        } else {
-                            tree = tree.right();
-                        }
+                    } else {
+                        tree = tree.right();
                     }
                 }
             }
@@ -1679,7 +1677,7 @@ mod tests {
     fn make_obj(value: i32) -> UnsafeRef<Obj> {
         UnsafeRef::from_box(Box::new(Obj {
             link: Link::new(),
-            value: value,
+            value,
         }))
     }
 

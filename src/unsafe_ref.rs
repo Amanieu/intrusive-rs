@@ -64,7 +64,7 @@ impl<T: ?Sized> UnsafeRef<T> {
 
     /// Converts an `UnsafeRef` into a raw pointer
     #[inline]
-    pub fn into_raw(ptr: Self) -> *mut T {
+    pub fn into_raw(ptr: &Self) -> *mut T {
         ptr.ptr
     }
 }
@@ -86,8 +86,8 @@ impl<T: ?Sized> UnsafeRef<T> {
     /// collections. This operation is only valid if the `UnsafeRef` was
     /// created using `UnsafeRef::from_box`.
     #[inline]
-    pub unsafe fn into_box(ptr: Self) -> Box<T> {
-        Box::from_raw(UnsafeRef::into_raw(ptr))
+    pub unsafe fn into_box(ptr: &Self) -> Box<T> {
+        Box::from_raw(UnsafeRef::into_raw(&ptr))
     }
 }
 

@@ -770,7 +770,7 @@ mod tests {
         UnsafeRef::from_box(Box::new(Obj {
             link1: Link::new(),
             link2: Link::default(),
-            value: value,
+            value,
         }))
     }
 

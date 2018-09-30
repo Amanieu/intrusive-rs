@@ -56,7 +56,7 @@ unsafe impl<'a, T: ?Sized> IntrusivePointer<T> for &'a T {
 unsafe impl<T: ?Sized> IntrusivePointer<T> for UnsafeRef<T> {
     #[inline]
     fn into_raw(self) -> *const T {
-        UnsafeRef::into_raw(self)
+        UnsafeRef::into_raw(&self)
     }
     #[inline]
     unsafe fn from_raw(ptr: *const T) -> Self {
