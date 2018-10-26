@@ -260,7 +260,7 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a A::Value> {
+    pub fn get(&self) -> Option<&A::Value> {
         if self.is_null() {
             None
         } else {

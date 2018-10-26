@@ -625,7 +625,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a A::Value> {
+    pub fn get(&self) -> Option<&A::Value> {
         if self.is_null() {
             None
         } else {
@@ -1855,8 +1855,12 @@ mod tests {
             for i in indices {
                 {
                     let mut c = t.front_mut();
-                    while let Some(x) = c.get() {
-                        if x.value > v[i].value {
+                    loop {
+                        if let Some(x) = c.get() {
+                            if x.value > v[i].value {
+                                break;
+                            }
+                        } else {
                             break;
                         }
                         c.move_next();
@@ -1879,8 +1883,12 @@ mod tests {
             for i in indices {
                 {
                     let mut c = t.back_mut();
-                    while let Some(x) = c.get() {
-                        if x.value < v[i].value {
+                    loop {
+                        if let Some(x) = c.get() {
+                            if x.value < v[i].value {
+                                break;
+                            }
+                        } else {
                             break;
                         }
                         c.move_prev();
