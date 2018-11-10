@@ -176,10 +176,20 @@ macro_rules! intrusive_adapter {
         ($($privacy:tt)*) $name:ident ($($args:tt $(: ?$bound:tt)*),*)
         = $pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*
     ) => {
-        #[derive(Clone, Default)]
         $($privacy)* struct $name<$($args),*>($crate::__core::marker::PhantomData<$pointer>) $($where_)*;
         unsafe impl<$($args $(: ?$bound)*),*> Send for $name<$($args),*> $($where_)* {}
         unsafe impl<$($args $(: ?$bound)*),*> Sync for $name<$($args),*> $($where_)* {}
+        impl<$($args $(: ?$bound)*),*> Copy for $name<$($args),*> $($where_)* {}
+        impl<$($args $(: ?$bound)*),*> Clone for $name<$($args),*> $($where_)* {
+            fn clone(&self) -> Self {
+                *self
+            }
+        }
+        impl<$($args $(: ?$bound)*),*> Default for $name<$($args),*> $($where_)* {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
         #[allow(dead_code)]
         impl<$($args $(: ?$bound)*),*> $name<$($args),*> $($where_)* {
             pub const fn new() -> Self {
@@ -294,10 +304,20 @@ macro_rules! intrusive_adapter {
         ($($privacy:tt)*) $name:ident ($($args:tt $(: ?$bound:tt)*),*)
         = $pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*
     ) => {
-        #[derive(Clone, Default)]
         $($privacy)* struct $name<$($args),*>($crate::__core::marker::PhantomData<$pointer>) $($where_)*;
         unsafe impl<$($args $(: ?$bound)*),*> Send for $name<$($args),*> $($where_)* {}
         unsafe impl<$($args $(: ?$bound)*),*> Sync for $name<$($args),*> $($where_)* {}
+        impl<$($args $(: ?$bound)*),*> Copy for $name<$($args),*> $($where_)* {}
+        impl<$($args $(: ?$bound)*),*> Clone for $name<$($args),*> $($where_)* {
+            fn clone(&self) -> Self {
+                *self
+            }
+        }
+        impl<$($args $(: ?$bound)*),*> Default for $name<$($args),*> $($where_)* {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
         #[allow(dead_code)]
         impl<$($args $(: ?$bound)*),*> $name<$($args),*> $($where_)* {
             pub fn new() -> Self {
