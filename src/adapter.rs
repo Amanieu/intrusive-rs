@@ -97,7 +97,7 @@ macro_rules! offset_of {
 ///
 /// This is unsafe because it assumes that the given expression is a valid
 /// pointer to the specified field of some container type.
-#[macro_export]
+#[macro_export(local_inner_macros)]
 macro_rules! container_of {
     ($ptr:expr, $container:path, $field:ident) => {
         #[cfg_attr(feature = "cargo-clippy", allow(cast_ptr_alignment))]
@@ -169,7 +169,7 @@ macro_rules! container_of {
 /// # fn main() {}
 /// ```
 #[cfg(feature = "nightly")]
-#[macro_export]
+#[macro_export(local_inner_macros)]
 #[allow_internal_unstable]
 macro_rules! intrusive_adapter {
     (@impl
@@ -298,7 +298,7 @@ macro_rules! intrusive_adapter {
 /// # fn main() {}
 /// ```
 #[cfg(not(feature = "nightly"))]
-#[macro_export]
+#[macro_export(local_inner_macros)]
 macro_rules! intrusive_adapter {
     (@impl
         ($($privacy:tt)*) $name:ident ($($args:tt $(: ?$bound:tt)*),*)
