@@ -667,7 +667,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
         }
     }
 
-    /// Returns `true if the `LinkedList` is empty.
+    /// Returns `true` if the `LinkedList` is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.head.is_null()

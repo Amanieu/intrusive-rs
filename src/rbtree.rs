@@ -891,7 +891,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
         }
     }
 
-    /// Returns `true if the `RBTree` is empty.
+    /// Returns `true` if the `RBTree` is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.root.is_null()

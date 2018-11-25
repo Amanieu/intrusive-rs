@@ -505,7 +505,7 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
         }
     }
 
-    /// Returns `true if the `SinglyLinkedList` is empty.
+    /// Returns `true` if the `SinglyLinkedList` is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.head.is_null()
