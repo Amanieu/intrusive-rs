@@ -13,7 +13,8 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::ops::Deref;
 #[cfg(feature = "alloc")]
-use core::{mem, ptr};
+use core::ptr;
+use core::mem;
 use UnsafeRef;
 
 /// Trait representing an owned pointer type which can be converted to and from
