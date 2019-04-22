@@ -1292,30 +1292,34 @@ impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
                 loop {
                     let current = &*self.adapter.get_value(tree.0);
                     match key.cmp(self.adapter.get_key(current).borrow()) {
-                        Ordering::Less => if tree.left().is_null() {
-                            return Entry::Vacant(InsertCursor {
-                                parent: tree,
-                                insert_left: true,
-                                tree: self,
-                            });
-                        } else {
-                            tree = tree.left();
-                        },
+                        Ordering::Less => {
+                            if tree.left().is_null() {
+                                return Entry::Vacant(InsertCursor {
+                                    parent: tree,
+                                    insert_left: true,
+                                    tree: self,
+                                });
+                            } else {
+                                tree = tree.left();
+                            }
+                        }
                         Ordering::Equal => {
                             return Entry::Occupied(CursorMut {
                                 current: tree,
                                 tree: self,
                             });
                         }
-                        Ordering::Greater => if tree.right().is_null() {
-                            return Entry::Vacant(InsertCursor {
-                                parent: tree,
-                                insert_left: false,
-                                tree: self,
-                            });
-                        } else {
-                            tree = tree.right();
-                        },
+                        Ordering::Greater => {
+                            if tree.right().is_null() {
+                                return Entry::Vacant(InsertCursor {
+                                    parent: tree,
+                                    insert_left: false,
+                                    tree: self,
+                                });
+                            } else {
+                                tree = tree.right();
+                            }
+                        }
                     }
                 }
             }
@@ -1652,7 +1656,6 @@ mod tests {
     use super::{Entry, Link, RBTree};
     use std::boxed::Box;
     use std::fmt;
-    use std::marker::PhantomData;
     use std::vec::Vec;
     use Bound::*;
     use {KeyAdapter, UnsafeRef};
@@ -2369,7 +2372,7 @@ mod tests {
             value: &v,
         };
         let b = a.clone();
-        let mut l = RBTree::new(ObjAdapter(PhantomData));
+        let mut l = RBTree::new(ObjAdapter::new());
         l.insert(&a);
         l.insert(&b);
         assert_eq!(*l.front().get().unwrap().value, 5);

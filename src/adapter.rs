@@ -56,13 +56,14 @@ pub unsafe trait Adapter {
 
 /// Macro to get the offset of a struct field in bytes from the address of the
 /// struct.
+#[cfg(not(feature = "nightly"))]
 #[macro_export]
 macro_rules! offset_of {
     ($container:path, $field:ident) => {{
         // Make sure the field actually exists. This line ensures that a
         // compile-time error is generated if $field is accessed through a
         // Deref impl.
-        #[cfg_attr(feature = "cargo-clippy", allow(unneeded_field_pattern))]
+        #[allow(clippy::unneeded_field_pattern)]
         let $container { $field: _, .. };
 
         // Create an instance of the container and calculate the offset to its
@@ -71,9 +72,33 @@ macro_rules! offset_of {
         #[allow(unused_unsafe)]
         let val: $container = unsafe { $crate::__core::mem::uninitialized() };
         let result = &val.$field as *const _ as usize - &val as *const _ as usize;
-        #[cfg_attr(feature = "cargo-clippy", allow(forget_copy))]
+        #[allow(clippy::forget_copy)]
         $crate::__core::mem::forget(val);
         result as isize
+    }};
+}
+
+/// Macro to get the offset of a struct field in bytes from the address of the
+/// struct.
+#[cfg(feature = "nightly")]
+#[macro_export]
+#[allow_internal_unstable(maybe_uninit, ptr_offset_from)]
+macro_rules! offset_of {
+    ($container:path, $field:ident) => {{
+        // Make sure the field actually exists. This line ensures that a
+        // compile-time error is generated if $field is accessed through a
+        // Deref impl.
+        #[allow(clippy::unneeded_field_pattern)]
+        let $container { $field: _, .. };
+
+        // Create an instance of the container and calculate the offset to its
+        // field. Although we are creating references to uninitialized data this
+        // is fine since we are not dereferencing them.
+        #[allow(unused_unsafe)]
+        let val = unsafe { $crate::__core::mem::MaybeUninit::<$container>::uninit() };
+        #[allow(unused_unsafe)]
+        let field = unsafe { &(*val.as_ptr()).$field as *const _ };
+        (field as *const u8).offset_from(val.as_ptr() as *const u8)
     }};
 }
 
@@ -100,19 +125,13 @@ macro_rules! offset_of {
 #[macro_export(local_inner_macros)]
 macro_rules! container_of {
     ($ptr:expr, $container:path, $field:ident) => {
-        #[cfg_attr(feature = "cargo-clippy", allow(cast_ptr_alignment))]
+        #[allow(clippy::cast_ptr_alignment)]
         {
             ($ptr as *const _ as *const u8).offset(-offset_of!($container, $field))
                 as *mut $container
         }
     };
 }
-
-// Note that we define the macro twice here. The nightly version of the macro
-// defines the new() constructor for adapters as a const fn, while the normal
-// version defines it as a normal function. Unfortunately, this is necessary
-// because #[cfg] in a macro are evaluated in crates using the macro rather
-// than the crate which defines the macro.
 
 /// Macro to generate an implementation of `Adapter` for a given set of types.
 /// In particular this will automatically generate implementations of the
@@ -123,6 +142,9 @@ macro_rules! container_of {
 /// ```rust,ignore
 /// intrusive_adapter!(Adapter = Pointer: Value { link_field: LinkType });
 /// ```
+///
+/// You can create a new instance of an adapter using the `new` method or the
+/// `NEW` associated constant. The adapter also implements the `Default` trait.
 ///
 /// # Generics
 ///
@@ -168,136 +190,6 @@ macro_rules! container_of {
 /// intrusive_adapter!(MyAdapter3<'a, T: ?Sized> = &'a Test2<T>: Test2<T> { link: LinkedListLink } where T: Clone + 'a);
 /// # fn main() {}
 /// ```
-#[cfg(feature = "nightly")]
-#[macro_export(local_inner_macros)]
-#[allow_internal_unstable]
-macro_rules! intrusive_adapter {
-    (@impl
-        ($($privacy:tt)*) $name:ident ($($args:tt $(: ?$bound:tt)*),*)
-        = $pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*
-    ) => {
-        $($privacy)* struct $name<$($args),*>($crate::__core::marker::PhantomData<$pointer>) $($where_)*;
-        unsafe impl<$($args $(: ?$bound)*),*> Send for $name<$($args),*> $($where_)* {}
-        unsafe impl<$($args $(: ?$bound)*),*> Sync for $name<$($args),*> $($where_)* {}
-        impl<$($args $(: ?$bound)*),*> Copy for $name<$($args),*> $($where_)* {}
-        impl<$($args $(: ?$bound)*),*> Clone for $name<$($args),*> $($where_)* {
-            fn clone(&self) -> Self {
-                *self
-            }
-        }
-        impl<$($args $(: ?$bound)*),*> Default for $name<$($args),*> $($where_)* {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-        #[allow(dead_code)]
-        impl<$($args $(: ?$bound)*),*> $name<$($args),*> $($where_)* {
-            pub const fn new() -> Self {
-                $name($crate::__core::marker::PhantomData)
-            }
-        }
-        #[allow(dead_code, unsafe_code)]
-        unsafe impl<$($args $(: ?$bound)*),*> $crate::Adapter for $name<$($args),*> $($where_)* {
-            type Link = $link;
-            type Value = $value;
-            type Pointer = $pointer;
-            #[inline]
-            unsafe fn get_value(&self, link: *const $link) -> *const $value {
-                container_of!(link, $value, $field)
-            }
-            #[inline]
-            unsafe fn get_link(&self, value: *const $value) -> *const $link {
-                &(*value).$field
-            }
-        }
-    };
-    (@find_generic
-        ($($privacy:tt)*) $name:tt ($($prev:tt)*) > $($rest:tt)*
-    ) => {
-        intrusive_adapter!(@impl
-            ($($privacy)*) $name ($($prev)*) $($rest)*
-        );
-    };
-    (@find_generic
-        ($($privacy:tt)*) $name:tt ($($prev:tt)*) $cur:tt $($rest:tt)*
-    ) => {
-        intrusive_adapter!(@find_generic
-            ($($privacy)*) $name ($($prev)* $cur) $($rest)*
-        );
-    };
-    (@find_if_generic
-        ($($privacy:tt)*) $name:tt < $($rest:tt)*
-    ) => {
-        intrusive_adapter!(@find_generic
-            ($($privacy)*) $name () $($rest)*
-        );
-    };
-    (@find_if_generic
-        ($($privacy:tt)*) $name:tt $($rest:tt)*
-    ) => {
-        intrusive_adapter!(@impl
-            ($($privacy)*) $name () $($rest)*
-        );
-    };
-    (pub $name:tt $($rest:tt)*) => {
-        intrusive_adapter!(@find_if_generic
-            (pub) $name $($rest)*
-        );
-    };
-    ($name:tt $($rest:tt)*) => {
-        intrusive_adapter!(@find_if_generic
-            () $name $($rest)*
-        );
-    };
-}
-
-/// Macro to generate an implementation of `Adapter` for a given set of types.
-/// In particular this will automatically generate implementations of the
-/// `get_value` and `get_link` methods for a given named field in a struct.
-///
-/// The basic syntax to create an adapter is:
-///
-/// ```rust,ignore
-/// intrusive_adapter!(Adapter = Pointer: Value { link_field: LinkType });
-/// ```
-///
-/// # Generics
-///
-/// This macro supports generic arguments:
-///
-/// ```rust,ignore
-/// intrusive_adapter!(Adapter<'lifetime, Type, Type2: ?Sized> = Pointer: Value { link_field: LinkType } where Type: Copy, Type2: 'lifetiem);
-/// ```
-///
-/// Note that due to macro parsing limitations, only `?Trait` style bounds are
-/// allowed in the generic argument list. In most cases this is only needed for
-/// `?Sized`. Other bounds can be specified in the `where` clause at the end
-/// the macro.
-///
-/// # Examples
-///
-/// ```
-/// #[macro_use]
-/// extern crate intrusive_collections;
-/// use intrusive_collections::{LinkedListLink, RBTreeLink};
-///
-/// pub struct Test {
-///     link: LinkedListLink,
-///     link2: RBTreeLink,
-/// }
-/// intrusive_adapter!(MyAdapter = Box<Test>: Test { link: LinkedListLink });
-/// intrusive_adapter!(pub MyAdapter2 = Box<Test>: Test { link2: RBTreeLink });
-///
-/// pub struct Test2<T: ?Sized>
-///     where T: Clone
-/// {
-///     link: LinkedListLink,
-///     val: T,
-/// }
-/// intrusive_adapter!(MyAdapter3<'a, T: ?Sized> = &'a Test2<T>: Test2<T> { link: LinkedListLink } where T: Clone + 'a);
-/// # fn main() {}
-/// ```
-#[cfg(not(feature = "nightly"))]
 #[macro_export(local_inner_macros)]
 macro_rules! intrusive_adapter {
     (@impl
@@ -315,13 +207,14 @@ macro_rules! intrusive_adapter {
         }
         impl<$($args $(: ?$bound)*),*> Default for $name<$($args),*> $($where_)* {
             fn default() -> Self {
-                Self::new()
+                Self::NEW
             }
         }
         #[allow(dead_code)]
         impl<$($args $(: ?$bound)*),*> $name<$($args),*> $($where_)* {
+            pub const NEW: Self = $name($crate::__core::marker::PhantomData);
             pub fn new() -> Self {
-                $name($crate::__core::marker::PhantomData)
+                Self::NEW
             }
         }
         #[allow(dead_code, unsafe_code)]

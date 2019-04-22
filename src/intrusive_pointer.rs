@@ -11,10 +11,10 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 #[cfg(feature = "alloc")]
 use alloc::sync::Arc;
+use core::mem;
 use core::ops::Deref;
 #[cfg(feature = "alloc")]
 use core::ptr;
-use core::mem;
 use UnsafeRef;
 
 /// Trait representing an owned pointer type which can be converted to and from

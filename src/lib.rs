@@ -273,11 +273,7 @@
 
 #![warn(missing_docs)]
 #![no_std]
-#![cfg_attr(
-    feature = "nightly",
-    feature(const_fn, allow_internal_unstable)
-)]
-#![cfg_attr(all(feature = "nightly", feature = "alloc"), feature(alloc))]
+#![cfg_attr(feature = "nightly", feature(const_fn, allow_internal_unstable))]
 
 // Use liballoc on nightly to avoid a dependency on libstd
 #[cfg(all(feature = "nightly", feature = "alloc"))]

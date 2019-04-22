@@ -979,7 +979,6 @@ mod tests {
     use super::{Link, LinkedList};
     use std::boxed::Box;
     use std::fmt;
-    use std::marker::PhantomData;
     use std::vec::Vec;
     use UnsafeRef;
 
@@ -1348,7 +1347,7 @@ mod tests {
             value: &v,
         };
         let b = a.clone();
-        let mut l = LinkedList::new(ObjAdapter(PhantomData));
+        let mut l = LinkedList::new(ObjAdapter::new());
         l.cursor_mut().insert_before(&a);
         l.cursor_mut().insert_before(&b);
         assert_eq!(*l.front().get().unwrap().value, 5);
