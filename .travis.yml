@@ -12,7 +12,7 @@ rust:
 - nightly
 - beta
 - stable
-- 1.17.0
+- 1.31.0
 
 before_script:
 - |
