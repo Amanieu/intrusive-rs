@@ -7,15 +7,15 @@
 
 //! Intrusive red-black tree.
 
+use crate::Bound::{self, Excluded, Included, Unbounded};
+use crate::IntrusivePointer;
+use crate::{Adapter, KeyAdapter};
 use core::borrow::Borrow;
 use core::cell::Cell;
 use core::cmp::Ordering;
 use core::fmt;
 use core::mem;
 use core::ptr;
-use Bound::{self, Excluded, Included, Unbounded};
-use IntrusivePointer;
-use {Adapter, KeyAdapter};
 
 // =============================================================================
 // Link
@@ -95,7 +95,7 @@ impl Default for Link {
 // still derive Debug.
 impl fmt::Debug for Link {
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // There isn't anything sensible to print here except whether the link
         // is currently in a tree.
         if self.is_linked() {
@@ -517,7 +517,7 @@ impl NodePtr {
 // =============================================================================
 
 /// A cursor which provides read-only access to a `RBTree`.
-pub struct Cursor<'a, A: Adapter<Link = Link> + 'a> {
+pub struct Cursor<'a, A: Adapter<Link = Link>> {
     current: NodePtr,
     tree: &'a RBTree<A>,
 }
@@ -587,7 +587,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
     /// first element of the `RBTree`. If it is pointing to the last
     /// element of the `RBTree` then this will return a null cursor.
     #[inline]
-    pub fn peek_next(&self) -> Cursor<A> {
+    pub fn peek_next(&self) -> Cursor<'_, A> {
         let mut next = self.clone();
         next.move_next();
         next
@@ -599,7 +599,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
     /// last element of the `RBTree`. If it is pointing to the first
     /// element of the `RBTree` then this will return a null cursor.
     #[inline]
-    pub fn peek_prev(&self) -> Cursor<A> {
+    pub fn peek_prev(&self) -> Cursor<'_, A> {
         let mut prev = self.clone();
         prev.move_prev();
         prev
@@ -607,7 +607,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
 }
 
 /// A cursor which provides mutable access to a `RBTree`.
-pub struct CursorMut<'a, A: Adapter<Link = Link> + 'a> {
+pub struct CursorMut<'a, A: Adapter<Link = Link>> {
     current: NodePtr,
     tree: &'a mut RBTree<A>,
 }
@@ -639,7 +639,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// `CursorMut`, which means it cannot outlive the `CursorMut` and that the
     /// `CursorMut` is frozen for the lifetime of the `Cursor`.
     #[inline]
-    pub fn as_cursor(&self) -> Cursor<A> {
+    pub fn as_cursor(&self) -> Cursor<'_, A> {
         Cursor {
             current: self.current,
             tree: self.tree,
@@ -680,7 +680,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// first element of the `RBTree`. If it is pointing to the last
     /// element of the `RBTree` then this will return a null cursor.
     #[inline]
-    pub fn peek_next(&self) -> Cursor<A> {
+    pub fn peek_next(&self) -> Cursor<'_, A> {
         let mut next = self.as_cursor();
         next.move_next();
         next
@@ -692,7 +692,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// last element of the `RBTree`. If it is pointing to the first
     /// element of the `RBTree` then this will return a null cursor.
     #[inline]
-    pub fn peek_prev(&self) -> Cursor<A> {
+    pub fn peek_prev(&self) -> Cursor<'_, A> {
         let mut prev = self.as_cursor();
         prev.move_prev();
         prev
@@ -899,7 +899,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
 
     /// Returns a null `Cursor` for this tree.
     #[inline]
-    pub fn cursor(&self) -> Cursor<A> {
+    pub fn cursor(&self) -> Cursor<'_, A> {
         Cursor {
             current: NodePtr::null(),
             tree: self,
@@ -908,7 +908,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
 
     /// Returns a null `CursorMut` for this tree.
     #[inline]
-    pub fn cursor_mut(&mut self) -> CursorMut<A> {
+    pub fn cursor_mut(&mut self) -> CursorMut<'_, A> {
         CursorMut {
             current: NodePtr::null(),
             tree: self,
@@ -921,7 +921,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     ///
     /// `ptr` must be a pointer to an object that is part of this tree.
     #[inline]
-    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Value) -> Cursor<A> {
+    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Value) -> Cursor<'_, A> {
         Cursor {
             current: NodePtr(self.adapter.get_link(ptr)),
             tree: self,
@@ -934,7 +934,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     ///
     /// `ptr` must be a pointer to an object that is part of this tree.
     #[inline]
-    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Value) -> CursorMut<A> {
+    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Value) -> CursorMut<'_, A> {
         CursorMut {
             current: NodePtr(self.adapter.get_link(ptr)),
             tree: self,
@@ -944,7 +944,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     /// Returns a `Cursor` pointing to the first element of the tree. If the
     /// tree is empty then a null cursor is returned.
     #[inline]
-    pub fn front(&self) -> Cursor<A> {
+    pub fn front(&self) -> Cursor<'_, A> {
         let mut cursor = self.cursor();
         cursor.move_next();
         cursor
@@ -953,7 +953,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     /// Returns a `CursorMut` pointing to the first element of the tree. If the
     /// the tree is empty then a null cursor is returned.
     #[inline]
-    pub fn front_mut(&mut self) -> CursorMut<A> {
+    pub fn front_mut(&mut self) -> CursorMut<'_, A> {
         let mut cursor = self.cursor_mut();
         cursor.move_next();
         cursor
@@ -962,7 +962,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     /// Returns a `Cursor` pointing to the last element of the tree. If the tree
     /// is empty then a null cursor is returned.
     #[inline]
-    pub fn back(&self) -> Cursor<A> {
+    pub fn back(&self) -> Cursor<'_, A> {
         let mut cursor = self.cursor();
         cursor.move_prev();
         cursor
@@ -971,7 +971,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     /// Returns a `CursorMut` pointing to the last element of the tree. If the
     /// tree is empty then a null cursor is returned.
     #[inline]
-    pub fn back_mut(&mut self) -> CursorMut<A> {
+    pub fn back_mut(&mut self) -> CursorMut<'_, A> {
         let mut cursor = self.cursor_mut();
         cursor.move_prev();
         cursor
@@ -988,7 +988,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     /// Gets an iterator over the objects in the `RBTree`, in ascending key
     /// order.
     #[inline]
-    pub fn iter(&self) -> Iter<A> {
+    pub fn iter(&self) -> Iter<'_, A> {
         if self.root.is_null() {
             Iter {
                 head: NodePtr::null(),
@@ -1227,7 +1227,7 @@ impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert<'a>(&'a mut self, val: A::Pointer) -> CursorMut<A>
+    pub fn insert<'a>(&'a mut self, val: A::Pointer) -> CursorMut<'_, A>
     where
         <A as KeyAdapter<'a>>::Key: Ord,
     {
@@ -1419,7 +1419,7 @@ impl<A: Adapter<Link = Link>> fmt::Debug for RBTree<A>
 where
     A::Value: fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set().entries(self.iter()).finish()
     }
 }
@@ -1430,7 +1430,7 @@ where
 
 /// A cursor pointing to a slot in which an element can be inserted into a
 /// `RBTree`.
-pub struct InsertCursor<'a, A: Adapter<Link = Link> + 'a> {
+pub struct InsertCursor<'a, A: Adapter<Link = Link>> {
     parent: NodePtr,
     insert_left: bool,
     tree: &'a mut RBTree<A>,
@@ -1514,7 +1514,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> Entry<'a, A> {
 // =============================================================================
 
 /// An iterator over references to the items of a `RBTree`.
-pub struct Iter<'a, A: Adapter<Link = Link> + 'a> {
+pub struct Iter<'a, A: Adapter<Link = Link>> {
     head: NodePtr,
     tail: NodePtr,
     tree: &'a RBTree<A>,
@@ -1654,12 +1654,12 @@ impl<A: Adapter<Link = Link>> DoubleEndedIterator for IntoIter<A> {
 #[cfg(test)]
 mod tests {
     use super::{Entry, Link, RBTree};
+    use crate::Bound::*;
+    use crate::{KeyAdapter, UnsafeRef};
     use std::boxed::Box;
     use std::fmt;
     use std::vec::Vec;
-    use Bound::*;
-    use {KeyAdapter, UnsafeRef};
-    extern crate rand;
+    use rand;
     use self::rand::{Rng, XorShiftRng};
 
     #[derive(Clone)]
@@ -1668,7 +1668,7 @@ mod tests {
         value: i32,
     }
     impl fmt::Debug for Obj {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "{}", self.value)
         }
     }
@@ -2354,7 +2354,7 @@ mod tests {
     #[test]
     fn test_non_static() {
         #[derive(Clone)]
-        struct Obj<'a, T: 'a> {
+        struct Obj<'a, T> {
             link: Link,
             value: &'a T,
         }

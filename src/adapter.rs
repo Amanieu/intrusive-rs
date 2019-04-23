@@ -5,7 +5,7 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use IntrusivePointer;
+use crate::IntrusivePointer;
 
 /// Trait for a adapter which allows a type to be inserted into an intrusive
 /// collection. The `Link` type contains the collection-specific metadata which
@@ -196,6 +196,7 @@ macro_rules! intrusive_adapter {
         ($($privacy:tt)*) $name:ident ($($args:tt $(: ?$bound:tt)*),*)
         = $pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*
     ) => {
+        #[allow(explicit_outlives_requirements)]
         $($privacy)* struct $name<$($args),*>($crate::__core::marker::PhantomData<$pointer>) $($where_)*;
         unsafe impl<$($args $(: ?$bound)*),*> Send for $name<$($args),*> $($where_)* {}
         unsafe impl<$($args $(: ?$bound)*),*> Sync for $name<$($args),*> $($where_)* {}

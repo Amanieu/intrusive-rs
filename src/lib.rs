@@ -272,6 +272,7 @@
 //! reference counts.
 
 #![warn(missing_docs)]
+#![warn(rust_2018_idioms)]
 #![no_std]
 #![cfg_attr(feature = "nightly", feature(const_fn, allow_internal_unstable))]
 
@@ -298,16 +299,16 @@ pub mod linked_list;
 pub mod rbtree;
 pub mod singly_linked_list;
 
-pub use adapter::Adapter;
-pub use intrusive_pointer::IntrusivePointer;
-pub use key_adapter::KeyAdapter;
-pub use linked_list::Link as LinkedListLink;
-pub use linked_list::LinkedList;
-pub use rbtree::Link as RBTreeLink;
-pub use rbtree::RBTree;
-pub use singly_linked_list::Link as SinglyLinkedListLink;
-pub use singly_linked_list::SinglyLinkedList;
-pub use unsafe_ref::UnsafeRef;
+pub use crate::adapter::Adapter;
+pub use crate::intrusive_pointer::IntrusivePointer;
+pub use crate::key_adapter::KeyAdapter;
+pub use crate::linked_list::Link as LinkedListLink;
+pub use crate::linked_list::LinkedList;
+pub use crate::rbtree::Link as RBTreeLink;
+pub use crate::rbtree::RBTree;
+pub use crate::singly_linked_list::Link as SinglyLinkedListLink;
+pub use crate::singly_linked_list::SinglyLinkedList;
+pub use crate::unsafe_ref::UnsafeRef;
 
 /// An endpoint of a range of keys.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]

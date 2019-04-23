@@ -6,16 +6,16 @@
 // copied, modified, or distributed except according to those terms.
 
 #[cfg(feature = "alloc")]
-use alloc::boxed::Box;
+use crate::alloc::boxed::Box;
 #[cfg(feature = "alloc")]
-use alloc::rc::Rc;
+use crate::alloc::rc::Rc;
 #[cfg(feature = "alloc")]
-use alloc::sync::Arc;
+use crate::alloc::sync::Arc;
+use crate::UnsafeRef;
 use core::mem;
 use core::ops::Deref;
 #[cfg(feature = "alloc")]
 use core::ptr;
-use UnsafeRef;
 
 /// Trait representing an owned pointer type which can be converted to and from
 /// a raw pointer.
@@ -192,14 +192,14 @@ mod tests {
     #[test]
     fn test_box_unsized() {
         unsafe {
-            let p = Box::new(1) as Box<Debug>;
-            let a: *const Debug = &*p;
+            let p = Box::new(1) as Box<dyn Debug>;
+            let a: *const dyn Debug = &*p;
             let b: (usize, usize) = mem::transmute(a);
             let r = IntrusivePointer::into_raw(p);
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Box<Debug> = IntrusivePointer::from_raw(r);
-            let a2: *const Debug = &*p2;
+            let p2: Box<dyn Debug> = IntrusivePointer::from_raw(r);
+            let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
         }
@@ -208,14 +208,14 @@ mod tests {
     #[test]
     fn test_rc_unsized() {
         unsafe {
-            let p = Rc::new(1) as Rc<Debug>;
-            let a: *const Debug = &*p;
+            let p = Rc::new(1) as Rc<dyn Debug>;
+            let a: *const dyn Debug = &*p;
             let b: (usize, usize) = mem::transmute(a);
             let r = IntrusivePointer::into_raw(p);
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Rc<Debug> = IntrusivePointer::from_raw(r);
-            let a2: *const Debug = &*p2;
+            let p2: Rc<dyn Debug> = IntrusivePointer::from_raw(r);
+            let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
         }
@@ -224,14 +224,14 @@ mod tests {
     #[test]
     fn test_arc_unsized() {
         unsafe {
-            let p = Arc::new(1) as Arc<Debug>;
-            let a: *const Debug = &*p;
+            let p = Arc::new(1) as Arc<dyn Debug>;
+            let a: *const dyn Debug = &*p;
             let b: (usize, usize) = mem::transmute(a);
             let r = IntrusivePointer::into_raw(p);
             assert_eq!(a, r);
             assert_eq!(b, mem::transmute(r));
-            let p2: Arc<Debug> = IntrusivePointer::from_raw(r);
-            let a2: *const Debug = &*p2;
+            let p2: Arc<dyn Debug> = IntrusivePointer::from_raw(r);
+            let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
         }

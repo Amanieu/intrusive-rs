@@ -5,7 +5,7 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use Adapter;
+use crate::Adapter;
 
 /// Extension of the `Adapter` trait to provide a way of extracting a key from
 /// an object. This key can then be used as an index in certain intrusive

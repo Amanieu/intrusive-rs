@@ -7,11 +7,11 @@
 
 //! Intrusive doubly-linked list.
 
+use crate::Adapter;
+use crate::IntrusivePointer;
 use core::cell::Cell;
 use core::fmt;
 use core::ptr;
-use Adapter;
-use IntrusivePointer;
 
 // =============================================================================
 // Link
@@ -88,7 +88,7 @@ impl Default for Link {
 // still derive Debug.
 impl fmt::Debug for Link {
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // There isn't anything sensible to print here except whether the link
         // is currently in a list.
         if self.is_linked() {
@@ -209,7 +209,7 @@ impl NodePtr {
 // =============================================================================
 
 /// A cursor which provides read-only access to a `LinkedList`.
-pub struct Cursor<'a, A: Adapter<Link = Link> + 'a> {
+pub struct Cursor<'a, A: Adapter<Link = Link>> {
     current: NodePtr,
     list: &'a LinkedList<A>,
 }
@@ -279,7 +279,7 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
     /// first element of the `LinkedList`. If it is pointing to the last
     /// element of the `LinkedList` then this will return a null cursor.
     #[inline]
-    pub fn peek_next(&self) -> Cursor<A> {
+    pub fn peek_next(&self) -> Cursor<'_, A> {
         let mut next = self.clone();
         next.move_next();
         next
@@ -291,7 +291,7 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
     /// last element of the `LinkedList`. If it is pointing to the first
     /// element of the `LinkedList` then this will return a null cursor.
     #[inline]
-    pub fn peek_prev(&self) -> Cursor<A> {
+    pub fn peek_prev(&self) -> Cursor<'_, A> {
         let mut prev = self.clone();
         prev.move_prev();
         prev
@@ -299,7 +299,7 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
 }
 
 /// A cursor which provides mutable access to a `LinkedList`.
-pub struct CursorMut<'a, A: Adapter<Link = Link> + 'a> {
+pub struct CursorMut<'a, A: Adapter<Link = Link>> {
     current: NodePtr,
     list: &'a mut LinkedList<A>,
 }
@@ -331,7 +331,7 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// `CursorMut`, which means it cannot outlive the `CursorMut` and that the
     /// `CursorMut` is frozen for the lifetime of the `Cursor`.
     #[inline]
-    pub fn as_cursor(&self) -> Cursor<A> {
+    pub fn as_cursor(&self) -> Cursor<'_, A> {
         Cursor {
             current: self.current,
             list: self.list,
@@ -372,7 +372,7 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// first element of the `LinkedList`. If it is pointing to the last
     /// element of the `LinkedList` then this will return a null cursor.
     #[inline]
-    pub fn peek_next(&self) -> Cursor<A> {
+    pub fn peek_next(&self) -> Cursor<'_, A> {
         let mut next = self.as_cursor();
         next.move_next();
         next
@@ -384,7 +384,7 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// last element of the `LinkedList`. If it is pointing to the first
     /// element of the `LinkedList` then this will return a null cursor.
     #[inline]
-    pub fn peek_prev(&self) -> Cursor<A> {
+    pub fn peek_prev(&self) -> Cursor<'_, A> {
         let mut prev = self.as_cursor();
         prev.move_prev();
         prev
@@ -675,7 +675,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
 
     /// Returns a null `Cursor` for this list.
     #[inline]
-    pub fn cursor(&self) -> Cursor<A> {
+    pub fn cursor(&self) -> Cursor<'_, A> {
         Cursor {
             current: NodePtr::null(),
             list: self,
@@ -684,7 +684,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
 
     /// Returns a null `CursorMut` for this list.
     #[inline]
-    pub fn cursor_mut(&mut self) -> CursorMut<A> {
+    pub fn cursor_mut(&mut self) -> CursorMut<'_, A> {
         CursorMut {
             current: NodePtr::null(),
             list: self,
@@ -697,7 +697,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
     #[inline]
-    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Value) -> Cursor<A> {
+    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Value) -> Cursor<'_, A> {
         Cursor {
             current: NodePtr(self.adapter.get_link(ptr)),
             list: self,
@@ -710,7 +710,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
     #[inline]
-    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Value) -> CursorMut<A> {
+    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Value) -> CursorMut<'_, A> {
         CursorMut {
             current: NodePtr(self.adapter.get_link(ptr)),
             list: self,
@@ -720,7 +720,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
     /// Returns a `Cursor` pointing to the first element of the list. If the
     /// list is empty then a null cursor is returned.
     #[inline]
-    pub fn front(&self) -> Cursor<A> {
+    pub fn front(&self) -> Cursor<'_, A> {
         let mut cursor = self.cursor();
         cursor.move_next();
         cursor
@@ -729,7 +729,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
     /// Returns a `CursorMut` pointing to the first element of the list. If the
     /// the list is empty then a null cursor is returned.
     #[inline]
-    pub fn front_mut(&mut self) -> CursorMut<A> {
+    pub fn front_mut(&mut self) -> CursorMut<'_, A> {
         let mut cursor = self.cursor_mut();
         cursor.move_next();
         cursor
@@ -738,7 +738,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
     /// Returns a `Cursor` pointing to the last element of the list. If the list
     /// is empty then a null cursor is returned.
     #[inline]
-    pub fn back(&self) -> Cursor<A> {
+    pub fn back(&self) -> Cursor<'_, A> {
         let mut cursor = self.cursor();
         cursor.move_prev();
         cursor
@@ -747,7 +747,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
     /// Returns a `CursorMut` pointing to the last element of the list. If the
     /// list is empty then a null cursor is returned.
     #[inline]
-    pub fn back_mut(&mut self) -> CursorMut<A> {
+    pub fn back_mut(&mut self) -> CursorMut<'_, A> {
         let mut cursor = self.cursor_mut();
         cursor.move_prev();
         cursor
@@ -755,7 +755,7 @@ impl<A: Adapter<Link = Link>> LinkedList<A> {
 
     /// Gets an iterator over the objects in the `LinkedList`.
     #[inline]
-    pub fn iter(&self) -> Iter<A> {
+    pub fn iter(&self) -> Iter<'_, A> {
         Iter {
             head: self.head,
             tail: self.tail,
@@ -885,7 +885,7 @@ impl<A: Adapter<Link = Link>> fmt::Debug for LinkedList<A>
 where
     A::Value: fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
 }
@@ -895,7 +895,7 @@ where
 // =============================================================================
 
 /// An iterator over references to the items of a `LinkedList`.
-pub struct Iter<'a, A: Adapter<Link = Link> + 'a> {
+pub struct Iter<'a, A: Adapter<Link = Link>> {
     head: NodePtr,
     tail: NodePtr,
     list: &'a LinkedList<A>,
@@ -977,10 +977,10 @@ impl<A: Adapter<Link = Link>> DoubleEndedIterator for IntoIter<A> {
 #[cfg(test)]
 mod tests {
     use super::{Link, LinkedList};
+    use crate::UnsafeRef;
     use std::boxed::Box;
     use std::fmt;
     use std::vec::Vec;
-    use UnsafeRef;
 
     #[derive(Clone)]
     struct Obj {
@@ -989,7 +989,7 @@ mod tests {
         value: u32,
     }
     impl fmt::Debug for Obj {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "{}", self.value)
         }
     }
@@ -1335,7 +1335,7 @@ mod tests {
     #[test]
     fn test_non_static() {
         #[derive(Clone)]
-        struct Obj<'a, T: 'a> {
+        struct Obj<'a, T> {
             link: Link,
             value: &'a T,
         }

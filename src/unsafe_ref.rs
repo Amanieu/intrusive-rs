@@ -6,7 +6,7 @@
 // copied, modified, or distributed except according to those terms.
 
 #[cfg(feature = "alloc")]
-use alloc::boxed::Box;
+use crate::alloc::boxed::Box;
 use core::borrow::Borrow;
 use core::fmt;
 use core::ops::Deref;
@@ -130,7 +130,7 @@ impl<T: ?Sized> Borrow<T> for UnsafeRef<T> {
 
 impl<T: fmt::Debug + ?Sized> fmt::Debug for UnsafeRef<T> {
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self.as_ref(), f)
     }
 }
