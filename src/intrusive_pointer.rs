@@ -14,8 +14,6 @@ use crate::alloc::sync::Arc;
 use crate::UnsafeRef;
 use core::mem;
 use core::ops::Deref;
-#[cfg(feature = "alloc")]
-use core::ptr;
 
 /// Trait representing an owned pointer type which can be converted to and from
 /// a raw pointer.
