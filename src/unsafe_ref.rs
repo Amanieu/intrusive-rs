@@ -10,7 +10,6 @@ use crate::alloc::boxed::Box;
 use core::borrow::Borrow;
 use core::fmt;
 use core::ops::Deref;
-#[cfg(feature = "nightly")]
 use core::ptr::NonNull;
 
 /// Unchecked shared pointer
@@ -23,13 +22,9 @@ use core::ptr::NonNull;
 /// moved, dropped or accessed through a mutable reference as long as at least
 /// one `UnsafeRef` is pointing to it.
 pub struct UnsafeRef<T: ?Sized> {
-    #[cfg(feature = "nightly")]
     ptr: NonNull<T>,
-    #[cfg(not(feature = "nightly"))]
-    ptr: *mut T,
 }
 
-#[cfg(feature = "nightly")]
 impl<T: ?Sized> UnsafeRef<T> {
     /// Creates an `UnsafeRef` from a raw pointer
     ///
@@ -47,25 +42,6 @@ impl<T: ?Sized> UnsafeRef<T> {
     #[inline]
     pub fn into_raw(ptr: Self) -> *mut T {
         ptr.ptr.as_ptr()
-    }
-}
-
-#[cfg(not(feature = "nightly"))]
-impl<T: ?Sized> UnsafeRef<T> {
-    /// Creates an `UnsafeRef` from a raw pointer
-    ///
-    /// # Safety
-    ///
-    /// You must ensure that the `UnsafeRef` guarantees are upheld.
-    #[inline]
-    pub unsafe fn from_raw(val: *const T) -> UnsafeRef<T> {
-        UnsafeRef { ptr: val as *mut _ }
-    }
-
-    /// Converts an `UnsafeRef` into a raw pointer
-    #[inline]
-    pub fn into_raw(ptr: Self) -> *mut T {
-        ptr.ptr
     }
 }
 
@@ -108,16 +84,9 @@ impl<T: ?Sized> Deref for UnsafeRef<T> {
 }
 
 impl<T: ?Sized> AsRef<T> for UnsafeRef<T> {
-    #[cfg(feature = "nightly")]
     #[inline]
     fn as_ref(&self) -> &T {
         unsafe { self.ptr.as_ref() }
-    }
-
-    #[cfg(not(feature = "nightly"))]
-    #[inline]
-    fn as_ref(&self) -> &T {
-        unsafe { &*self.ptr }
     }
 }
 
