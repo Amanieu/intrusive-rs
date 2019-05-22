@@ -33,7 +33,7 @@ extern crate intrusive_collections;
 
 This crate has two Cargo features:
 
-- `nightly`: Enables nightly-only features: `const fn` constructors, `NonZero` support for `UnsafeRef`.
+- `nightly`: Enables nightly-only features: `const fn` constructors for collections (`Link` constructors are always `const fn`)
 - `alloc` (enabled by default): Implements `IntrusivePointer` for `Box`, `Rc` and `Arc`. This requires `libstd` on stable, but only `liballoc` if the `nightly` feature is enabled.
 
 ## License

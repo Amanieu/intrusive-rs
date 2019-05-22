@@ -30,23 +30,11 @@ pub struct Link {
 
 impl Link {
     /// Creates a new `Link`.
-    #[cfg(feature = "nightly")]
     #[inline]
     pub const fn new() -> Link {
         Link {
             left: Cell::new(NodePtr(ptr::null())),
             right: Cell::new(NodePtr(ptr::null())),
-            parent_color: Cell::new(UNLINKED_MARKER),
-        }
-    }
-
-    /// Creates a new `Link`.
-    #[cfg(not(feature = "nightly"))]
-    #[inline]
-    pub fn new() -> Link {
-        Link {
-            left: Cell::new(NodePtr::null()),
-            right: Cell::new(NodePtr::null()),
             parent_color: Cell::new(UNLINKED_MARKER),
         }
     }
