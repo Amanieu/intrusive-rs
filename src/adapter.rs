@@ -98,7 +98,8 @@ macro_rules! offset_of {
         let val = unsafe { $crate::__core::mem::MaybeUninit::<$container>::uninit() };
         #[allow(unused_unsafe)]
         let field = unsafe { &(*val.as_ptr()).$field as *const _ };
-        (field as *const u8).offset_from(val.as_ptr() as *const u8)
+        #[allow(unused_unsafe)]
+        unsafe { (field as *const u8).offset_from(val.as_ptr() as *const u8) }
     }};
 }
 
