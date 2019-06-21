@@ -555,13 +555,15 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
             list
         } else {
             unsafe {
-                let list = LinkedList {
+                let mut list = LinkedList {
                     head: self.current.next(),
                     tail: self.list.tail,
                     adapter: self.list.adapter.clone(),
                 };
                 if !list.head.is_null() {
                     list.head.set_prev(NodePtr::null());
+                } else {
+                    list.tail = NodePtr::null();
                 }
                 self.current.set_next(NodePtr::null());
                 self.list.tail = self.current;
@@ -592,13 +594,15 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
             list
         } else {
             unsafe {
-                let list = LinkedList {
+                let mut list = LinkedList {
                     head: self.list.head,
                     tail: self.current.prev(),
                     adapter: self.list.adapter.clone(),
                 };
                 if !list.tail.is_null() {
                     list.tail.set_next(NodePtr::null());
+                } else {
+                    list.head = NodePtr::null();
                 }
                 self.current.set_prev(NodePtr::null());
                 self.list.head = self.current;
@@ -1196,6 +1200,20 @@ mod tests {
         {
             let mut cur = l2.cursor_mut();
             l1 = cur.split_before();
+        }
+        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
+        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+        {
+            let mut cur = l1.front_mut();
+            l2 = cur.split_before();
+        }
+        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
+        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+        {
+            let mut cur = l1.back_mut();
+            l2 = cur.split_after();
         }
         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
