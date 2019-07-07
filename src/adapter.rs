@@ -67,8 +67,9 @@ macro_rules! offset_of {
         let $container { $field: _, .. };
 
         // Create an instance of the container and calculate the offset to its
-        // field. Although we are creating references to uninitialized data this
-        // is fine since we are not dereferencing them.
+        // field. We are creating references to uninitialized data, which is
+        // not allowed and UB under the current rules---but offset_of cannot
+        // currently be implemented without it.
         #[allow(unused_unsafe)]
         let val: $container = unsafe { $crate::__core::mem::uninitialized() };
         let result = &val.$field as *const _ as usize - &val as *const _ as usize;
@@ -92,8 +93,9 @@ macro_rules! offset_of {
         let $container { $field: _, .. };
 
         // Create an instance of the container and calculate the offset to its
-        // field. Although we are creating references to uninitialized data this
-        // is fine since we are not dereferencing them.
+        // field. We are creating references to uninitialized data, which is
+        // not allowed and UB under the current rules---but offset_of cannot
+        // currently be implemented without it.
         #[allow(unused_unsafe)]
         let val = unsafe { $crate::__core::mem::MaybeUninit::<$container>::uninit() };
         #[allow(unused_unsafe)]
