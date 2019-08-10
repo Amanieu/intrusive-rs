@@ -59,7 +59,7 @@ pub unsafe trait Adapter {
 #[macro_export(local_inner_macros)]
 macro_rules! offset_of {
     ($($inner:tt)*) => {
-        $crate::__memoffset::offset_of!($($inner)*)
+        ($crate::__memoffset::offset_of!($($inner)*) as isize)
     }
 }
 
@@ -88,7 +88,7 @@ macro_rules! container_of {
     ($ptr:expr, $container:path, $field:ident) => {
         #[allow(clippy::cast_ptr_alignment)]
         {
-            ($ptr as *const _ as *const u8).sub($crate::__memoffset::offset_of!($container, $field))
+            ($ptr as *const _ as *const u8).offset(-offset_of!($container, $field))
                 as *mut $container
         }
     };
