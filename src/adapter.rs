@@ -56,53 +56,11 @@ pub unsafe trait Adapter {
 
 /// Macro to get the offset of a struct field in bytes from the address of the
 /// struct.
-#[cfg(not(feature = "nightly"))]
-#[macro_export]
+#[macro_export(local_inner_macros)]
 macro_rules! offset_of {
-    ($container:path, $field:ident) => {{
-        // Make sure the field actually exists. This line ensures that a
-        // compile-time error is generated if $field is accessed through a
-        // Deref impl.
-        #[allow(clippy::unneeded_field_pattern)]
-        let $container { $field: _, .. };
-
-        // Create an instance of the container and calculate the offset to its
-        // field. We are creating references to uninitialized data, which is
-        // not allowed and UB under the current rules---but offset_of cannot
-        // currently be implemented without it.
-        #[allow(unused_unsafe)]
-        let val: $container = unsafe { $crate::__core::mem::uninitialized() };
-        let result = &val.$field as *const _ as usize - &val as *const _ as usize;
-        #[allow(clippy::forget_copy)]
-        $crate::__core::mem::forget(val);
-        result as isize
-    }};
-}
-
-/// Macro to get the offset of a struct field in bytes from the address of the
-/// struct.
-#[cfg(feature = "nightly")]
-#[macro_export]
-#[allow_internal_unstable(maybe_uninit, ptr_offset_from)]
-macro_rules! offset_of {
-    ($container:path, $field:ident) => {{
-        // Make sure the field actually exists. This line ensures that a
-        // compile-time error is generated if $field is accessed through a
-        // Deref impl.
-        #[allow(clippy::unneeded_field_pattern)]
-        let $container { $field: _, .. };
-
-        // Create an instance of the container and calculate the offset to its
-        // field. We are creating references to uninitialized data, which is
-        // not allowed and UB under the current rules---but offset_of cannot
-        // currently be implemented without it.
-        #[allow(unused_unsafe)]
-        let val = unsafe { $crate::__core::mem::MaybeUninit::<$container>::uninit() };
-        #[allow(unused_unsafe)]
-        let field = unsafe { &(*val.as_ptr()).$field as *const _ };
-        #[allow(unused_unsafe)]
-        unsafe { (field as *const u8).offset_from(val.as_ptr() as *const u8) }
-    }};
+    ($($inner:tt)*) => {
+        ($crate::__memoffset::offset_of!($($inner)*) as isize)
+    }
 }
 
 /// Unsafe macro to get a raw pointer to an outer object from a pointer to one

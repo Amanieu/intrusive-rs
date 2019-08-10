@@ -289,6 +289,9 @@ extern crate std;
 // Re-export core for use by macros
 #[doc(hidden)]
 pub extern crate core as __core;
+// Re-export memoffset for use by macros
+#[doc(hidden)]
+pub extern crate memoffset as __memoffset;
 
 mod intrusive_pointer;
 mod unsafe_ref;
