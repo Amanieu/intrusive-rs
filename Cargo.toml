@@ -16,6 +16,9 @@ nightly = []
 alloc = []
 default = ["alloc"]
 
+[dependencies]
+memoffset = "0.5"
+
 [dev-dependencies]
 rand = "0.3"
 typed-arena = "1.2"
