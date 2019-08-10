@@ -54,6 +54,10 @@ pub unsafe trait Adapter {
     unsafe fn get_link(&self, value: *const Self::Value) -> *const Self::Link;
 }
 
+/// Macro to get the offset of a struct field in bytes from the address of the
+/// struct.
+pub use memoffset::offset_of;
+
 /// Unsafe macro to get a raw pointer to an outer object from a pointer to one
 /// of its fields.
 ///
