@@ -56,7 +56,12 @@ pub unsafe trait Adapter {
 
 /// Macro to get the offset of a struct field in bytes from the address of the
 /// struct.
-pub use memoffset::offset_of;
+#[macro_export(local_inner_macros)]
+macro_rules! offset_of {
+    ($($inner:tt)*) => {
+        $crate::__memoffset::offset_of!($($inner)*)
+    }
+}
 
 /// Unsafe macro to get a raw pointer to an outer object from a pointer to one
 /// of its fields.
