@@ -1506,12 +1506,7 @@ mod tests {
                 assert_eq!(values, expected);
             }
 
-            while let Some(x) = t.front_mut().remove() {
-                //println!("removed: {:?}", &x.value);
-                //assert_eq!(x.value, expected.remove(0));
-                //assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
-            }
-            //assert!(expected.is_empty());
+            while let Some(_) = t.front_mut().remove() {}
             assert!(t.is_empty());
         }
 
@@ -1525,12 +1520,7 @@ mod tests {
                 assert_eq!(values, expected);
             }
 
-            while let Some(x) = t.front_mut().remove() {
-                //println!("removed: {:?}", &x.value);
-                //assert_eq!(x.value, expected.remove(0));
-                //assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
-            }
-            //assert!(expected.is_empty());
+            while let Some(_) = t.front_mut().remove() {}
             assert!(t.is_empty());
         }
     }
