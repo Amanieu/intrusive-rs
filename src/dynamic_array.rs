@@ -154,7 +154,7 @@ impl<T> DynamicArray for alloc::vec::Vec<T> {
     fn try_resize(&mut self, new_len: usize, value: Self::Item) -> Result<(), DynamicArrayAllocErr>
     where Self::Item: Clone
     {
-        self.resize(new_len, value);
+        DynamicArray::resize(self, new_len, value);
         Ok(())
     }
 
@@ -171,7 +171,7 @@ impl<T> DynamicArray for alloc::vec::Vec<T> {
     where
         F: FnMut() -> Self::Item,
     {
-        self.resize_with(new_len, f);
+        DynamicArray::resize_with(self, new_len, f);
         Ok(())
     }
 }
