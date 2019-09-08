@@ -9,29 +9,6 @@ pub mod chaining;
 
 use core::cmp;
 
-/// Hash Table Load Factor
-#[derive(Clone, Copy, Debug)]
-pub enum LoadFactor {
-    /// A chaining hash table.
-    Chained(ChainedLoadFactor),
-    /// An "open addressing" hash table.
-    OpenAddressed(OpenAddressedLoadFactor),
-}
-
-impl From<ChainedLoadFactor> for LoadFactor {
-    #[inline]
-    fn from(other: ChainedLoadFactor) -> LoadFactor {
-        LoadFactor::Chained(other)
-    }
-}
-
-impl From<OpenAddressedLoadFactor> for LoadFactor {
-    #[inline]
-    fn from(other: OpenAddressedLoadFactor) -> LoadFactor {
-        LoadFactor::OpenAddressed(other)
-    }
-}
-
 /// Chaining Hash Table Load Factor
 #[derive(Clone, Copy, Debug, Eq)]
 pub struct ChainedLoadFactor {
@@ -68,15 +45,6 @@ impl Ord for ChainedLoadFactor {
     fn cmp(&self, rhs: &Self) -> cmp::Ordering {
         (self.size * rhs.bucket_count).cmp(&(rhs.size * self.bucket_count))
     }
-}
-
-/// Open Addressing Hash Table Load Factor
-#[derive(Clone, Copy, Debug)]
-pub struct OpenAddressedLoadFactor {
-    /// The maximum number of items in the hash table.
-    pub capacity: usize,
-    /// The number of items in the hash table.
-    pub size: usize,
 }
 
 /// The default load factor of a chaining hash table.
