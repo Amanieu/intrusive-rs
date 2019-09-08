@@ -290,7 +290,6 @@ pub mod singly_linked_list;
 pub mod xor_linked_list;
 
 pub mod array;
-pub mod bits;
 pub mod dynamic_array;
 mod hash_adapter;
 mod hash_table;

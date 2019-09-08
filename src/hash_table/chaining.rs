@@ -15,7 +15,6 @@ use core::fmt;
 
 use crate::adapter::Adapter;
 use crate::array::Array;
-use crate::bits::{Bits, BitsArray};
 use crate::dynamic_array::DynamicArray;
 use crate::hash_adapter::HashAdapter;
 pub use crate::hash_table::ChainedLoadFactor;
@@ -30,27 +29,23 @@ use crate::hash_table::DEFAULT_CHAINED_LOAD_FACTOR;
 /// When this collection is dropped, all elements linked into it will be
 /// converted back to owned pointers and dropped.
 #[derive(Clone)]
-pub struct ChainedHashTable<A, B, C, S>
+pub struct ChainedHashTable<A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
 {
     adapter: A,
     buckets: B,
-    buckets_bits: C,
-    buckets_len: usize,
     hash_builder: S,
     max_load_factor: ChainedLoadFactor,
     cap: usize,
     size: usize,
 }
 
-impl<A, B, C, S> Drop for ChainedHashTable<A, B, C, S>
+impl<A, B, S> Drop for ChainedHashTable<A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
 {
     fn drop(&mut self) {
         // Must be explicit b/c the array used to index the buckets may never be dropped.
@@ -58,26 +53,22 @@ where
     }
 }
 
-impl<A, B, C, S> Default for ChainedHashTable<A, B, C, S>
+impl<A, B, S> Default for ChainedHashTable<A, B, S>
 where
     A: Adapter<Link = LinkedListLink> + Default,
     B: Array<Item = LinkedList<A>> + Default,
-    C: Array + Default,
-    C::Item: Bits,
     S: BuildHasher + Default,
 {
     #[inline]
-    fn default() -> ChainedHashTable<A, B, C, S> {
-        ChainedHashTable::with_adapter_buckets_hasher_and_load_factor(A::default(), B::default(), C::default(), S::default(), DEFAULT_CHAINED_LOAD_FACTOR)
+    fn default() -> ChainedHashTable<A, B, S> {
+        ChainedHashTable::with_adapter_buckets_hasher_and_load_factor(A::default(), B::default(), S::default(), DEFAULT_CHAINED_LOAD_FACTOR)
     }
 }
 
-impl<A, B, C, S> fmt::Debug for ChainedHashTable<A, B, C, S>
+impl<A, B, S> fmt::Debug for ChainedHashTable<A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
     A::Value: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -85,12 +76,10 @@ where
     }
 }
 
-impl<A, B, C, S> ChainedHashTable<A, B, C, S>
+impl<A, B, S> ChainedHashTable<A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>> + Default,
-    C: Array + Default,
-    C::Item: Bits,
     S: BuildHasher + Default,
 {
     /// Creates an empty `ChainedHashTable`.
@@ -100,10 +89,9 @@ where
     /// If `B` implements [`DynamicArray`], then it will not allocated until it is first inserted into.
     ///
     #[inline]
-    pub fn new(adapter: A) -> ChainedHashTable<A, B, C, S> {
+    pub fn new(adapter: A) -> ChainedHashTable<A, B, S> {
         ChainedHashTable::with_adapter_buckets_hasher_and_load_factor(
             adapter,
-            Default::default(),
             Default::default(),
             Default::default(),
             DEFAULT_CHAINED_LOAD_FACTOR,
@@ -111,12 +99,10 @@ where
     }
 }
 
-impl<A, B, C, S> ChainedHashTable<A, B, C, S>
+impl<A, B, S> ChainedHashTable<A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
     S: BuildHasher,
 {
     /// Creates an empty `ChainedHashTable`.
@@ -124,18 +110,14 @@ where
     pub fn with_adapter_buckets_hasher_and_load_factor(
         adapter: A,
         buckets: B,
-        buckets_bits: C,
         hasher: S,
         load_factor: ChainedLoadFactor,
-    ) -> ChainedHashTable<A, B, C, S> {
-        let buckets_len = cmp::min(buckets.len(), buckets_bits.len() * <C::Item as Bits>::BITS);
-        let cap = cmp::max(0, buckets_len / load_factor.bucket_count) * load_factor.size;
+    ) -> ChainedHashTable<A, B, S> {
+        let cap = (buckets.len() / load_factor.bucket_count) * load_factor.size;
 
         ChainedHashTable {
             adapter,
             buckets,
-            buckets_bits,
-            buckets_len,
             hash_builder: hasher,
             max_load_factor: load_factor,
             cap,
@@ -144,11 +126,10 @@ where
     }
 }
 
-impl<A, B, C, S> ChainedHashTable<A, B, C, S>
+impl<A, B, S> ChainedHashTable<A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
 {
     /// Returns `true` if the `ChainedHashTable` is empty.
     #[inline]
@@ -164,7 +145,7 @@ where
 
     /// Returns a null `Cursor` for this hash table.
     #[inline]
-    pub fn cursor(&self) -> Cursor<'_, A, B, C, S> {
+    pub fn cursor(&self) -> Cursor<'_, A, B, S> {
         Cursor {
             hash_table: self,
             inner: None,
@@ -173,7 +154,7 @@ where
 
     /// Returns a null `CursorMut` for this hash table.
     #[inline]
-    pub fn cursor_mut(&mut self) -> CursorMut<'_, A, B, C, S> {
+    pub fn cursor_mut(&mut self) -> CursorMut<'_, A, B, S> {
         CursorMut {
             hash_table: self,
             inner: None,
@@ -226,31 +207,15 @@ where
     #[inline]
     fn clear(&mut self) {
         for bucket in self.buckets.as_mut_slice() {
-            let mut cursor = bucket.front_mut();
-            while let Some(ptr) = cursor.remove() {
-                core::mem::drop(ptr);
-            }
+            bucket.clear()
         }
-        /*let mut start = None;
-        while let Some(idx) = self.buckets_bits.find_next_one(start) {
-            // iterate over the buckets..
-            let mut cursor = bucket.front_mut();
-            while let Some(ptr) = cursor.remove() {
-                core::mem::drop(ptr);
-            }
-            start = Some(idx.saturating_add(1));
-        }
-        self.buckets_bits.clear();
-        self.size = 0;*/
     }
 }
 
-impl<A, B, C, S> ChainedHashTable<A, B, C, S>
+impl<A, B, S> ChainedHashTable<A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
 {
     /// Empties the `ChainedHashTable` without unlinking or freeing objects in it.
     ///
@@ -260,20 +225,15 @@ where
     /// `force_unlink` function on them.
     #[inline]
     pub fn fast_clear(&mut self) {
-        let mut start = None;
-        while let Some(idx) = self.buckets_bits.find_next_one(start) {
-            // iterate over the buckets..
-            self.buckets.as_mut_slice()[idx].fast_clear();
-            start = Some(idx);
+        for bucket in self.buckets.as_mut_slice() {
+            bucket.fast_clear()
         }
-        self.buckets_bits.clear();
-        self.size = 0;
     }
 
     /// Returns a `Cursor` pointing to the first element of the hash table. If the
     /// hash table is empty then a null cursor is returned.
     #[inline]
-    pub fn front(&self) -> Cursor<'_, A, B, C, S> {
+    pub fn front(&self) -> Cursor<'_, A, B, S> {
         let mut ret = self.cursor();
         ret.move_next();
         ret
@@ -282,7 +242,7 @@ where
     /// Returns a `CursorMut` pointing to the first element of the hash table. If the
     /// hash table is empty then a null cursor is returned.
     #[inline]
-    pub fn front_mut(&mut self) -> CursorMut<'_, A, B, C, S> {
+    pub fn front_mut(&mut self) -> CursorMut<'_, A, B, S> {
         let mut ret = self.cursor_mut();
         ret.move_next();
         ret
@@ -291,7 +251,7 @@ where
     /// Returns a `Cursor` pointing to the last element of the hash table. If the
     /// hash table is empty then a null cursor is returned.
     #[inline]
-    pub fn back(&self) -> Cursor<'_, A, B, C, S> {
+    pub fn back(&self) -> Cursor<'_, A, B, S> {
         let mut ret = self.cursor();
         ret.move_prev();
         ret
@@ -300,7 +260,7 @@ where
     /// Returns a `CursorMut` pointing to the last element of the hash table. If the
     /// hash table is empty then a null cursor is returned.
     #[inline]
-    pub fn back_mut(&mut self) -> CursorMut<'_, A, B, C, S> {
+    pub fn back_mut(&mut self) -> CursorMut<'_, A, B, S> {
         let mut ret = self.cursor_mut();
         ret.move_prev();
         ret
@@ -309,19 +269,17 @@ where
     /// Gets an iterator over the objects in the `ChainedHashTable`, in ascending key
     /// order.
     #[inline]
-    pub fn iter(&self) -> Iter<'_, A, B, C, S> {
+    pub fn iter(&self) -> Iter<'_, A, B, S> {
         Iter {
             cursor: self.front(),
         }
     }
 }
 
-impl<A, B, C, S> ChainedHashTable<A, B, C, S>
+impl<A, B, S> ChainedHashTable<A, B, S>
 where
     A: for<'a> KeyAdapter<'a, Link = LinkedListLink> + HashAdapter,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
     S: BuildHasher,
 {
     #[inline]
@@ -331,11 +289,7 @@ where
         A::Value: 'a,
         //B::Item: 'a,
     {
-        let bucket_idx = (hash_code % (self.buckets_len as u64)) as usize;
-
-        if !(self.buckets_bits.get_bit(bucket_idx) == Some(true)) {
-            return (bucket_idx, None);
-        }
+        let bucket_idx = (hash_code % (self.buckets.len() as u64)) as usize;
 
         for val in self.buckets.as_slice()[bucket_idx].iter() {
             // did we cache the hash code?
@@ -377,7 +331,7 @@ where
     /// If multiple elements with an identical key are found then an arbitrary
     /// one is returned.
     #[inline]
-    pub fn find<'a, Q: ?Sized + Eq + Hash>(&self, key: &Q) -> Cursor<'_, A, B, C, S>
+    pub fn find<'a, Q: ?Sized + Eq + Hash>(&self, key: &Q) -> Cursor<'_, A, B, S>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
         A::Value: 'a,
@@ -402,7 +356,7 @@ where
     /// If multiple elements with an identical key are found then an arbitrary
     /// one is returned.
     #[inline]
-    pub fn find_mut<'a, Q: ?Sized + Eq + Hash>(&mut self, key: &Q) -> CursorMut<'_, A, B, C, S>
+    pub fn find_mut<'a, Q: ?Sized + Eq + Hash>(&mut self, key: &Q) -> CursorMut<'_, A, B, S>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
         A::Value: 'a,
@@ -432,13 +386,11 @@ where
     }
 }
 
-impl<A, B, C, S> ChainedHashTable<A, B, C, S>
+impl<A, B, S> ChainedHashTable<A, B, S>
 where
     A: Adapter<Link = LinkedListLink> + HashAdapter,
     A: for<'a> KeyAdapter<'a>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
     S: BuildHasher,
 {
     /// Returns an `Entry` for the given key which contains a `CursorMut` to an
@@ -446,7 +398,7 @@ where
     /// in which to insert a new element with the given key.
     ///
     /// This is more efficient than calling `find` followed by `insert` since
-    /// the tree does not have to be searched a second time to find a place to
+    /// the hash table does not have to be searched a second time to find a place to
     /// insert the new element.
     ///
     /// If multiple elements with an identical key are found then an arbitrary
@@ -455,7 +407,7 @@ where
     pub fn entry_noalloc<'a>(
         &mut self,
         val: A::Pointer,
-    ) -> Result<Entry<'_, A, B, C, S>, A::Pointer>
+    ) -> Result<Entry<'_, A, B, S>, A::Pointer>
     where
         <A as KeyAdapter<'a>>::Key: Eq + Hash,
         A::Value: 'a,
@@ -489,7 +441,7 @@ where
     pub fn insert_noalloc<'a>(
         &mut self,
         val: A::Pointer,
-    ) -> Result<CursorMut<'_, A, B, C, S>, A::Pointer>
+    ) -> Result<CursorMut<'_, A, B, S>, A::Pointer>
     where
         <A as KeyAdapter<'a>>::Key: Eq + Hash,
         A::Value: 'a,
@@ -531,18 +483,17 @@ where
         // V
         // self.size * self.max_load_factor.bucket_count < self.max_load_factor.size * self.buckets_len
         if !(self.size * self.max_load_factor.bucket_count
-            < self.max_load_factor.size * self.buckets_len)
+            < self.max_load_factor.size * self.buckets.len())
         {
             return Err(val);
         }
 
         self.adapter.set_cached_hash(val.deref(), Some(hash_code));
-        let bucket_idx = (hash_code % (self.buckets_len as u64)) as usize;
+        let bucket_idx = (hash_code % (self.buckets.len() as u64)) as usize;
 
         let ptr = { val.deref() as *const _ };
         self.size += 1;
         self.buckets.as_mut_slice()[bucket_idx].push_back(val);
-        self.buckets_bits.set_bit(bucket_idx, true);
 
         Ok((ptr, bucket_idx))
     }
@@ -568,7 +519,7 @@ where
         // V
         // self.size * self.max_load_factor.bucket_count < self.max_load_factor.size * self.buckets_len
         if !(self.size * self.max_load_factor.bucket_count
-            < self.max_load_factor.size * self.buckets_len)
+            < self.max_load_factor.size * self.buckets.len())
         {
             return Err(val);
         }
@@ -618,17 +569,15 @@ where
     }
 }
 
-impl<A, B, C, S> ChainedHashTable<A, B, C, S>
+impl<A, B, S> ChainedHashTable<A, B, S>
 where
     A: Adapter<Link = LinkedListLink> + HashAdapter + Clone,
     A: for<'a> KeyAdapter<'a>,
     B: DynamicArray<Item = LinkedList<A>>,
-    C: DynamicArray,
-    C::Item: Bits,
     S: BuildHasher,
 {
     /// Inserts a value into the table.
-    pub fn insert<'a>(&mut self, mut val: A::Pointer) -> CursorMut<'_, A, B, C, S>
+    pub fn insert<'a>(&mut self, mut val: A::Pointer) -> CursorMut<'_, A, B, S>
     where
         <A as KeyAdapter<'a>>::Key: Eq + Hash,
         A::Value: 'a,
@@ -642,7 +591,7 @@ where
                     };
                 }
                 Err(ptr) => {
-                    self.rehash(self.buckets_len + (self.buckets_len >> 1));
+                    self.rehash(self.buckets.len() + (self.buckets.len() >> 1));
                     // try to insert again
                     val = ptr;
                 }
@@ -655,7 +604,7 @@ where
     /// in which to insert a new element with the given key.
     ///
     /// This is more efficient than calling `find` followed by `insert` since
-    /// the tree does not have to be searched a second time to find a place to
+    /// the hash table does not have to be searched a second time to find a place to
     /// insert the new element.
     ///
     /// If multiple elements with an identical key are found then an arbitrary
@@ -664,7 +613,7 @@ where
     pub fn entry<'a>(
         &mut self,
         mut val: A::Pointer,
-    ) -> Entry<'_, A, B, C, S>
+    ) -> Entry<'_, A, B, S>
     where
         <A as KeyAdapter<'a>>::Key: Eq + Hash,
         A::Value: 'a,
@@ -678,7 +627,7 @@ where
                     return x;
                 }
                 Err(ptr) => {
-                    self.rehash(self.buckets_len + (self.buckets_len >> 1));
+                    self.rehash(self.buckets.len() + (self.buckets.len() >> 1));
                     // try to insert again
                     val = ptr;
                 }
@@ -714,8 +663,8 @@ where
                 acc
             },
         );
-        self.buckets_bits.clear();
-        let old_bucket_count = self.buckets_len;
+        
+        let old_bucket_count = self.buckets.len();
         // increase by 1.5x, not 2x.
         // 1.5x is optimal for resizing dynamic arrays. look it up!
         let new_bucket_count = cmp::max(cmp::max(2, old_bucket_count + (old_bucket_count >> 1)), new_buckets_len);
@@ -723,10 +672,6 @@ where
         let new_adapter = self.adapter.clone();
         self.buckets
             .resize_with(new_bucket_count, || LinkedList::new(new_adapter.clone()));
-        self.buckets_bits.resize_with(
-            (new_bucket_count + <C::Item as Bits>::BITS - 1) / <C::Item as Bits>::BITS,
-            || <C::Item as Bits>::ZERO,
-        );
         // Re-hash everything.
         let mut cursor = items.front_mut();
         while let Some(item) = cursor.remove() {
@@ -746,37 +691,30 @@ where
             let bucket_idx = (hash_code % (new_bucket_count as u64)) as usize;
 
             self.buckets.as_mut_slice()[bucket_idx].push_back(item);
-            self.buckets_bits.set_bit(bucket_idx, true);
         }
         // what is the new capacity?
         let new_cap = cmp::max(1, new_bucket_count / self.max_load_factor.bucket_count)
             * self.max_load_factor.size;
         self.cap = new_cap;
-        self.buckets_len = cmp::min(
-            self.buckets.len(),
-            self.buckets_bits.len() * <C::Item as Bits>::BITS,
-        );
     }
 }
 
 /// A cursor which provides read-only access to a `ChainedHashTable`.
-pub struct Cursor<'a, A, B, C, S>
+pub struct Cursor<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
 {
-    hash_table: &'a ChainedHashTable<A, B, C, S>,
+    hash_table: &'a ChainedHashTable<A, B, S>,
     inner: Option<(*const A::Value, usize)>,
 }
 // bucket_index(&self) -> Option<usize>
 // move_next, move_prev, move_next_bucket, move_prev_bucket
 
-impl<'a, A, B, C, S> Clone for Cursor<'a, A, B, C, S>
+impl<'a, A, B, S> Clone for Cursor<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
 {
     #[inline]
     fn clone(&self) -> Self {
@@ -787,27 +725,24 @@ where
     }
 }
 
-unsafe impl<'a, A, B, C, S> Send for Cursor<'a, A, B, C, S>
+unsafe impl<'a, A, B, S> Send for Cursor<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
 {
 }
 
-unsafe impl<'a, A, B, C, S> Sync for Cursor<'a, A, B, C, S>
+unsafe impl<'a, A, B, S> Sync for Cursor<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
 {
 }
 
-impl<'a, A, B, C, S> Cursor<'a, A, B, C, S>
+impl<'a, A, B, S> Cursor<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
 {
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
@@ -832,12 +767,10 @@ where
     }
 }
 
-impl<'a, A, B, C, S> Cursor<'a, A, B, C, S>
+impl<'a, A, B, S> Cursor<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
 {
     /// Moves the cursor to the next element of the `ChainedHashTable`.
     ///
@@ -857,21 +790,21 @@ where
                     return;
                 }
             }
-            // or start the search at idx
-            Some(idx)
+            // or start the search at idx, exclusive
+            idx.saturating_add(1)
         } else {
-            None
+            0
         };
 
         // find item in any bucket
-        while let Some(idx) = self.hash_table.buckets_bits.find_next_one(start) {
-            let cursor = self.hash_table.buckets.as_slice()[idx].front();
-            if cursor.is_null() {
-                panic!("the bit is wrong! the bucket is empty. {:?}", idx);
+        for i in start..(self.hash_table.buckets.len()) {
+            let cursor = self.hash_table.buckets.as_slice()[i].front();
+            if !cursor.is_null() {
+                self.inner = cursor.get().map(|x| (x as *const _, i));
+                return;
             }
-            self.inner = cursor.get().map(|x| (x as *const _, idx));
-            return;
         }
+        
         self.inner = None;
     }
 
@@ -882,7 +815,7 @@ where
     /// element of the `ChainedHashTable` then this will move it to the null object.
     #[inline]
     pub fn move_prev(&mut self) {
-        let idx = if let Some((ptr, idx)) = self.inner {
+        let end = if let Some((ptr, idx)) = self.inner {
             // find prev item in bucket 'idx'
             {
                 let mut cursor =
@@ -893,22 +826,21 @@ where
                     return;
                 }
             }
-            // or start the search at idx
-            Some(idx)
+            // or end the search at idx, exclusive
+            idx
         } else {
-            None
+            self.hash_table.buckets.len()
         };
 
         // find item in any bucket
-        while let Some(idx) = self.hash_table.buckets_bits.find_prev_one(idx) {
-            let cursor = self.hash_table.buckets.as_slice()[idx].front();
-            if cursor.is_null() {
-                // the bit is wrong! the bucket is empty.
-                continue;
+        for i in (0..end).rev() {
+            let cursor = self.hash_table.buckets.as_slice()[i].front();
+            if !cursor.is_null() {
+                self.inner = cursor.get().map(|x| (x as *const _, i));
+                return;
             }
-            self.inner = cursor.get().map(|x| (x as *const _, idx));
-            return;
         }
+
         self.inner = None;
     }
 
@@ -919,22 +851,16 @@ where
     /// element of the `ChainedHashTable` then this will move it to the null object.
     #[inline]
     pub fn move_next_bucket(&mut self) {
-        while let Some(idx) = self
-            .hash_table
-            .buckets_bits
-            .find_next_one(self.inner.map(|(_, idx)| idx))
-        {
-            let cursor = self.hash_table.buckets.as_slice()[idx].front();
-            if cursor.is_null() {
-                // the bit is wrong! the bucket is empty.
-                continue;
+        // idx is exclusive
+        let start = self.inner.map(|(_, idx)| idx.saturating_add(1)).unwrap_or(0);
+        for i in start..(self.hash_table.buckets.len()) {
+            let cursor = self.hash_table.buckets.as_slice()[i].front();
+            if !cursor.is_null() {
+                self.inner = cursor.get().map(|x| (x as *const _, i));
+                return;
             }
-            self.inner = self.hash_table.buckets.as_slice()[idx]
-                .front()
-                .get()
-                .map(|x| (x as *const _, idx));
-            return;
         }
+        
         self.inner = None;
     }
 
@@ -945,34 +871,27 @@ where
     /// element of the `ChainedHashTable` then this will move it to the null object.
     #[inline]
     pub fn move_prev_bucket(&mut self) {
-        while let Some(idx) = self
-            .hash_table
-            .buckets_bits
-            .find_prev_one(self.inner.map(|(_, idx)| idx))
-        {
-            let cursor = self.hash_table.buckets.as_slice()[idx].front();
-            if cursor.is_null() {
-                // the bit is wrong! the bucket is empty.
-                continue;
+        // idx is exclusive
+        let end = self.inner.map(|(_, idx)| idx).unwrap_or(self.hash_table.buckets.len());
+        for i in (0..end).rev() {
+            let cursor = self.hash_table.buckets.as_slice()[i].front();
+            if !cursor.is_null() {
+                self.inner = cursor.get().map(|x| (x as *const _, i));
+                return;
             }
-            self.inner = self.hash_table.buckets.as_slice()[idx]
-                .front()
-                .get()
-                .map(|x| (x as *const _, idx));
-            return;
         }
+        
         self.inner = None;
     }
 }
 
 /// A cursor which provides mutable access to a `ChainedHashTable`.
-pub struct CursorMut<'a, A, B, C, S>
+pub struct CursorMut<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
 {
-    hash_table: &'a mut ChainedHashTable<A, B, C, S>,
+    hash_table: &'a mut ChainedHashTable<A, B, S>,
     inner: Option<(*const A::Value, usize)>,
 }
 // bucket_index(&self) -> Option<usize>
@@ -980,12 +899,10 @@ where
 // remove
 // replace
 
-impl<'a, A, B, C, S> CursorMut<'a, A, B, C, S>
+impl<'a, A, B, S> CursorMut<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
 {
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
@@ -1015,7 +932,7 @@ where
     /// `CursorMut`, which means it cannot outlive the `CursorMut` and that the
     /// `CursorMut` is frozen for the lifetime of the `Cursor`.
     #[inline]
-    pub fn as_cursor(&self) -> Cursor<'_, A, B, C, S> {
+    pub fn as_cursor(&self) -> Cursor<'_, A, B, S> {
         Cursor {
             hash_table: self.hash_table,
             inner: self.inner.clone(),
@@ -1076,7 +993,7 @@ where
     /// first element of the `ChainedHashTable`. If it is pointing to the last
     /// element of the `ChainedHashTable` then this will return a null cursor.
     #[inline]
-    pub fn peek_next(&self) -> Cursor<'_, A, B, C, S> {
+    pub fn peek_next(&self) -> Cursor<'_, A, B, S> {
         let mut next = self.as_cursor();
         next.move_next();
         next
@@ -1088,7 +1005,7 @@ where
     /// last element of the `ChainedHashTable`. If it is pointing to the first
     /// element of the `ChainedHashTable` then this will return a null cursor.
     #[inline]
-    pub fn peek_prev(&self) -> Cursor<'_, A, B, C, S> {
+    pub fn peek_prev(&self) -> Cursor<'_, A, B, S> {
         let mut prev = self.as_cursor();
         prev.move_prev();
         prev
@@ -1116,22 +1033,16 @@ where
                 self.hash_table.size -= 1;
                 let ret = cursor.remove();
                 self.inner = next_inner;
-                // clear the bit, if necessary
-                if self.hash_table.buckets.as_slice()[idx].is_empty() {
-                    self.hash_table.buckets_bits.set_bit(idx, false);
-                }
                 ret
             }
         }
     }
 }
 
-impl<'a, A, B, C, S> CursorMut<'a, A, B, C, S>
+impl<'a, A, B, S> CursorMut<'a, A, B, S>
 where
     A: HashAdapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
 {
     /// Removes the current element from the `ChainedHashTable` and inserts another
     /// object in its place.
@@ -1167,13 +1078,11 @@ where
     }
 }
 
-impl<'a, A, B, C, S> CursorMut<'a, A, B, C, S>
+impl<'a, A, B, S> CursorMut<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink> + HashAdapter,
     A: for<'b> KeyAdapter<'b>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
     S: core::hash::BuildHasher,
 {
     /// Inserts a new element into the `ChainedHashTable`.
@@ -1200,13 +1109,11 @@ where
     }
 }
 
-impl<'a, A, B, C, S> CursorMut<'a, A, B, C, S>
+impl<'a, A, B, S> CursorMut<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink> + HashAdapter + Clone + Default,
     A: for<'b> KeyAdapter<'b>,
     B: DynamicArray<Item = LinkedList<A>>,
-    C: DynamicArray,
-    C::Item: Bits,
     S: core::hash::BuildHasher,
 {
     /// Inserts a new element into the `ChainedHashTable`.
@@ -1230,21 +1137,18 @@ where
 // insert_after, insert_before may be unsafe b/c we must ensure that the key hashes to the appropriate bucket.
 
 /// A iterator over the items in a chained hash table.
-pub struct Iter<'a, A, B, C, S>
+pub struct Iter<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
 {
-    cursor: Cursor<'a, A, B, C, S>,
+    cursor: Cursor<'a, A, B, S>,
 }
 
-impl<'a, A, B, C, S> Clone for Iter<'a, A, B, C, S>
+impl<'a, A, B, S> Clone for Iter<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink> + 'a,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
 {
     #[inline]
     fn clone(&self) -> Self {
@@ -1254,12 +1158,10 @@ where
     }
 }
 
-impl<'a, A, B, C, S> Iterator for Iter<'a, A, B, C, S>
+impl<'a, A, B, S> Iterator for Iter<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink> + 'a,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
 {
     type Item = &'a A::Value;
 
@@ -1276,12 +1178,10 @@ where
     }
 }
 
-impl<'a, A, B, C, S> DoubleEndedIterator for Iter<'a, A, B, C, S>
+impl<'a, A, B, S> DoubleEndedIterator for Iter<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink> + 'a,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
 {
     fn next_back(&mut self) -> Option<Self::Item> {
         unsafe {
@@ -1296,38 +1196,32 @@ where
     }
 }
 
-impl<'a, A, B, C, S> iter::FusedIterator for Iter<'a, A, B, C, S>
+impl<'a, A, B, S> iter::FusedIterator for Iter<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink> + 'a,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
 {
 }
 
 /// An entry in a `ChainedHashTable`.
 ///
 /// See the documentation for `ChainedHashTable::entry`.
-pub enum Entry<'a, A, B, C, S>
+pub enum Entry<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
 {
     /// An occupied entry.
-    Occupied(CursorMut<'a, A, B, C, S>),
+    Occupied(CursorMut<'a, A, B, S>),
     /// A vacant entry.
-    Vacant(InsertCursor<'a, A, B, C, S>),
+    Vacant(InsertCursor<'a, A, B, S>),
 }
 
-impl<'a, A, B, C, S> Entry<'a, A, B, C, S>
+impl<'a, A, B, S> Entry<'a, A, B, S>
 where
     A: HashAdapter<Link = LinkedListLink>,
     A: for<'b> KeyAdapter<'b>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
     S: BuildHasher,
     <A as KeyAdapter<'a>>::Key: Eq + Hash,
 {
@@ -1340,7 +1234,7 @@ where
     /// Panics if the `Entry` is vacant and the new element is already linked to
     /// a different intrusive collection.
     #[inline]
-    pub fn or_insert(self, val: A::Pointer) -> CursorMut<'a, A, B, C, S> {
+    pub fn or_insert(self, val: A::Pointer) -> CursorMut<'a, A, B, S> {
         match self {
             Entry::Occupied(x) => x,
             Entry::Vacant(x) => x.insert(val),
@@ -1357,7 +1251,7 @@ where
     /// Panics if the `Entry` is vacant and the new element is already linked to
     /// a different intrusive collection.
     #[inline]
-    pub fn or_insert_with<F: FnOnce() -> A::Pointer>(self, f: F) -> CursorMut<'a, A, B, C, S> {
+    pub fn or_insert_with<F: FnOnce() -> A::Pointer>(self, f: F) -> CursorMut<'a, A, B, S> {
         match self {
             Entry::Occupied(x) => x,
             Entry::Vacant(x) => x.insert(f()),
@@ -1367,24 +1261,20 @@ where
 
 /// A cursor pointing to a slot in which an element can be inserted into a
 /// `ChainedHashTable`.
-pub struct InsertCursor<'a, A, B, C, S>
+pub struct InsertCursor<'a, A, B, S>
 where
     A: Adapter<Link = LinkedListLink>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
 {
-    hash_table: &'a mut ChainedHashTable<A, B, C, S>,
+    hash_table: &'a mut ChainedHashTable<A, B, S>,
     hash_code: u64,
 }
 
-impl<'a, A, B, C, S> InsertCursor<'a, A, B, C, S>
+impl<'a, A, B, S> InsertCursor<'a, A, B, S>
 where
     A: HashAdapter<Link = LinkedListLink> + 'a,
     A: for<'b> KeyAdapter<'b>,
     B: Array<Item = LinkedList<A>>,
-    C: Array,
-    C::Item: Bits,
     S: BuildHasher,
     <A as KeyAdapter<'a>>::Key: Eq + Hash,
 {
@@ -1396,7 +1286,7 @@ where
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert(self, val: A::Pointer) -> CursorMut<'a, A, B, C, S> {
+    pub fn insert(self, val: A::Pointer) -> CursorMut<'a, A, B, S> {
         match self.hash_table.insert_noalloc_helper_hash_code(val, self.hash_code) {
             Ok((ptr, idx)) => {
                 CursorMut {
@@ -1464,7 +1354,7 @@ mod tests {
     fn test_insert_remove() {
         let v = (0..100).map(make_obj).collect::<Vec<_>>();
         assert!(v.iter().all(|x| !x.link.is_linked()));
-        let mut t: ChainedHashTable<_, Vec<_>, Vec<usize>, RandomState> =
+        let mut t: ChainedHashTable<_, Vec<_>, RandomState> =
             ChainedHashTable::new(ObjAdapter::new());
         t.set_max_load_factor(ChainedLoadFactor::new(7, 8));
         assert!(t.is_empty());
@@ -1502,7 +1392,7 @@ mod tests {
     #[test]
     fn test_find() {
         let v = (0..10).map(|x| make_obj(x * 10)).collect::<Vec<_>>();
-        let mut t: ChainedHashTable<_, Vec<_>, Vec<usize>, RandomState> =
+        let mut t: ChainedHashTable<_, Vec<_>, RandomState> =
             ChainedHashTable::new(ObjAdapter::new());
         assert!(t.is_empty());
         for x in v.iter() {
@@ -1529,7 +1419,7 @@ mod tests {
 
     #[test]
     fn test_fast_clear() {
-        let mut t: ChainedHashTable<_, Vec<_>, Vec<usize>, RandomState> =
+        let mut t: ChainedHashTable<_, Vec<_>, RandomState> =
             ChainedHashTable::new(ObjAdapter::new());
         t.set_max_load_factor(ChainedLoadFactor::new(7, 8));
         let a = make_obj(1);
@@ -1591,7 +1481,7 @@ mod tests {
         };
         let b = a.clone();
         let adapter: ObjAdapter<'_, i32> = ObjAdapter::new();
-        let mut l: ChainedHashTable<_, Vec<_>, Vec<usize>, RandomState> =
+        let mut l: ChainedHashTable<_, Vec<_>, RandomState> =
             ChainedHashTable::new(adapter);
         l.insert(&a);
         l.insert(&b);
