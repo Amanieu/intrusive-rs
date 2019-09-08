@@ -125,7 +125,7 @@ impl From<core::alloc::LayoutErr> for DynamicArrayAllocErr {
     }
 }
 
-#[cfg(any(test, feature = "std", feature = "alloc"))]
+#[cfg(any(test, feature = "alloc"))]
 impl<T> DynamicArray for alloc::vec::Vec<T> {
     #[inline]
     fn capacity(&self) -> usize {

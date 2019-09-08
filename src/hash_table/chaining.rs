@@ -6,9 +6,6 @@
 // copied, modified, or distributed except according to those terms.
 
 //! Intrusive hash table that uses "separate chaining" for collision resolution.
-#[cfg(any(test, feature = "std"))]
-use std::collections::hash_map::RandomState;
-
 use core::borrow::Borrow;
 use core::cmp;
 use core::hash::{BuildHasher, Hash, Hasher};
@@ -28,29 +25,6 @@ use crate::linked_list::LinkedList;
 //use crate::intrusive_pointer::IntrusivePointer;
 use crate::hash_table::DEFAULT_CHAINED_LOAD_FACTOR;
 
-#[cfg(any(test, feature = "std"))]
-/// An intrusive hash table.
-///
-/// When this collection is dropped, all elements linked into it will be
-/// converted back to owned pointers and dropped.
-#[derive(Clone)]
-pub struct ChainedHashTable<A, B, C, S = std::collections::hash_map::RandomState>
-where
-    A: Adapter<Link = LinkedListLink>,
-    B: Array<Item = LinkedList<A>>,
-    C: Array,
-{
-    adapter: A,
-    buckets: B,
-    buckets_bits: C,
-    buckets_len: usize,
-    hash_builder: S,
-    max_load_factor: ChainedLoadFactor,
-    cap: usize,
-    size: usize,
-}
-
-#[cfg(not(any(test, feature = "std")))]
 /// An intrusive hash table.
 ///
 /// When this collection is dropped, all elements linked into it will be

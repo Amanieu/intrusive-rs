@@ -74,7 +74,7 @@ impl_array!(36,
             0x40, 0x80, 0x100, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x4000, 0x8000,
             0x10000, 0x20000, 0x40000, 0x80000, 0x100000);
 
-#[cfg(any(test, feature = "std", feature = "alloc"))]
+#[cfg(any(test, feature = "alloc"))]
 impl<T> Array for alloc::vec::Vec<T> {
     type Item = T;
 
@@ -133,7 +133,7 @@ impl<'a, T> Array for &'a mut [T] {
     }
 }
 
-#[cfg(any(test, feature = "std", feature = "alloc"))]
+#[cfg(any(test, feature = "alloc"))]
 impl<T> Array for alloc::boxed::Box<[T]> {
     type Item = T;
 
