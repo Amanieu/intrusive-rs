@@ -209,6 +209,7 @@ where
         for bucket in self.buckets.as_mut_slice() {
             bucket.clear()
         }
+        self.size = 0;
     }
 }
 
@@ -228,6 +229,7 @@ where
         for bucket in self.buckets.as_mut_slice() {
             bucket.fast_clear()
         }
+        self.size = 0;
     }
 
     /// Returns a `Cursor` pointing to the first element of the hash table. If the
