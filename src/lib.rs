@@ -282,10 +282,8 @@
 #![cfg_attr(feature = "nightly", feature(const_fn, allow_internal_unstable))]
 
 // Use liballoc on nightly to avoid a dependency on libstd
-#[cfg(all(feature = "nightly", feature = "alloc"))]
+#[cfg(all(feature = "alloc"))]
 extern crate alloc;
-#[cfg(all(not(feature = "nightly"), feature = "alloc"))]
-extern crate std as alloc;
 
 #[cfg(test)]
 #[macro_use]
