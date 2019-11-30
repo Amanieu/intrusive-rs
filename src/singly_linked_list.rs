@@ -213,15 +213,8 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
     where
         A::Pointer: Clone,
     {
-        if self.is_null() {
-            None
-        } else {
-            let pointer = unsafe {
-                let value = &*self.list.adapter.get_value(self.current.0);
-                core::mem::ManuallyDrop::new(A::Pointer::from_raw(value as *const A::Value))
-            };
-            Some((*pointer).clone())
-        }
+        let raw_pointer = self.get()? as *const A::Value;
+        Some(unsafe { crate::intrusive_pointer::clone_pointer_from_raw(raw_pointer) })
     }
 
     /// Moves the cursor to the next element of the `SinglyLinkedList`.
