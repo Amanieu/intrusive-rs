@@ -192,7 +192,7 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
     /// Returns a reference to the object that the cursor is currently
     /// pointing to.
     ///
-    /// This returns None if the cursor is currently pointing to the null
+    /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
     pub fn get(&self) -> Option<&'a A::Value> {
@@ -206,10 +206,10 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
     /// Clones and returns the pointer that points to the element that the
     /// cursor is referencing.
     ///
-    /// This returns None if the cursor is currently pointing to the null
+    /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get_pointer(&self) -> Option<A::Pointer>
+    pub fn clone_pointer(&self) -> Option<A::Pointer>
     where
         A::Pointer: Clone,
     {
@@ -1125,12 +1125,12 @@ mod tests {
             l.cursor_mut().insert_after(a.clone());
             assert_eq!(2, $ptr::strong_count(&a));
 
-            let pointer = l.front().get_pointer().unwrap();
+            let pointer = l.front().clone_pointer().unwrap();
             assert_eq!(pointer.value, 5);
             assert_eq!(3, $ptr::strong_count(&a));
 
             l.clear();
-            assert!(l.front().get_pointer().is_none());
+            assert!(l.front().clone_pointer().is_none());
         }
     }
 
