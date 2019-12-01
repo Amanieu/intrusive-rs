@@ -116,11 +116,9 @@ pub(crate) unsafe fn clone_pointer_from_raw<P: IntrusivePointer<T> + Clone, T: ?
 
     impl<P: IntrusivePointer<T>, T: ?Sized> Drop for PointerGuard<P, T> {
         fn drop(&mut self) {
-            if let Some(pointer) = self.pointer.take() {
-                // Prevent shared pointers from being released by converting them
-                // back into the raw pointers
-                let _ = pointer.into_raw();
-            }
+            // Prevent shared pointers from being released by converting them
+            // back into the raw pointers
+            let _ = self.pointer.take().unwrap().into_raw();
         }
     }
 
@@ -128,7 +126,7 @@ pub(crate) unsafe fn clone_pointer_from_raw<P: IntrusivePointer<T> + Clone, T: ?
         pointer: Some(P::from_raw(pointer)),
         _phantom: core::marker::PhantomData,
     };
-    holder.pointer.as_ref().map(|p| p.clone()).unwrap()
+    holder.pointer.as_ref().unwrap().clone()
 }
 
 #[cfg(test)]
