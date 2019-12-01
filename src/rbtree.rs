@@ -530,7 +530,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
     /// Returns a reference to the object that the cursor is currently
     /// pointing to.
     ///
-    /// This returns None if the cursor is currently pointing to the null
+    /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
     pub fn get(&self) -> Option<&'a A::Value> {
@@ -539,6 +539,20 @@ impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
         } else {
             Some(unsafe { &*self.tree.adapter.get_value(self.current.0) })
         }
+    }
+
+    /// Clones and returns the pointer that points to the element that the
+    /// cursor is referencing.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null
+    /// object.
+    #[inline]
+    pub fn clone_pointer(&self) -> Option<A::Pointer>
+    where
+        A::Pointer: Clone,
+    {
+        let raw_pointer = self.get()? as *const A::Value;
+        Some(unsafe { crate::intrusive_pointer::clone_pointer_from_raw(raw_pointer) })
     }
 
     /// Moves the cursor to the next element of the `RBTree`.
@@ -1641,14 +1655,14 @@ impl<A: Adapter<Link = Link>> DoubleEndedIterator for IntoIter<A> {
 
 #[cfg(test)]
 mod tests {
+    use self::rand::{Rng, XorShiftRng};
     use super::{Entry, Link, RBTree};
     use crate::Bound::*;
     use crate::{KeyAdapter, UnsafeRef};
+    use rand;
     use std::boxed::Box;
     use std::fmt;
     use std::vec::Vec;
-    use rand;
-    use self::rand::{Rng, XorShiftRng};
 
     #[derive(Clone)]
     struct Obj {
@@ -2365,5 +2379,49 @@ mod tests {
         l.insert(&b);
         assert_eq!(*l.front().get().unwrap().value, 5);
         assert_eq!(*l.back().get().unwrap().value, 5);
+    }
+
+    macro_rules! test_clone_pointer {
+        ($ptr: ident, $ptr_import: path) => {
+            use $ptr_import;
+
+            #[derive(Clone)]
+            struct Obj {
+                link: Link,
+                value: usize,
+            }
+            intrusive_adapter!(ObjAdapter = $ptr<Obj>: Obj { link: Link });
+            impl<'a> KeyAdapter<'a> for ObjAdapter {
+                type Key = usize;
+                fn get_key(&self, value: &'a Obj) -> usize {
+                    value.value
+                }
+            }
+
+            let a = $ptr::new(Obj {
+                link: Link::new(),
+                value: 5,
+            });
+            let mut l = RBTree::new(ObjAdapter::new());
+            l.insert(a.clone());
+            assert_eq!(2, $ptr::strong_count(&a));
+
+            let pointer = l.front().clone_pointer().unwrap();
+            assert_eq!(pointer.value, 5);
+            assert_eq!(3, $ptr::strong_count(&a));
+
+            l.front_mut().remove();
+            assert!(l.front().clone_pointer().is_none());
+        }
+    }
+
+    #[test]
+    fn test_clone_pointer_rc() {
+        test_clone_pointer!(Rc, std::rc::Rc);
+    }
+
+    #[test]
+    fn test_clone_pointer_arc() {
+        test_clone_pointer!(Arc, std::sync::Arc);
     }
 }

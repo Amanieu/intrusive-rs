@@ -99,6 +99,36 @@ unsafe impl<T: ?Sized> IntrusivePointer<T> for Arc<T> {
     }
 }
 
+/// Creates an `IntrusivePointer` from a raw pointer
+///
+/// This method is only safe to call if the raw pointer is known to be
+/// managed by the provided `IntrusivePointer` type.
+pub(crate) unsafe fn clone_pointer_from_raw<P: IntrusivePointer<T> + Clone, T: ?Sized>(
+    pointer: *const T,
+) -> P {
+    /// Guard which converts an `IntrusivePointer` back into its raw version
+    /// when it gets dropped. This makes sure we also perform a full
+    /// `from_raw` and `into_raw` round trip - even in the case of panics.
+    struct PointerGuard<P: IntrusivePointer<T>, T: ?Sized> {
+        pointer: Option<P>,
+        _phantom: core::marker::PhantomData<T>,
+    }
+
+    impl<P: IntrusivePointer<T>, T: ?Sized> Drop for PointerGuard<P, T> {
+        fn drop(&mut self) {
+            // Prevent shared pointers from being released by converting them
+            // back into the raw pointers
+            let _ = self.pointer.take().unwrap().into_raw();
+        }
+    }
+
+    let holder = PointerGuard {
+        pointer: Some(P::from_raw(pointer)),
+        _phantom: core::marker::PhantomData,
+    };
+    holder.pointer.as_ref().unwrap().clone()
+}
+
 #[cfg(test)]
 mod tests {
     use super::IntrusivePointer;
@@ -192,6 +222,28 @@ mod tests {
             let a2: *const dyn Debug = &*p2;
             assert_eq!(a, a2);
             assert_eq!(b, mem::transmute(a2));
+        }
+    }
+
+    #[test]
+    fn clone_arc_from_raw() {
+        use super::clone_pointer_from_raw;
+        unsafe {
+            let p = Arc::new(1);
+            let raw = &*p as *const i32;
+            let p2: Arc<i32> = clone_pointer_from_raw(raw);
+            assert_eq!(2, Arc::strong_count(&p2));
+        }
+    }
+
+    #[test]
+    fn clone_rc_from_raw() {
+        use super::clone_pointer_from_raw;
+        unsafe {
+            let p = Rc::new(1);
+            let raw = &*p as *const i32;
+            let p2: Rc<i32> = clone_pointer_from_raw(raw);
+            assert_eq!(2, Rc::strong_count(&p2));
         }
     }
 }
