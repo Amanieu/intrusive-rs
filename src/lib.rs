@@ -95,6 +95,7 @@
 //! extern crate intrusive_collections;
 //! use intrusive_collections::{SinglyLinkedListLink, SinglyLinkedList};
 //! use intrusive_collections::{LinkedListLink, LinkedList};
+//! use intrusive_collections::{XorLinkedList, XorLinkedListLink};
 //! use intrusive_collections::{RBTreeLink, RBTree, KeyAdapter};
 //! use std::rc::Rc;
 //!
@@ -103,14 +104,16 @@
 //! struct Test {
 //!     link: LinkedListLink,
 //!     link2: SinglyLinkedListLink,
-//!     link3: RBTreeLink,
+//!     link3: XorLinkedListLink,
+//!     link4: RBTreeLink,
 //!     value: i32,
 //! }
 //!
 //! intrusive_adapter!(MyAdapter = Rc<Test>: Test { link: LinkedListLink });
 //! intrusive_adapter!(MyAdapter2 = Rc<Test>: Test { link2: SinglyLinkedListLink });
-//! intrusive_adapter!(MyAdapter3 = Rc<Test>: Test { link3: RBTreeLink });
-//! impl<'a> KeyAdapter<'a> for MyAdapter3 {
+//! intrusive_adapter!(MyAdapter3 = Rc<Test>: Test { link3: XorLinkedListLink });
+//! intrusive_adapter!(MyAdapter4 = Rc<Test>: Test { link4: RBTreeLink });
+//! impl<'a> KeyAdapter<'a> for MyAdapter4 {
 //!     type Key = i32;
 //!     fn get_key(&self, x: &'a Test) -> i32 { x.value }
 //! }
@@ -118,12 +121,14 @@
 //! fn main() {
 //!     let mut a = LinkedList::new(MyAdapter::new());
 //!     let mut b = SinglyLinkedList::new(MyAdapter2::new());
-//!     let mut c = RBTree::new(MyAdapter3::new());
+//!     let mut c = XorLinkedList::new(MyAdapter3::new());
+//!     let mut d = RBTree::new(MyAdapter4::new());
 //!
 //!     let test = Rc::new(Test::default());
 //!     a.push_front(test.clone());
 //!     b.push_front(test.clone());
-//!     c.insert(test);
+//!     c.push_front(test.clone());
+//!     d.insert(test);
 //! }
 //! ```
 //!
@@ -301,6 +306,7 @@ mod key_adapter;
 pub mod linked_list;
 pub mod rbtree;
 pub mod singly_linked_list;
+pub mod xor_linked_list;
 
 pub use crate::adapter::Adapter;
 pub use crate::intrusive_pointer::IntrusivePointer;
@@ -312,6 +318,8 @@ pub use crate::rbtree::RBTree;
 pub use crate::singly_linked_list::Link as SinglyLinkedListLink;
 pub use crate::singly_linked_list::SinglyLinkedList;
 pub use crate::unsafe_ref::UnsafeRef;
+pub use crate::xor_linked_list::Link as XorLinkedListLink;
+pub use crate::xor_linked_list::XorLinkedList;
 
 /// An endpoint of a range of keys.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
