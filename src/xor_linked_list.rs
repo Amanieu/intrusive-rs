@@ -713,6 +713,9 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
 
 /// Intrusive xor doubly-linked list which uses less memory than a regular doubly linked list
 ///
+/// In exchange for less memory use, it is impossible to create a cursor from a pointer to
+/// an element.
+///
 /// When this collection is dropped, all elements linked into it will be
 /// converted back to owned pointers and dropped.
 pub struct XorLinkedList<A: Adapter<Link = Link>> {
