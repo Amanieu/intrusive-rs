@@ -317,9 +317,9 @@ pub use crate::rbtree::Link as RBTreeLink;
 pub use crate::rbtree::RBTree;
 pub use crate::singly_linked_list::Link as SinglyLinkedListLink;
 pub use crate::singly_linked_list::SinglyLinkedList;
+pub use crate::unsafe_ref::UnsafeRef;
 pub use crate::xor_linked_list::Link as XorLinkedListLink;
 pub use crate::xor_linked_list::XorLinkedList;
-pub use crate::unsafe_ref::UnsafeRef;
 
 /// An endpoint of a range of keys.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]

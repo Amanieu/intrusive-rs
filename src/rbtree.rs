@@ -1641,14 +1641,14 @@ impl<A: Adapter<Link = Link>> DoubleEndedIterator for IntoIter<A> {
 
 #[cfg(test)]
 mod tests {
+    use self::rand::{Rng, XorShiftRng};
     use super::{Entry, Link, RBTree};
     use crate::Bound::*;
     use crate::{KeyAdapter, UnsafeRef};
+    use rand;
     use std::boxed::Box;
     use std::fmt;
     use std::vec::Vec;
-    use rand;
-    use self::rand::{Rng, XorShiftRng};
 
     #[derive(Clone)]
     struct Obj {

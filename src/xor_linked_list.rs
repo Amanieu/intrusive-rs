@@ -17,7 +17,6 @@ use core::fmt;
 use core::mem;
 use core::ptr;
 
-
 // =============================================================================
 // Link
 // =============================================================================
@@ -784,7 +783,11 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     /// `ptr` must be a pointer to an object that is part of this list.
     /// `prev` must be a pointer to an object that is the previous object in this list (null for the head)
     #[inline]
-    pub unsafe fn cursor_from_ptr_and_prev(&self, ptr: *const A::Value, prev: *const A::Value) -> Cursor<'_, A> {
+    pub unsafe fn cursor_from_ptr_and_prev(
+        &self,
+        ptr: *const A::Value,
+        prev: *const A::Value,
+    ) -> Cursor<'_, A> {
         debug_assert!(!ptr.is_null());
 
         let current = &*self.adapter.get_link(ptr);
@@ -802,10 +805,7 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
 
         Cursor {
             current,
-            link: BidirPtr {
-                prev,
-                next,
-            },
+            link: BidirPtr { prev, next },
             list: self,
         }
     }
@@ -817,7 +817,11 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     /// `ptr` must be a pointer to an object that is part of this list.
     /// `prev` must be a pointer to an object that is the previous object in this list (null for the head)
     #[inline]
-    pub unsafe fn cursor_mut_from_ptr_and_prev(&mut self, ptr: *const A::Value, prev: *const A::Value) -> CursorMut<'_, A> {
+    pub unsafe fn cursor_mut_from_ptr_and_prev(
+        &mut self,
+        ptr: *const A::Value,
+        prev: *const A::Value,
+    ) -> CursorMut<'_, A> {
         debug_assert!(!ptr.is_null());
 
         let current = &*self.adapter.get_link(ptr);
@@ -835,10 +839,7 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
 
         CursorMut {
             current,
-            link: BidirPtr {
-                prev,
-                next,
-            },
+            link: BidirPtr { prev, next },
             list: self,
         }
     }
@@ -850,7 +851,11 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     /// `ptr` must be a pointer to an object that is part of this list.
     /// `next` must be a pointer to an object that is the next object in this list (null for the tail)
     #[inline]
-    pub unsafe fn cursor_from_ptr_and_next(&self, ptr: *const A::Value, next: *const A::Value) -> Cursor<'_, A> {
+    pub unsafe fn cursor_from_ptr_and_next(
+        &self,
+        ptr: *const A::Value,
+        next: *const A::Value,
+    ) -> Cursor<'_, A> {
         debug_assert!(!ptr.is_null());
 
         let current = &*self.adapter.get_link(ptr);
@@ -868,10 +873,7 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
 
         Cursor {
             current,
-            link: BidirPtr {
-                prev,
-                next,
-            },
+            link: BidirPtr { prev, next },
             list: self,
         }
     }
@@ -883,7 +885,11 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     /// `ptr` must be a pointer to an object that is part of this list.
     /// `next` must be a pointer to an object that is the next object in this list (null for the tail)
     #[inline]
-    pub unsafe fn cursor_mut_from_ptr_and_next(&mut self, ptr: *const A::Value, next: *const A::Value) -> CursorMut<'_, A> {
+    pub unsafe fn cursor_mut_from_ptr_and_next(
+        &mut self,
+        ptr: *const A::Value,
+        next: *const A::Value,
+    ) -> CursorMut<'_, A> {
         debug_assert!(!ptr.is_null());
 
         let current = &*self.adapter.get_link(ptr);
@@ -901,10 +907,7 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
 
         CursorMut {
             current,
-            link: BidirPtr {
-                prev,
-                next,
-            },
+            link: BidirPtr { prev, next },
             list: self,
         }
     }
@@ -1178,10 +1181,10 @@ mod tests {
     use super::{Link, XorLinkedList};
     use crate::UnsafeRef;
     use std::boxed::Box;
+    use std::cell::Cell;
     use std::fmt;
     use std::ptr;
     use std::vec::Vec;
-    use std::cell::Cell;
 
     #[derive(Clone)]
     struct Obj {
@@ -1449,10 +1452,28 @@ mod tests {
             cursor.move_next();
             assert_eq!(cursor.get().unwrap().value, 3);
 
-            assert_eq!(l.cursor_mut_from_ptr_and_next(c.as_ref(), d.as_ref()).get().unwrap().value, 3);
+            assert_eq!(
+                l.cursor_mut_from_ptr_and_next(c.as_ref(), d.as_ref())
+                    .get()
+                    .unwrap()
+                    .value,
+                3
+            );
 
-            assert_eq!(l.cursor_mut_from_ptr_and_prev(a.as_ref(), ptr::null()).get().unwrap().value, 1);
-            assert_eq!(l.cursor_mut_from_ptr_and_next(d.as_ref(), ptr::null()).get().unwrap().value, 4);
+            assert_eq!(
+                l.cursor_mut_from_ptr_and_prev(a.as_ref(), ptr::null())
+                    .get()
+                    .unwrap()
+                    .value,
+                1
+            );
+            assert_eq!(
+                l.cursor_mut_from_ptr_and_next(d.as_ref(), ptr::null())
+                    .get()
+                    .unwrap()
+                    .value,
+                4
+            );
 
             let mut cursor = l.cursor_from_ptr_and_next(d.as_ref(), ptr::null());
             assert_eq!(cursor.get().unwrap().value, 4);
