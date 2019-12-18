@@ -99,7 +99,7 @@
 //! use intrusive_collections::{RBTreeLink, RBTree, KeyAdapter};
 //! use std::rc::Rc;
 //!
-//! // This struct can be inside two lists and one tree simultaneously
+//! // This struct can be inside three lists and one tree simultaneously
 //! #[derive(Default)]
 //! struct Test {
 //!     link: LinkedListLink,
