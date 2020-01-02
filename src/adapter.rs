@@ -154,10 +154,11 @@ macro_rules! container_of {
 #[macro_export(local_inner_macros)]
 macro_rules! intrusive_adapter {
     (@impl
-        ($($privacy:tt)*) $name:ident ($($args:tt $(: ?$bound:tt)*),*)
+        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident ($($args:tt $(: ?$bound:tt)*),*)
         = $pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*
     ) => {
         #[allow(explicit_outlives_requirements)]
+        $(#[$attr])*
         $($privacy)* struct $name<$($args),*>($crate::__core::marker::PhantomData<$pointer>) $($where_)*;
         unsafe impl<$($args $(: ?$bound)*),*> Send for $name<$($args),*> $($where_)* {}
         unsafe impl<$($args $(: ?$bound)*),*> Sync for $name<$($args),*> $($where_)* {}
@@ -195,41 +196,57 @@ macro_rules! intrusive_adapter {
         }
     };
     (@find_generic
-        ($($privacy:tt)*) $name:tt ($($prev:tt)*) > $($rest:tt)*
+        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident ($($prev:tt)*) > $($rest:tt)*
     ) => {
         intrusive_adapter!(@impl
-            ($($privacy)*) $name ($($prev)*) $($rest)*
+            $(#[$attr])* ($($privacy)*) $name ($($prev)*) $($rest)*
         );
     };
     (@find_generic
-        ($($privacy:tt)*) $name:tt ($($prev:tt)*) $cur:tt $($rest:tt)*
+        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident ($($prev:tt)*) $cur:tt $($rest:tt)*
     ) => {
         intrusive_adapter!(@find_generic
-            ($($privacy)*) $name ($($prev)* $cur) $($rest)*
+            $(#[$attr])* ($($privacy)*) $name ($($prev)* $cur) $($rest)*
         );
     };
     (@find_if_generic
-        ($($privacy:tt)*) $name:tt < $($rest:tt)*
+        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident < $($rest:tt)*
     ) => {
         intrusive_adapter!(@find_generic
-            ($($privacy)*) $name () $($rest)*
+            $(#[$attr])* ($($privacy)*) $name () $($rest)*
         );
     };
     (@find_if_generic
-        ($($privacy:tt)*) $name:tt $($rest:tt)*
+        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident $($rest:tt)*
     ) => {
         intrusive_adapter!(@impl
-            ($($privacy)*) $name () $($rest)*
+            $(#[$attr])* ($($privacy)*) $name () $($rest)*
         );
     };
-    (pub $name:tt $($rest:tt)*) => {
+    ($(#[$attr:meta])* pub $name:ident $($rest:tt)*) => {
         intrusive_adapter!(@find_if_generic
-            (pub) $name $($rest)*
+            $(#[$attr])* (pub) $name $($rest)*
         );
     };
-    ($name:tt $($rest:tt)*) => {
+    ($(#[$attr:meta])* $name:ident $($rest:tt)*) => {
         intrusive_adapter!(@find_if_generic
-            () $name $($rest)*
+            $(#[$attr])* () $name $($rest)*
         );
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::LinkedListLink;
+    use std::rc::Rc;
+
+    struct Obj {
+        link: LinkedListLink,
+    }
+
+    #[deny(missing_docs)]
+    intrusive_adapter! {
+        /// Test doc comment
+        ObjAdapter1 = Rc<Obj>: Obj { link: LinkedListLink }
+    }
 }
