@@ -306,6 +306,8 @@ pub mod rbtree;
 pub mod singly_linked_list;
 pub mod xor_linked_list;
 
+pub mod custom_links;
+
 pub use crate::adapter::Adapter;
 pub use crate::intrusive_pointer::IntrusivePointer;
 pub use crate::key_adapter::KeyAdapter;
