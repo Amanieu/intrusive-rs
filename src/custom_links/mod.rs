@@ -7,5 +7,6 @@
 
 mod adapter;
 pub mod singly_linked_list;
+pub mod linked_list;
 
 pub use self::adapter::Adapter;
