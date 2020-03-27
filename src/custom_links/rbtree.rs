@@ -35,15 +35,15 @@ pub trait Link<NodeRef> {
     fn color(&self) -> Color;
 
     /// Sets the reference to the "left" object.
-    fn set_left(&self, left: NodeRef);
+    unsafe fn set_left(&self, left: NodeRef);
 
     /// Sets the reference to the "right" object.
-    fn set_right(&self, right: NodeRef);
+    unsafe fn set_right(&self, right: NodeRef);
 
     /// Sets the reference to the "parent" object.
-    fn set_parent(&self, parent: NodeRef);
+    unsafe fn set_parent(&self, parent: NodeRef);
 
-    fn set_color(&self, color: Color);
+    unsafe fn set_color(&self, color: Color);
 
     /// Checks whether the `Link` is linked into a `RBTree`.
     fn is_linked(&self) -> bool;
@@ -1812,6 +1812,7 @@ where
 // RawLink, RawLinkRef
 // =============================================================================
 
+/// Intrusive link that uses raw pointers to allow an object to be inserted into a `RBTree`.
 pub struct RawLink {
     left: Cell<RawLinkRef>,
     right: Cell<RawLinkRef>,
@@ -1891,24 +1892,24 @@ impl Link<RawLinkRef> for RawLink {
 
     /// Sets the reference to the "left" object.
     #[inline]
-    fn set_left(&self, left: RawLinkRef) {
+    unsafe fn set_left(&self, left: RawLinkRef) {
         self.left.set(left);
     }
 
     /// Sets the reference to the "right" object.
     #[inline]
-    fn set_right(&self, right: RawLinkRef) {
+    unsafe fn set_right(&self, right: RawLinkRef) {
         self.right.set(right);
     }
 
     /// Sets the reference to the "parent" object.
     #[inline]
-    fn set_parent(&self, parent: RawLinkRef) {
+    unsafe fn set_parent(&self, parent: RawLinkRef) {
         self.set_parent_color(parent, self.color());
     }
 
     #[inline]
-    fn set_color(&self, color: Color) {
+    unsafe fn set_color(&self, color: Color) {
         self.set_parent_color(self.parent(), color);
     }
 
@@ -1967,6 +1968,7 @@ impl fmt::Debug for RawLink {
     }
 }
 
+/// A concrete `NodeRef` that uses raw pointers.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct RawLinkRef(*const RawLink);
 

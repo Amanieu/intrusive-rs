@@ -25,10 +25,10 @@ pub trait Link<NodeRef> {
     fn prev(&self) -> NodeRef;
 
     /// Sets the reference to the "next" object.
-    fn set_next(&self, next: NodeRef);
+    unsafe fn set_next(&self, next: NodeRef);
 
     /// Sets the reference to the "prev" object.
-    fn set_prev(&self, prev: NodeRef);
+    unsafe fn set_prev(&self, prev: NodeRef);
 
     /// Checks whether the `Link` is linked into a `LinkedList`.
     fn is_linked(&self) -> bool;
@@ -1136,12 +1136,12 @@ impl Link<RawLinkRef> for RawLink {
     }
 
     #[inline]
-    fn set_next(&self, next: RawLinkRef) {
+    unsafe fn set_next(&self, next: RawLinkRef) {
         self.next.set(next);
     }
 
     #[inline]
-    fn set_prev(&self, prev: RawLinkRef) {
+    unsafe fn set_prev(&self, prev: RawLinkRef) {
         self.prev.set(prev);
     }
 

@@ -22,7 +22,7 @@ pub trait Link<NodeRef> {
     fn next(&self) -> NodeRef;
 
     /// Sets the reference to the "next" object.
-    fn set_next(&self, next: NodeRef);
+    unsafe fn set_next(&self, next: NodeRef);
 
     /// Checks whether the `Link` is linked into a `SinglyLinkedList`.
     fn is_linked(&self) -> bool;
@@ -858,7 +858,7 @@ impl Link<RawLinkRef> for RawLink {
     }
 
     #[inline]
-    fn set_next(&self, next: RawLinkRef) {
+    unsafe fn set_next(&self, next: RawLinkRef) {
         self.next.set(next);
     }
 
