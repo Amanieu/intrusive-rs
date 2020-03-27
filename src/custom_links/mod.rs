@@ -6,7 +6,11 @@
 // copied, modified, or distributed except according to those terms.
 
 mod adapter;
+mod key_adapter;
+
 pub mod singly_linked_list;
 pub mod linked_list;
+pub mod rbtree;
 
 pub use self::adapter::Adapter;
+pub use self::key_adapter::KeyAdapter;
