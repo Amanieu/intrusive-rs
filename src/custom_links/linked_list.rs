@@ -53,9 +53,6 @@ pub trait NodeRef: Copy + Eq {
     /// Constructs a "null" `NodeRef`.
     fn null() -> Self;
 
-    /// Constructs an "UNLINKED_MARKER" `NodeRef`.
-    fn unlinked_marker() -> Self;
-
     /// Returns `true` if `self == Self::null()`.
     fn is_null(self) -> bool;
 
@@ -99,15 +96,11 @@ pub trait NodeRef: Copy + Eq {
         (&*adapter.node_into_link(self)).set_prev(prev);
     }
 
-    #[doc(hidden)]
-    #[inline]
+    /// Sets the "unlinked marker".
     unsafe fn unlink<A>(self, adapter: &A)
     where
         A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        self.set_next(adapter, Self::unlinked_marker());
-    }
+        A::Link: Link<Self>;
 
     #[doc(hidden)]
     #[inline]
@@ -1174,13 +1167,17 @@ impl NodeRef for RawLinkRef {
     }
 
     #[inline]
-    fn unlinked_marker() -> Self {
-        UNLINKED_MARKER
+    fn is_null(self) -> bool {
+        self.0.is_null()
     }
 
     #[inline]
-    fn is_null(self) -> bool {
-        self.0.is_null()
+    unsafe fn unlink<A>(self, adapter: &A)
+    where
+        A: Adapter<NodeRef = Self>,
+        A::Link: Link<Self>,
+    {
+        self.set_next(adapter, UNLINKED_MARKER);
     }
 }
 

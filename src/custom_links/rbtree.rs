@@ -167,7 +167,7 @@ pub trait NodeRef: Copy + Eq {
         self.set_color(adapter, color);
     }
 
-    #[inline]
+    /// Sets the "unlinked marker".
     unsafe fn unlink<A>(self, adapter: &A)
     where
         A: Adapter<NodeRef = Self>,
