@@ -6,5 +6,6 @@
 // copied, modified, or distributed except according to those terms.
 
 mod adapter;
+pub mod singly_linked_list;
 
 pub use self::adapter::Adapter;
