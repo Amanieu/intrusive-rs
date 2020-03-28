@@ -119,6 +119,11 @@ impl link_ops::LinkOps for LinkOps {
     unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr) {
         (*ptr).next.set(UNLINKED_MARKER);
     }
+
+    #[inline]
+    unsafe fn ptr_eq(&self, this: Self::LinkPtr, other: Self::LinkPtr) -> bool {
+        this == other
+    }
 }
 
 unsafe impl SinglyLinkedListOps for LinkOps {
@@ -187,14 +192,14 @@ unsafe fn remove<T: SinglyLinkedListOps>(
 #[inline]
 unsafe fn splice<T: SinglyLinkedListOps>(
     link_ops: &mut T,
-    start: Option<T::LinkPtr>,
+    start: T::LinkPtr,
     end: T::LinkPtr,
     prev: Option<T::LinkPtr>,
     next: Option<T::LinkPtr>,
 ) {
     link_ops.set_next(end, next);
     if let Some(prev) = prev {
-        link_ops.set_next(prev, start);
+        link_ops.set_next(prev, Some(start));
     }
 }
 
@@ -470,7 +475,7 @@ where
                     }
                     splice(
                         self.list.adapter.link_ops_mut(),
-                        list.head,
+                        head,
                         tail,
                         self.current,
                         Some(next),
