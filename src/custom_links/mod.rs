@@ -7,10 +7,10 @@
 
 mod adapter;
 mod key_adapter;
+mod link_ops;
 
 pub mod singly_linked_list;
-pub mod linked_list;
-pub mod rbtree;
 
 pub use self::adapter::Adapter;
 pub use self::key_adapter::KeyAdapter;
+pub use self::link_ops::LinkOps;

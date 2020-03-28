@@ -1,4 +1,4 @@
-use crate::custom_links::Adapter;
+use super::adapter::Adapter;
 
 pub trait KeyAdapter<'a>: Adapter {
     /// Type of the key returned by `get_key`.
