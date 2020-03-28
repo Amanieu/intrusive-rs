@@ -119,11 +119,6 @@ impl link_ops::LinkOps for LinkOps {
     unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr) {
         (*ptr).next.set(UNLINKED_MARKER);
     }
-
-    #[inline]
-    unsafe fn ptr_eq(&self, this: Self::LinkPtr, other: Self::LinkPtr) -> bool {
-        this == other
-    }
 }
 
 unsafe impl SinglyLinkedListOps for LinkOps {
