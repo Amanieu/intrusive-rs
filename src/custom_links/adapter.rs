@@ -6,6 +6,7 @@
 // copied, modified, or distributed except according to those terms.
 
 use super::link_ops::LinkOps;
+use super::pointer_ops::PointerOps;
 
 /// Trait for a adapter which allows a type to be inserted into an intrusive
 /// collection. The `Link` type contains the collection-specific metadata which
@@ -43,65 +44,19 @@ pub unsafe trait Adapter {
     /// Link type which allows an object to be inserted into an intrusive collection.
     type LinkOps: LinkOps;
 
-    /// Object type which is inserted in an intrusive collection.
-    type Value: ?Sized;
-
-    /// Pointer type which owns an instance of a value.
-    type Pointer;
+    /// Collection-specific pointer conversions which allow an object to
+    /// be inserted in an intrusive collection.
+    type PointerOps: PointerOps;
 
     /// Gets a reference to an object from a reference to a link in that object.
-    unsafe fn get_value(&self, link: <Self::LinkOps as LinkOps>::LinkPtr) -> *const Self::Value;
+    unsafe fn get_value(&self, link: <Self::LinkOps as LinkOps>::LinkPtr) -> *const <Self::PointerOps as PointerOps>::Value;
 
     /// Gets a reference to the link for the given object.
-    unsafe fn get_link(&self, value: *const Self::Value) -> <Self::LinkOps as LinkOps>::LinkPtr;
+    unsafe fn get_link(&self, value: *const <Self::PointerOps as PointerOps>::Value) -> <Self::LinkOps as LinkOps>::LinkPtr;
 
     fn link_ops(&self) -> &Self::LinkOps;
 
     fn link_ops_mut(&mut self) -> &mut Self::LinkOps;
 
-    /// Constructs an owned pointer from a raw pointer.
-    /// 
-    /// # Safety
-    /// The raw pointer must have been previously returned by `into_raw`.
-    unsafe fn from_raw(&self, value: *const Self::Value) -> Self::Pointer;
-
-    /// Consumes the owned pointer and returns a raw pointer to the owned object.
-    fn into_raw(&self, ptr: Self::Pointer) -> *const Self::Value;
-}
-
-#[inline]
-pub(crate) unsafe fn clone_pointer_from_raw<A: Adapter>(
-    adapter: &A,
-    pointer: *const A::Value,
-) -> A::Pointer
-where
-    A::Pointer: Clone,
-{
-    use core::mem::ManuallyDrop;
-    use core::ops::Deref;
-
-    /// Guard which converts an pointer back into its raw version
-    /// when it gets dropped. This makes sure we also perform a full
-    /// `from_raw` and `into_raw` round trip - even in the case of panics.
-    struct PointerGuard<'a, A: Adapter> {
-        pointer: ManuallyDrop<A::Pointer>,
-        adapter: &'a A,
-    }
-
-    impl<'a, A: Adapter> Drop for PointerGuard<'a, A> {
-        #[inline]
-        fn drop(&mut self) {
-            // Prevent shared pointers from being released by converting them
-            // back into the raw pointers
-            let _ = self
-                .adapter
-                .into_raw(unsafe { ManuallyDrop::take(&mut self.pointer) });
-        }
-    }
-
-    let holder = PointerGuard {
-        pointer: ManuallyDrop::new(adapter.from_raw(pointer)),
-        adapter,
-    };
-    holder.pointer.deref().clone()
+    fn pointer_ops(&self) -> &Self::PointerOps;
 }

@@ -8,8 +8,9 @@
 use core::cell::Cell;
 use core::fmt;
 
-use super::link_ops;
+use super::link_ops::{self, DefaultLinkOps};
 use super::Adapter;
+use super::pointer_ops::PointerOps;
 
 // =============================================================================
 // SinglyLinkedListOps
@@ -64,6 +65,10 @@ impl Link {
     }
 }
 
+impl DefaultLinkOps for Link {
+    type Ops = LinkOps;
+}
+
 // An object containing a link can be sent to another thread if it is unlinked.
 unsafe impl Send for Link {}
 
@@ -104,7 +109,7 @@ impl fmt::Debug for Link {
 // =============================================================================
 
 /// Default `LinkOps` implementation for `SinglyLinkedList`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct LinkOps;
 
 impl link_ops::LinkOps for LinkOps {
@@ -240,7 +245,7 @@ where
     /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a A::Value> {
+    pub fn get(&self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
         Some(unsafe { &*self.list.adapter.get_value(self.current?) })
     }
 
@@ -250,12 +255,12 @@ where
     /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn clone_pointer(&self) -> Option<A::Pointer>
+    pub fn clone_pointer(&self) -> Option<<A::PointerOps as PointerOps>::Pointer>
     where
-        A::Pointer: Clone,
+        <A::PointerOps as PointerOps>::Pointer: Clone,
     {
-        let raw_pointer = self.get()? as *const A::Value;
-        Some(unsafe { super::adapter::clone_pointer_from_raw(&self.list.adapter, raw_pointer) })
+        let raw_pointer = self.get()? as *const <A::PointerOps as PointerOps>::Value;
+        Some(unsafe { super::pointer_ops::clone_pointer_from_raw(self.list.adapter.pointer_ops(), raw_pointer) })
     }
 
     /// Moves the cursor to the next element of the `SinglyLinkedList`.
@@ -266,11 +271,11 @@ where
     /// null object.
     #[inline]
     pub fn move_next(&mut self) {
-        self.current = if let Some(current) = self.current {
-            self.list.adapter.link_ops().next(current)
+        if let Some(current) = self.current {
+            self.current = self.list.adapter.link_ops().next(current);
         } else {
-            self.list.head
-        };
+            self.current = self.list.head;
+        }
     }
 
     /// Returns a cursor pointing to the next element of the `SinglyLinkedList`.
@@ -311,7 +316,7 @@ where
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&A::Value> {
+    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Value> {
         Some(unsafe { &*self.list.adapter.get_value(self.current?) })
     }
 
@@ -336,11 +341,11 @@ where
     /// null object.
     #[inline]
     pub fn move_next(&mut self) {
-        self.current = if let Some(current) = self.current {
-            self.list.adapter.link_ops().next(current)
+        if let Some(current) = self.current {
+            self.current = self.list.adapter.link_ops().next(current);
         } else {
-            self.list.head
-        };
+            self.current = self.list.head;
+        }
     }
 
     /// Returns a cursor pointing to the next element of the `SinglyLinkedList`.
@@ -363,7 +368,7 @@ where
     /// If the cursor is currently pointing to the last element of the
     /// `SinglyLinkedList` then no element is removed and `None` is returned.
     #[inline]
-    pub fn remove_next(&mut self) -> Option<A::Pointer> {
+    pub fn remove_next(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         unsafe {
             let next = if let Some(current) = self.current {
                 self.list.adapter.link_ops().next(current)
@@ -379,6 +384,7 @@ where
             Some(
                 self.list
                     .adapter
+                    .pointer_ops()
                     .from_raw(self.list.adapter.get_value(next)),
             )
         }
@@ -399,7 +405,7 @@ where
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn replace_next_with(&mut self, val: A::Pointer) -> Result<A::Pointer, A::Pointer> {
+    pub fn replace_next_with(&mut self, val: <A::PointerOps as PointerOps>::Pointer) -> Result<<A::PointerOps as PointerOps>::Pointer, <A::PointerOps as PointerOps>::Pointer> {
         unsafe {
             let next = if let Some(current) = self.current {
                 self.list.adapter.link_ops().next(current)
@@ -416,6 +422,7 @@ where
                     Ok(self
                         .list
                         .adapter
+                        .pointer_ops()
                         .from_raw(self.list.adapter.get_value(next)))
                 }
                 None => Err(val),
@@ -433,7 +440,7 @@ where
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert_after(&mut self, val: A::Pointer) {
+    pub fn insert_after(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
         unsafe {
             let new = self.list.node_from_value(val);
             if let Some(current) = self.current {
@@ -545,11 +552,11 @@ where
     A::LinkOps: SinglyLinkedListOps,
 {
     #[inline]
-    fn node_from_value(&self, val: A::Pointer) -> <A::LinkOps as super::LinkOps>::LinkPtr {
+    fn node_from_value(&self, val: <A::PointerOps as PointerOps>::Pointer) -> <A::LinkOps as super::LinkOps>::LinkPtr {
         use link_ops::LinkOps;
 
         unsafe {
-            let raw = self.adapter.into_raw(val);
+            let raw = self.adapter.pointer_ops().into_raw(val);
 
             if self
                 .adapter
@@ -557,7 +564,7 @@ where
                 .is_linked(self.adapter.get_link(raw))
             {
                 // convert the node back into a pointer
-                self.adapter.from_raw(raw);
+                self.adapter.pointer_ops().from_raw(raw);
 
                 panic!("attempted to insert an object that is already linked");
             }
@@ -602,7 +609,7 @@ where
     /// # Safety
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
-    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Value) -> Cursor<'_, A> {
+    pub unsafe fn cursor_from_ptr(&self, ptr: *const <A::PointerOps as PointerOps>::Value) -> Cursor<'_, A> {
         Cursor {
             current: Some(self.adapter.get_link(ptr)),
             list: self,
@@ -614,7 +621,7 @@ where
     /// # Safety
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
-    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Value) -> CursorMut<'_, A> {
+    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const <A::PointerOps as PointerOps>::Value) -> CursorMut<'_, A> {
         CursorMut {
             current: Some(self.adapter.get_link(ptr)),
             list: self,
@@ -661,7 +668,7 @@ where
             unsafe {
                 let next = self.adapter.link_ops().next(x);
                 self.adapter.link_ops_mut().mark_unlinked(x);
-                self.adapter.from_raw(self.adapter.get_value(x));
+                self.adapter.pointer_ops().from_raw(self.adapter.get_value(x));
                 current = next;
             }
         }
@@ -693,7 +700,7 @@ where
 
     /// Inserts a new element at the start of the `SinglyLinkedList`.
     #[inline]
-    pub fn push_front(&mut self, val: A::Pointer) {
+    pub fn push_front(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
         self.cursor_mut().insert_after(val);
     }
 
@@ -701,7 +708,7 @@ where
     ///
     /// This returns `None` if the `SinglyLinkedList` is empty.
     #[inline]
-    pub fn pop_front(&mut self) -> Option<A::Pointer> {
+    pub fn pop_front(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         self.cursor_mut().remove_next()
     }
 }
@@ -709,17 +716,17 @@ where
 // Allow read-only access to values from multiple threads
 unsafe impl<A: Adapter + Sync> Sync for SinglyLinkedList<A>
 where
-    A::Value: Sync,
+    <A::PointerOps as PointerOps>::Value: Sync,
 
     A::LinkOps: SinglyLinkedListOps,
 {
 }
 
-// Allow sending to another thread if the ownership (represented by the A::Pointer owned
+// Allow sending to another thread if the ownership (represented by the <A::PointerOps as PointerOps>::Pointer owned
 // pointer type) can be transferred to another thread.
 unsafe impl<A: Adapter + Send> Send for SinglyLinkedList<A>
 where
-    A::Pointer: Send,
+    <A::PointerOps as PointerOps>::Pointer: Send,
 
     A::LinkOps: SinglyLinkedListOps,
 {
@@ -740,7 +747,7 @@ impl<A: Adapter> IntoIterator for SinglyLinkedList<A>
 where
     A::LinkOps: SinglyLinkedListOps,
 {
-    type Item = A::Pointer;
+    type Item = <A::PointerOps as PointerOps>::Pointer;
     type IntoIter = IntoIter<A>;
 
     #[inline]
@@ -753,7 +760,7 @@ impl<'a, A: Adapter + 'a> IntoIterator for &'a SinglyLinkedList<A>
 where
     A::LinkOps: SinglyLinkedListOps,
 {
-    type Item = &'a A::Value;
+    type Item = &'a <A::PointerOps as PointerOps>::Value;
     type IntoIter = Iter<'a, A>;
 
     #[inline]
@@ -774,7 +781,7 @@ where
 impl<A: Adapter> fmt::Debug for SinglyLinkedList<A>
 where
     A::LinkOps: SinglyLinkedListOps,
-    A::Value: fmt::Debug,
+    <A::PointerOps as PointerOps>::Value: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
@@ -797,10 +804,10 @@ impl<'a, A: Adapter + 'a> Iterator for Iter<'a, A>
 where
     A::LinkOps: SinglyLinkedListOps,
 {
-    type Item = &'a A::Value;
+    type Item = &'a <A::PointerOps as PointerOps>::Value;
 
     #[inline]
-    fn next(&mut self) -> Option<&'a A::Value> {
+    fn next(&mut self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
         let current = self.current?;
 
         self.current = self.list.adapter.link_ops().next(current);
@@ -835,10 +842,10 @@ impl<A: Adapter> Iterator for IntoIter<A>
 where
     A::LinkOps: SinglyLinkedListOps,
 {
-    type Item = A::Pointer;
+    type Item = <A::PointerOps as PointerOps>::Pointer;
 
     #[inline]
-    fn next(&mut self) -> Option<A::Pointer> {
+    fn next(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         self.list.pop_front()
     }
 }
@@ -849,9 +856,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{link_ops, Adapter, Link, LinkOps, SinglyLinkedList};
-    use crate::IntrusivePointer;
+    use super::{link_ops, Adapter, Link, LinkOps, SinglyLinkedList, PointerOps, DefaultLinkOps};
     use crate::UnsafeRef;
+    use crate::custom_links::pointer_ops::DefaultPointerOps;
     use std::boxed::Box;
     use std::fmt;
     use std::vec::Vec;
@@ -866,7 +873,7 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    struct ObjAdapter1(LinkOps, core::marker::PhantomData<UnsafeRef<Obj>>);
+    struct ObjAdapter1(LinkOps, DefaultPointerOps<UnsafeRef<Obj>>, core::marker::PhantomData<UnsafeRef<Obj>>);
     unsafe impl Send for ObjAdapter1 {}
     unsafe impl Sync for ObjAdapter1 {}
     impl Clone for ObjAdapter1 {
@@ -884,7 +891,7 @@ mod tests {
     }
     #[allow(dead_code)]
     impl ObjAdapter1 {
-        pub const NEW: Self = ObjAdapter1(LinkOps, core::marker::PhantomData);
+        pub const NEW: Self = ObjAdapter1(LinkOps, DefaultPointerOps::new(), core::marker::PhantomData);
         #[inline]
         pub fn new() -> Self {
             Self::NEW
@@ -893,20 +900,19 @@ mod tests {
     #[allow(dead_code, unsafe_code)]
     unsafe impl Adapter for ObjAdapter1 {
         type LinkOps = LinkOps;
-        type Value = Obj;
-        type Pointer = UnsafeRef<Obj>;
+        type PointerOps = DefaultPointerOps<UnsafeRef<Obj>>;
 
         #[inline]
         unsafe fn get_value(
             &self,
             link: <Self::LinkOps as link_ops::LinkOps>::LinkPtr,
-        ) -> *const Self::Value {
-            container_of!(link, Self::Value, link1)
+        ) -> *const <Self::PointerOps as PointerOps>::Value {
+            container_of!(link, Obj, link1)
         }
         #[inline]
         unsafe fn get_link(
             &self,
-            value: *const Self::Value,
+            value: *const <Self::PointerOps as PointerOps>::Value,
         ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
             &(*value).link1
         }
@@ -922,16 +928,11 @@ mod tests {
         }
 
         #[inline]
-        unsafe fn from_raw(&self, value: *const Self::Value) -> Self::Pointer {
-            Self::Pointer::from_raw(value)
-        }
-
-        #[inline]
-        fn into_raw(&self, ptr: Self::Pointer) -> *const Self::Value {
-            Self::Pointer::into_raw(ptr)
+        fn pointer_ops(&self) -> &Self::PointerOps {
+            &self.1
         }
     }
-    struct ObjAdapter2(LinkOps, core::marker::PhantomData<UnsafeRef<Obj>>);
+    struct ObjAdapter2(LinkOps, DefaultPointerOps<UnsafeRef<Obj>>, core::marker::PhantomData<UnsafeRef<Obj>>);
     unsafe impl Send for ObjAdapter2 {}
     unsafe impl Sync for ObjAdapter2 {}
     impl Clone for ObjAdapter2 {
@@ -949,7 +950,7 @@ mod tests {
     }
     #[allow(dead_code)]
     impl ObjAdapter2 {
-        pub const NEW: Self = ObjAdapter2(LinkOps, core::marker::PhantomData);
+        pub const NEW: Self = ObjAdapter2(LinkOps, DefaultPointerOps::new(), core::marker::PhantomData);
         #[inline]
         pub fn new() -> Self {
             Self::NEW
@@ -958,20 +959,19 @@ mod tests {
     #[allow(dead_code, unsafe_code)]
     unsafe impl Adapter for ObjAdapter2 {
         type LinkOps = LinkOps;
-        type Value = Obj;
-        type Pointer = UnsafeRef<Obj>;
+        type PointerOps = DefaultPointerOps<UnsafeRef<Obj>>;
 
         #[inline]
         unsafe fn get_value(
             &self,
             link: <Self::LinkOps as link_ops::LinkOps>::LinkPtr,
-        ) -> *const Self::Value {
-            container_of!(link, Self::Value, link2)
+        ) -> *const <Self::PointerOps as PointerOps>::Value {
+            container_of!(link, Obj, link2)
         }
         #[inline]
         unsafe fn get_link(
             &self,
-            value: *const Self::Value,
+            value: *const <Self::PointerOps as PointerOps>::Value,
         ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
             &(*value).link2
         }
@@ -987,13 +987,8 @@ mod tests {
         }
 
         #[inline]
-        unsafe fn from_raw(&self, value: *const Self::Value) -> Self::Pointer {
-            Self::Pointer::from_raw(value)
-        }
-
-        #[inline]
-        fn into_raw(&self, ptr: Self::Pointer) -> *const Self::Value {
-            Self::Pointer::into_raw(ptr)
+        fn pointer_ops(&self) -> &Self::PointerOps {
+            &self.1
         }
     }
     fn make_obj(value: u32) -> UnsafeRef<Obj> {
@@ -1310,7 +1305,7 @@ mod tests {
             link: Link,
             value: &'a T,
         }
-        struct ObjAdapter<'a, T>(LinkOps, core::marker::PhantomData<&'a Obj<'a, T>>);
+        struct ObjAdapter<'a, T>(LinkOps, DefaultPointerOps<&'a Obj<'a, T>>, core::marker::PhantomData<&'a Obj<'a, T>>);
         unsafe impl<'a, T> Send for ObjAdapter<'a, T> where T: 'a {}
         unsafe impl<'a, T> Sync for ObjAdapter<'a, T> where T: 'a {}
         impl<'a, T> Clone for ObjAdapter<'a, T>
@@ -1337,7 +1332,7 @@ mod tests {
         where
             T: 'a,
         {
-            pub const NEW: Self = ObjAdapter(LinkOps, core::marker::PhantomData);
+            pub const NEW: Self = ObjAdapter(LinkOps, DefaultPointerOps::new(), core::marker::PhantomData);
             #[inline]
             pub fn new() -> Self {
                 Self::NEW
@@ -1346,20 +1341,19 @@ mod tests {
         #[allow(dead_code, unsafe_code)]
         unsafe impl<'a, T: 'a> Adapter for ObjAdapter<'a, T> {
             type LinkOps = LinkOps;
-            type Value = Obj<'a, T>;
-            type Pointer = &'a Obj<'a, T>;
+            type PointerOps = DefaultPointerOps<&'a Obj<'a, T>>;
 
             #[inline]
             unsafe fn get_value(
                 &self,
                 link: <Self::LinkOps as link_ops::LinkOps>::LinkPtr,
-            ) -> *const Self::Value {
-                container_of!(link, Self::Value, link)
+            ) -> *const <Self::PointerOps as PointerOps>::Value {
+                container_of!(link, Obj<'a, T>, link)
             }
             #[inline]
             unsafe fn get_link(
                 &self,
-                value: *const Self::Value,
+                value: *const <Self::PointerOps as PointerOps>::Value,
             ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
                 &(*value).link
             }
@@ -1375,13 +1369,8 @@ mod tests {
             }
 
             #[inline]
-            unsafe fn from_raw(&self, value: *const Self::Value) -> Self::Pointer {
-                Self::Pointer::from_raw(value)
-            }
-
-            #[inline]
-            fn into_raw(&self, ptr: Self::Pointer) -> *const Self::Value {
-                Self::Pointer::into_raw(ptr)
+            fn pointer_ops(&self) -> &Self::PointerOps {
+                &self.1
             }
         }
 
@@ -1407,7 +1396,7 @@ mod tests {
                 link: Link,
                 value: usize,
             }
-            struct ObjAdapter(LinkOps, core::marker::PhantomData<$ptr<Obj>>);
+            struct ObjAdapter(LinkOps, DefaultPointerOps<$ptr<Obj>>, core::marker::PhantomData<$ptr<Obj>>);
             unsafe impl Send for ObjAdapter {}
             unsafe impl Sync for ObjAdapter {}
             impl Clone for ObjAdapter {
@@ -1425,7 +1414,7 @@ mod tests {
             }
             #[allow(dead_code)]
             impl ObjAdapter {
-                pub const NEW: Self = ObjAdapter(LinkOps, core::marker::PhantomData);
+                pub const NEW: Self = ObjAdapter(LinkOps, DefaultPointerOps::new(), core::marker::PhantomData);
                 #[inline]
                 pub fn new() -> Self {
                     Self::NEW
@@ -1434,20 +1423,19 @@ mod tests {
             #[allow(dead_code, unsafe_code)]
             unsafe impl Adapter for ObjAdapter {
                 type LinkOps = LinkOps;
-                type Value = Obj;
-                type Pointer = $ptr<Obj>;
+                type PointerOps = DefaultPointerOps<$ptr<Obj>>;
 
                 #[inline]
                 unsafe fn get_value(
                     &self,
                     link: <Self::LinkOps as link_ops::LinkOps>::LinkPtr,
-                ) -> *const Self::Value {
-                    container_of!(link, Self::Value, link)
+                ) -> *const <Self::PointerOps as PointerOps>::Value {
+                    container_of!(link, Obj, link)
                 }
                 #[inline]
                 unsafe fn get_link(
                     &self,
-                    value: *const Self::Value,
+                    value: *const <Self::PointerOps as PointerOps>::Value,
                 ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
                     &(*value).link
                 }
@@ -1463,13 +1451,8 @@ mod tests {
                 }
 
                 #[inline]
-                unsafe fn from_raw(&self, value: *const Self::Value) -> Self::Pointer {
-                    Self::Pointer::from_raw(value)
-                }
-
-                #[inline]
-                fn into_raw(&self, ptr: Self::Pointer) -> *const Self::Value {
-                    Self::Pointer::into_raw(ptr)
+                fn pointer_ops(&self) -> &Self::PointerOps {
+                    &self.1
                 }
             }
 
