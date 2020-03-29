@@ -11,6 +11,7 @@ mod link_ops;
 mod pointer_ops;
 
 pub mod singly_linked_list;
+pub mod linked_list;
 
 pub use self::adapter::Adapter;
 pub use self::key_adapter::KeyAdapter;
