@@ -7,6 +7,7 @@
 
 use core::cell::Cell;
 use core::fmt;
+use core::ptr::NonNull;
 
 use super::link_ops::{self, DefaultLinkOps};
 use super::Adapter;
@@ -35,12 +36,12 @@ pub unsafe trait LinkedListOps: super::LinkOps {
 /// Intrusive link that allows an object to be inserted into a
 /// `LinkedList`.
 pub struct Link {
-    next: Cell<*const Link>,
-    prev: Cell<*const Link>,
+    next: Cell<Option<NonNull<Link>>>,
+    prev: Cell<Option<NonNull<Link>>>,
 }
 
 // Use a special value to indicate an unlinked node
-const UNLINKED_MARKER: *const Link = 1 as *const Link;
+const UNLINKED_MARKER: Option<NonNull<Link>> = unsafe { Some(NonNull::new_unchecked(1 as *mut Link)) };
 
 impl Link {
     /// Creates a new `Link`.
@@ -120,16 +121,16 @@ impl fmt::Debug for Link {
 pub struct LinkOps;
 
 impl link_ops::LinkOps for LinkOps {
-    type LinkPtr = *const Link;
+    type LinkPtr = NonNull<Link>;
 
     #[inline]
     fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
-        unsafe { (*ptr).is_linked() }
+        unsafe { ptr.as_ref().is_linked() }
     }
 
     #[inline]
     unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr) {
-        (*ptr).next.set(UNLINKED_MARKER);
+        ptr.as_ref().next.set(UNLINKED_MARKER);
     }
 }
 
@@ -137,35 +138,25 @@ unsafe impl LinkedListOps for LinkOps {
     #[inline]
     fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
         unsafe {
-            let raw = (*ptr).next.get();
-            if raw.is_null() {
-                None
-            } else {
-                Some(raw)
-            }
+            ptr.as_ref().next.get()
         }
     }
 
     #[inline]
     fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
         unsafe {
-            let raw = (*ptr).prev.get();
-            if raw.is_null() {
-                None
-            } else {
-                Some(raw)
-            }
+            ptr.as_ref().prev.get()
         }
     }
 
     #[inline]
     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
-        (*ptr).next.set(next.unwrap_or(core::ptr::null()));
+        ptr.as_ref().next.set(next);
     }
 
     #[inline]
     unsafe fn set_prev(&mut self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>) {
-        (*ptr).prev.set(prev.unwrap_or(core::ptr::null()));
+        ptr.as_ref().prev.set(prev);
     }
 }
 
@@ -173,18 +164,13 @@ unsafe impl SinglyLinkedListOps for LinkOps {
     #[inline]
     fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
         unsafe {
-            let raw = (*ptr).next.get();
-            if raw.is_null() {
-                None
-            } else {
-                Some(raw)
-            }
+            ptr.as_ref().next.get()
         }
     }
 
     #[inline]
     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
-        (*ptr).next.set(next.unwrap_or(core::ptr::null()));
+        ptr.as_ref().next.set(next);
     }
 }
 
@@ -1138,6 +1124,7 @@ mod tests {
     use std::boxed::Box;
     use std::fmt;
     use std::vec::Vec;
+    use core::ptr::NonNull;
 
     struct Obj {
         link1: Link,
@@ -1183,14 +1170,14 @@ mod tests {
             &self,
             link: <Self::LinkOps as link_ops::LinkOps>::LinkPtr,
         ) -> *const <Self::PointerOps as PointerOps>::Value {
-            container_of!(link, Obj, link1)
+            container_of!(link.as_ptr(), Obj, link1)
         }
         #[inline]
         unsafe fn get_link(
             &self,
             value: *const <Self::PointerOps as PointerOps>::Value,
         ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
-            &(*value).link1
+            NonNull::new_unchecked(&(*value).link1 as *const Link as *mut Link)
         }
 
         #[inline]
@@ -1242,14 +1229,14 @@ mod tests {
             &self,
             link: <Self::LinkOps as link_ops::LinkOps>::LinkPtr,
         ) -> *const <Self::PointerOps as PointerOps>::Value {
-            container_of!(link, Obj, link2)
+            container_of!(link.as_ptr(), Obj, link2)
         }
         #[inline]
         unsafe fn get_link(
             &self,
             value: *const <Self::PointerOps as PointerOps>::Value,
         ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
-            &(*value).link2
+            NonNull::new_unchecked(&(*value).link2 as *const Link as *mut Link)
         }
 
         #[inline]
@@ -1668,14 +1655,14 @@ mod tests {
                 &self,
                 link: <Self::LinkOps as link_ops::LinkOps>::LinkPtr,
             ) -> *const <Self::PointerOps as PointerOps>::Value {
-                container_of!(link, Obj<'a, T>, link)
+                container_of!(link.as_ptr(), Obj<'a, T>, link)
             }
             #[inline]
             unsafe fn get_link(
                 &self,
                 value: *const <Self::PointerOps as PointerOps>::Value,
             ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
-                &(*value).link
+                NonNull::new_unchecked(&(*value).link as *const Link as *mut Link)
             }
 
             #[inline]
@@ -1750,14 +1737,14 @@ mod tests {
                     &self,
                     link: <Self::LinkOps as link_ops::LinkOps>::LinkPtr,
                 ) -> *const <Self::PointerOps as PointerOps>::Value {
-                    container_of!(link, Obj, link)
+                    container_of!(link.as_ptr(), Obj, link)
                 }
                 #[inline]
                 unsafe fn get_link(
                     &self,
                     value: *const <Self::PointerOps as PointerOps>::Value,
                 ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
-                    &(*value).link
+                    NonNull::new_unchecked(&(*value).link as *const Link as *mut Link)
                 }
 
                 #[inline]
