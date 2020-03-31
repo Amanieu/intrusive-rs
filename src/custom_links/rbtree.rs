@@ -5,48 +5,82 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use crate::Bound::{self, Excluded, Included, Unbounded};
-use crate::IntrusivePointer;
-use core::borrow::Borrow;
 use core::cell::Cell;
-use core::cmp::Ordering;
 use core::fmt;
 use core::mem;
-use core::ptr;
+use core::ptr::NonNull;
+use core::cmp::Ordering;
+use core::borrow::Borrow;
+use core::hint;
 
-use crate::custom_links::{Adapter, KeyAdapter};
+use crate::Bound::{self, Excluded, Included, Unbounded};
 
+use super::link_ops::{self, DefaultLinkOps};
+use super::pointer_ops::PointerOps;
+use super::Adapter;
+use super::KeyAdapter;
+
+// =============================================================================
+// RBTreeOps
+// =============================================================================
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Color {
+    Red,
+    Black,
+}
+
+/// Link operations for `RBTree`.
+pub unsafe trait RBTreeOps: super::LinkOps {
+    fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+
+    fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+
+    fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+
+    fn color(&self, ptr: Self::LinkPtr) -> Color;
+
+    unsafe fn set_left(&mut self, ptr: Self::LinkPtr, left: Option<Self::LinkPtr>);
+
+    unsafe fn set_right(&mut self, ptr: Self::LinkPtr, right: Option<Self::LinkPtr>);
+
+    unsafe fn set_parent(&self, ptr: Self::LinkPtr, parent: Option<Self::LinkPtr>);
+
+    unsafe fn set_color(&self, ptr: Self::LinkPtr, color: Color);
+}
 
 // =============================================================================
 // Link
 // =============================================================================
 
-/// Intrusive link that allows an object to be inserted into a `RBTree`.
-pub trait Link<NodeRef> {
-    /// Returns the reference to the "left" object.
-    fn left(&self) -> NodeRef;
+/// Intrusive link that allows an object to be inserted into a
+/// `RBTree`.
+pub struct Link {
+    left: Cell<Option<NonNull<Link>>>,
+    right: Cell<Option<NonNull<Link>>>,
+    parent_color: Cell<usize>,
+}
 
-    /// Returns the reference to the "right" object.
-    fn right(&self) -> NodeRef;
+// Use a special value to indicate an unlinked node. This value represents a
+// red root node, which is impossible in a valid red-black tree.
+const UNLINKED_MARKER: usize = 0;
 
-    /// Returns the reference to the "parent" object.
-    fn parent(&self) -> NodeRef;
-
-    fn color(&self) -> Color;
-
-    /// Sets the reference to the "left" object.
-    unsafe fn set_left(&self, left: NodeRef);
-
-    /// Sets the reference to the "right" object.
-    unsafe fn set_right(&self, right: NodeRef);
-
-    /// Sets the reference to the "parent" object.
-    unsafe fn set_parent(&self, parent: NodeRef);
-
-    unsafe fn set_color(&self, color: Color);
+impl Link {
+    /// Creates a new `Link`.
+    #[inline]
+    pub const fn new() -> Link {
+        Link {
+            left: Cell::new(None),
+            right: Cell::new(None),
+            parent_color: Cell::new(UNLINKED_MARKER),
+        }
+    }
 
     /// Checks whether the `Link` is linked into a `RBTree`.
-    fn is_linked(&self) -> bool;
+    #[inline]
+    pub fn is_linked(&self) -> bool {
+        self.parent_color.get() != UNLINKED_MARKER
+    }
 
     /// Forcibly unlinks an object from a `RBTree`.
     ///
@@ -56,500 +90,527 @@ pub trait Link<NodeRef> {
     /// `RBTree`. The only situation where this function is useful is
     /// after calling `fast_clear` on a `RBTree`, since this clears
     /// the collection without marking the nodes as unlinked.
-    unsafe fn force_unlink(&self);
+    #[inline]
+    pub unsafe fn force_unlink(&self) {
+        self.parent_color.set(UNLINKED_MARKER);
+    }
 }
 
-
-// =============================================================================
-// NodeRef
-// =============================================================================
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum Color {
-    Red,
-    Black,
+impl DefaultLinkOps for Link {
+    type Ops = LinkOps;
 }
 
-/// A reference to an object that can be inserted into a `RBTRee`.
-pub trait NodeRef: Copy + Eq {
-    /// Constructs a "null" `NodeRef`.
-    fn null() -> Self;
+// An object containing a link can be sent to another thread if it is unlinked.
+unsafe impl Send for Link {}
 
-
-    /// Returns `true` if `self == Self::null()`.
-    fn is_null(self) -> bool;
-
-    /// Returns the reference to the "left" object.
+// Provide an implementation of Clone which simply initializes the new link as
+// unlinked. This allows structs containing a link to derive Clone.
+impl Clone for Link {
     #[inline]
-    unsafe fn left<A>(self, adapter: &A) -> Self
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>
-    {
-        (&*adapter.node_into_link(self)).left()
+    fn clone(&self) -> Link {
+        Link::new()
     }
+}
 
-    /// Returns the reference to the "right" object.
+// Same as above
+impl Default for Link {
     #[inline]
-    unsafe fn right<A>(self, adapter: &A) -> Self
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>
-    {
-        (&*adapter.node_into_link(self)).right()
+    fn default() -> Link {
+        Link::new()
     }
+}
 
-    /// Returns the reference to the "parent" object.
+// Provide an implementation of Debug so that structs containing a link can
+// still derive Debug.
+impl fmt::Debug for Link {
     #[inline]
-    unsafe fn parent<A>(self, adapter: &A) -> Self
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>
-    {
-        (&*adapter.node_into_link(self)).parent()
-    }
-
-    #[inline]
-    unsafe fn color<A>(self, adapter: &A) -> Color
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>
-    {
-        (&*adapter.node_into_link(self)).color()
-    }
-
-    /// Sets the reference to the "left" object.
-    #[inline]
-    unsafe fn set_left<A>(self, adapter: &A, left: Self)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>
-    {
-        (&*adapter.node_into_link(self)).set_left(left);
-    }
-
-    /// Sets the reference to the "right" object.
-    #[inline]
-    unsafe fn set_right<A>(self, adapter: &A, right: Self)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>
-    {
-        (&*adapter.node_into_link(self)).set_right(right);
-    }
-
-    /// Sets the reference to the "parent" object.
-    #[inline]
-    unsafe fn set_parent<A>(self, adapter: &A, parent: Self)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>
-    {
-        (&*adapter.node_into_link(self)).set_parent(parent);
-    }
-
-    #[inline]
-    unsafe fn set_color<A>(self, adapter: &A, color: Color)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>
-    {
-        (&*adapter.node_into_link(self)).set_color(color);
-    }
-
-    #[inline]
-    unsafe fn set_parent_color<A>(self, adapter: &A, parent: Self, color: Color)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>
-    {
-        self.set_parent(adapter, parent);
-        self.set_color(adapter, color);
-    }
-
-    /// Sets the "unlinked marker".
-    unsafe fn unlink<A>(self, adapter: &A)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>;
-
-    #[doc(hidden)]
-    #[inline]
-    unsafe fn is_left_child<A>(self, adapter: &A) -> bool
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        self.parent(adapter).left(adapter) == self
-    }
-
-    #[doc(hidden)]
-    #[inline]
-    unsafe fn first_child<A>(self, adapter: &A) -> A::NodeRef
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        if self.is_null() {
-            A::NodeRef::null()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // There isn't anything sensible to print here except whether the link
+        // is currently in a tree.
+        if self.is_linked() {
+            write!(f, "linked")
         } else {
-            let mut x = self;
-            while !x.left(adapter).is_null() {
-                x = x.left(adapter);
-            }
-            x
+            write!(f, "unlinked")
         }
     }
+}
 
-    #[doc(hidden)]
+// =============================================================================
+// LinkOps
+// =============================================================================
+
+/// Default `LinkOps` implementation for `RBTree`.
+#[derive(Clone, Copy, Default)]
+pub struct LinkOps;
+
+impl LinkOps {
     #[inline]
-    unsafe fn last_child<A>(self, adapter: &A) -> A::NodeRef
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        if self.is_null() {
-            A::NodeRef::null()
-        } else {
-            let mut x = self;
-            while !x.right(adapter).is_null() {
-                x = x.right(adapter);
-            }
-            x
-        }
-    }
-
-    #[doc(hidden)]
-    unsafe fn next<A>(self, adapter: &A) -> A::NodeRef
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        if !self.right(adapter).is_null() {
-            self.right(adapter).first_child(adapter)
-        } else {
-            let mut x = self;
-            loop {
-                if x.parent(adapter).is_null() {
-                    return A::NodeRef::null();
-                }
-                if x.is_left_child(adapter) {
-                    return x.parent(adapter);
-                }
-                x = x.parent(adapter);
-            }
-        }
-    }
-
-    #[doc(hidden)]
-    unsafe fn prev<A>(self, adapter: &A) -> A::NodeRef
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        if !self.left(adapter).is_null() {
-            self.left(adapter).last_child(adapter)
-        } else {
-            let mut x = self;
-            loop {
-                if x.parent(adapter).is_null() {
-                    return A::NodeRef::null();
-                }
-                if !x.is_left_child(adapter) {
-                    return x.parent(adapter);
-                }
-                x = x.parent(adapter);
-            }
-        }
-    }
-
-    #[doc(hidden)]
-    unsafe fn replace_with<A>(self, adapter: &A, new: A::NodeRef, root: &mut A::NodeRef)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        if self.parent(adapter).is_null() {
-            *root = new;
-        } else if self.is_left_child(adapter) {
-            self.parent(adapter).set_left(adapter, new);
-        } else {
-            self.parent(adapter).set_right(adapter, new);
-        }
-        if !self.left(adapter).is_null() {
-            self.left(adapter).set_parent(adapter, new);
-        }
-        if !self.right(adapter).is_null() {
-            self.right(adapter).set_parent(adapter, new);
-        }
-        new.set_left(adapter, self.left(adapter));
-        new.set_right(adapter, self.right(adapter));
-        new.set_parent_color(adapter, self.parent(adapter), self.color(adapter));
-        self.unlink(adapter);
-    }
-
-    #[doc(hidden)]
-    #[inline]
-    unsafe fn insert_left<A>(self, adapter: &A, new: A::NodeRef, root: &mut A::NodeRef)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        new.set_parent_color(adapter, self, Color::Red);
-        new.set_left(adapter, A::NodeRef::null());
-        new.set_right(adapter, A::NodeRef::null());
-        self.set_left(adapter, new);
-        new.post_insert(adapter, root);
-    }
-
-    #[doc(hidden)]
-    #[inline]
-    unsafe fn insert_right<A>(self, adapter: &A, new: A::NodeRef, root: &mut A::NodeRef)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        new.set_parent_color(adapter, self, Color::Red);
-        new.set_left(adapter, A::NodeRef::null());
-        new.set_right(adapter, A::NodeRef::null());
-        self.set_right(adapter, new);
-        new.post_insert(adapter, root);
-    }
-
-    #[doc(hidden)]
-    unsafe fn rotate_left<A>(self, adapter: &A, root: &mut A::NodeRef)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        let y = self.right(adapter);
-        self.set_right(adapter, y.left(adapter));
-        if !self.right(adapter).is_null() {
-            self.right(adapter).set_parent(adapter, self);
-        }
-        y.set_parent(adapter, self.parent(adapter));
-        if self.parent(adapter).is_null() {
-            *root = y;
-        } else if self.is_left_child(adapter) {
-            self.parent(adapter).set_left(adapter, y);
-        } else {
-            self.parent(adapter).set_right(adapter, y);
-        }
-        y.set_left(adapter, self);
-        self.set_parent(adapter, y);
-    }
-
-    #[doc(hidden)]
-    unsafe fn rotate_right<A>(self, adapter: &A, root: &mut A::NodeRef)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        let y = self.left(adapter);
-        self.set_left(adapter, y.right(adapter));
-        if !self.left(adapter).is_null() {
-            self.left(adapter).set_parent(adapter, self);
-        }
-        y.set_parent(adapter, self.parent(adapter));
-        if self.parent(adapter).is_null() {
-            *root = y;
-        } else if self.is_left_child(adapter) {
-            self.parent(adapter).set_left(adapter, y);
-        } else {
-            self.parent(adapter).set_right(adapter, y);
-        }
-        y.set_right(adapter, self);
-        self.set_parent(adapter, y);
-    }
-
-    // This code is based on the red-black tree implementation in libc++
-    #[doc(hidden)]
-    unsafe fn post_insert<A>(self, adapter: &A, root: &mut A::NodeRef)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        let mut x = self;
-        while !x.parent(adapter).is_null() && x.parent(adapter).color(adapter) == Color::Red {
-            if x.parent(adapter).is_left_child(adapter) {
-                let y = x.parent(adapter).parent(adapter).right(adapter);
-                if !y.is_null() && y.color(adapter) == Color::Red {
-                    x = x.parent(adapter);
-                    x.set_color(adapter, Color::Black);
-                    x = x.parent(adapter);
-                    if x.parent(adapter).is_null() {
-                        x.set_color(adapter, Color::Black);
-                    } else {
-                        x.set_color(adapter, Color::Red);
-                    }
-                    y.set_color(adapter, Color::Black);
-                } else {
-                    if !x.is_left_child(adapter) {
-                        x = x.parent(adapter);
-                        x.rotate_left(adapter, root);
-                    }
-                    x = x.parent(adapter);
-                    x.set_color(adapter, Color::Black);
-                    x = x.parent(adapter);
-                    x.set_color(adapter, Color::Red);
-                    x.rotate_right(adapter, root);
-                    break;
-                }
-            } else {
-                let y = x.parent(adapter).parent(adapter).left(adapter);
-                if !y.is_null() && y.color(adapter) == Color::Red {
-                    x = x.parent(adapter);
-                    x.set_color(adapter, Color::Black);
-                    x = x.parent(adapter);
-                    if x.parent(adapter).is_null() {
-                        x.set_color(adapter, Color::Black);
-                    } else {
-                        x.set_color(adapter, Color::Red);
-                    }
-                    y.set_color(adapter, Color::Black);
-                } else {
-                    if x.is_left_child(adapter) {
-                        x = x.parent(adapter);
-                        x.rotate_right(adapter, root);
-                    }
-                    x = x.parent(adapter);
-                    x.set_color(adapter, Color::Black);
-                    x = x.parent(adapter);
-                    x.set_color(adapter, Color::Red);
-                    x.rotate_left(adapter, root);
-                    break;
-                }
-            }
-        }
-    }
-
-    // This code is based on the red-black tree implementation in libc++
-    #[doc(hidden)]
-    unsafe fn remove<A>(self, adapter: &A, root: &mut A::NodeRef)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>,
-    {
-        let y = if self.left(adapter).is_null() || self.right(adapter).is_null() {
-            self
-        } else {
-            self.next(adapter)
+    unsafe fn set_parent_color(
+        &self,
+        ptr: <Self as super::LinkOps>::LinkPtr,
+        parent: Option<<Self as super::LinkOps>::LinkPtr>,
+        color: Color,
+    ) {
+        assert!(mem::align_of::<Link>() >= 2);
+        let bit = match color {
+            Color::Red => 0,
+            Color::Black => 1,
         };
-        let mut x = if !y.left(adapter).is_null() {
-            y.left(adapter)
-        } else {
-            y.right(adapter)
-        };
-        let mut w = A::NodeRef::null();
-        if !x.is_null() {
-            x.set_parent(adapter, y.parent(adapter));
+        let parent_usize = parent.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        ptr.as_ref().parent_color.set((parent_usize & !1) | bit);
+    }
+}
+
+impl link_ops::LinkOps for LinkOps {
+    type LinkPtr = NonNull<Link>;
+
+    #[inline]
+    fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
+        unsafe { ptr.as_ref().is_linked() }
+    }
+
+    #[inline]
+    unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr) {
+        ptr.as_ref().parent_color.set(UNLINKED_MARKER);
+    }
+}
+
+unsafe impl RBTreeOps for LinkOps {
+    #[inline]
+    fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        unsafe {
+            ptr.as_ref().left.get()
         }
-        if y.parent(adapter).is_null() {
-            *root = x;
-        } else if y.is_left_child(adapter) {
-            y.parent(adapter).set_left(adapter, x);
-            w = y.parent(adapter).right(adapter);
-        } else {
-            y.parent(adapter).set_right(adapter, x);
-            w = y.parent(adapter).left(adapter);
+    }
+
+    #[inline]
+    fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        unsafe {
+            ptr.as_ref().right.get()
         }
-        let removed_black = y.color(adapter) == Color::Black;
-        if y != self {
-            y.set_parent(adapter, self.parent(adapter));
-            if self.parent(adapter).is_null() {
-                *root = y;
-            } else if self.is_left_child(adapter) {
-                y.parent(adapter).set_left(adapter, y);
+    }
+
+    #[inline]
+    fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        unsafe {
+            let parent_usize = ptr.as_ref().parent_color.get() & !1;
+            if parent_usize > 0 {
+                Some(NonNull::new_unchecked(parent_usize as *mut Link))
             } else {
-                y.parent(adapter).set_right(adapter, y);
+                None
             }
-            y.set_left(adapter, self.left(adapter));
-            y.left(adapter).set_parent(adapter, y);
-            y.set_right(adapter, self.right(adapter));
-            if !y.right(adapter).is_null() {
-                y.right(adapter).set_parent(adapter, y);
-            }
-            y.set_color(adapter, self.color(adapter));
         }
-        if removed_black && !root.is_null() {
-            if !x.is_null() {
-                x.set_color(adapter, Color::Black);
+    }
+
+    #[inline]
+    fn color(&self, ptr: Self::LinkPtr) -> Color {
+        unsafe {
+            if ptr.as_ref().parent_color.get() & 1 == 1 {
+                Color::Black
             } else {
-                loop {
-                    if !w.is_left_child(adapter) {
-                        if w.color(adapter) == Color::Red {
-                            w.set_color(adapter, Color::Black);
-                            w.parent(adapter).set_color(adapter, Color::Red);
-                            w.parent(adapter).rotate_left(adapter, root);
-                            w = w.left(adapter).right(adapter);
-                        }
-                        if (w.left(adapter).is_null() || w.left(adapter).color(adapter) == Color::Black)
-                            && (w.right(adapter).is_null() || w.right(adapter).color(adapter) == Color::Black)
-                        {
-                            w.set_color(adapter, Color::Red);
-                            x = w.parent(adapter);
-                            if x.parent(adapter).is_null() || x.color(adapter) == Color::Red {
-                                x.set_color(adapter, Color::Black);
-                                break;
-                            }
-                            w = if x.is_left_child(adapter) {
-                                x.parent(adapter).right(adapter)
-                            } else {
-                                x.parent(adapter).left(adapter)
-                            };
-                        } else {
-                            if w.right(adapter).is_null() || w.right(adapter).color(adapter) == Color::Black {
-                                w.left(adapter).set_color(adapter, Color::Black);
-                                w.set_color(adapter, Color::Red);
-                                w.rotate_right(adapter, root);
-                                w = w.parent(adapter);
-                            }
-                            w.set_color(adapter, w.parent(adapter).color(adapter));
-                            w.parent(adapter).set_color(adapter, Color::Black);
-                            w.right(adapter).set_color(adapter, Color::Black);
-                            w.parent(adapter).rotate_left(adapter, root);
+                Color::Red
+            }
+        }
+    }
+
+    #[inline]
+    unsafe fn set_left(&mut self, ptr: Self::LinkPtr, left: Option<Self::LinkPtr>) {
+        ptr.as_ref().left.set(left);
+    }
+
+    #[inline]
+    unsafe fn set_right(&mut self, ptr: Self::LinkPtr, right: Option<Self::LinkPtr>) {
+        ptr.as_ref().right.set(right);
+    }
+
+    #[inline]
+    unsafe fn set_parent(
+        &self,
+        ptr: Self::LinkPtr,
+        parent: Option<Self::LinkPtr>,
+    ) {
+        self.set_parent_color(ptr, parent, self.color(ptr));
+    }
+
+    #[inline]
+    unsafe fn set_color(
+        &self,
+        ptr: Self::LinkPtr,
+        color: Color,
+    ) {
+        self.set_parent_color(ptr, self.parent(ptr), color);
+    }
+}
+
+#[inline]
+unsafe fn set_parent_color<T: RBTreeOps>(
+    link_ops: &T,
+    ptr: T::LinkPtr,
+    parent: Option<T::LinkPtr>,
+    color: Color,
+)
+{
+    link_ops.set_parent(ptr, parent);
+    link_ops.set_color(ptr, color);
+}
+
+#[inline]
+fn is_left_child<T: RBTreeOps>(
+    link_ops: &T,
+    ptr: T::LinkPtr,
+    parent: T::LinkPtr,
+) -> bool {
+    link_ops.left(parent) == Some(ptr)
+}
+
+#[inline]
+fn first_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> T::LinkPtr {
+    let mut x = ptr;
+    while let Some(y) = link_ops.left(x) {
+        x = y;
+    }
+    x
+}
+
+#[inline]
+fn last_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> T::LinkPtr {
+    let mut x = ptr;
+    while let Some(y) = link_ops.right(x) {
+        x = y;
+    }
+    x
+}
+
+#[inline]
+fn next<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> Option<T::LinkPtr> {
+    if let Some(right) = link_ops.right(ptr) {
+        Some(first_child(link_ops, right))
+    } else {
+        let mut x = ptr;
+        loop {
+            if let Some(parent) = link_ops.parent(x) {
+                if is_left_child(link_ops, x, parent) {
+                    return Some(parent);
+                }
+
+                x = parent;
+            } else {
+                return None;
+            }
+        }
+    }
+}
+
+#[inline]
+fn prev<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> Option<T::LinkPtr> {
+    if let Some(left) = link_ops.left(ptr) {
+        Some(last_child(link_ops, left))
+    } else {
+        let mut x = ptr;
+        loop {
+            if let Some(parent) = link_ops.parent(x) {
+                if !is_left_child(link_ops, x, parent) {
+                    return Some(parent);
+                }
+
+                x = parent;
+            } else {
+                return None;
+            }
+        }
+    }
+}
+
+#[inline]
+unsafe fn replace_with<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    new: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>,
+) {
+    if let Some(parent) = link_ops.parent(ptr) {
+        if is_left_child(link_ops, ptr, parent) {
+            link_ops.set_left(parent, Some(new));
+        } else {
+            link_ops.set_right(parent, Some(new));
+        }
+    } else {
+        *root = Some(new);
+    }
+    if let Some(left) = link_ops.left(ptr) {
+        link_ops.set_parent(left, Some(new));
+    }
+    if let Some(right) = link_ops.right(ptr) {
+        link_ops.set_parent(right, Some(new));
+    }
+    link_ops.set_left(new, link_ops.left(ptr));
+    link_ops.set_right(new, link_ops.right(ptr));
+    set_parent_color(link_ops, new, link_ops.parent(ptr), link_ops.color(ptr));
+    link_ops.mark_unlinked(ptr);
+}
+
+#[inline]
+unsafe fn insert_left<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    new: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>) 
+{
+    set_parent_color(link_ops, new, Some(ptr), Color::Red);
+    link_ops.set_left(new, None);
+    link_ops.set_right(new, None);
+    link_ops.set_left(ptr, Some(new));
+    post_insert(link_ops, new, root);
+}
+
+#[inline]
+unsafe fn insert_right<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    new: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>) 
+{
+    set_parent_color(link_ops, new, Some(ptr), Color::Red);
+    link_ops.set_left(new, None);
+    link_ops.set_right(new, None);
+    link_ops.set_right(ptr, Some(new));
+    post_insert(link_ops, new, root);
+}
+
+unsafe fn rotate_left<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>) 
+{
+    let y = link_ops.right(ptr).unwrap_or_else(|| hint::unreachable_unchecked());
+    link_ops.set_right(ptr, link_ops.left(y));
+    if let Some(right) = link_ops.right(ptr) {
+        link_ops.set_parent(right, Some(ptr));
+    }
+    link_ops.set_parent(y, link_ops.parent(ptr));
+    if let Some(parent) = link_ops.parent(ptr) {
+        if is_left_child(link_ops, ptr, parent) {
+            link_ops.set_left(parent, Some(y));
+        } else {
+            link_ops.set_right(parent, Some(y));
+        }
+    } else {
+        *root = Some(y);
+    }
+    link_ops.set_left(y, Some(ptr));
+    link_ops.set_parent(ptr, Some(y));
+}
+
+unsafe fn rotate_right<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>) 
+{
+    let y = link_ops.left(ptr).unwrap_or_else(|| hint::unreachable_unchecked());
+    link_ops.set_left(ptr, link_ops.right(y));
+    if let Some(left) = link_ops.left(ptr) {
+        link_ops.set_parent(left, Some(ptr));
+    }
+    link_ops.set_parent(y, link_ops.parent(ptr));
+    if let Some(parent) = link_ops.parent(ptr) {
+        if is_left_child(link_ops, ptr, parent) {
+            link_ops.set_left(parent, Some(y));
+        } else {
+            link_ops.set_right(parent, Some(y));
+        }
+    } else {
+        *root = Some(y);
+    }
+    link_ops.set_right(y, Some(ptr));
+    link_ops.set_parent(ptr, Some(y));
+}
+
+// This code is based on the red-black tree implementation in libc++
+unsafe fn post_insert<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>) 
+{
+    let mut x = ptr;
+    while !link_ops.parent(x).is_none() && link_ops.color(link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
+        if is_left_child(link_ops, link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.parent(link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) {
+            let y = link_ops.right(link_ops.parent(link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()));
+            if !y.is_none() && link_ops.color(y.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
+                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Black);
+                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+
+                if link_ops.parent(x).is_none() {
+                    link_ops.set_color(x, Color::Black);
+                } else {
+                    link_ops.set_color(x, Color::Red);
+                }
+                link_ops.set_color(y.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+            } else {
+                if !is_left_child(link_ops, x, link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())) {
+                    x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                    rotate_left(link_ops, x, root);
+                }
+                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Black);
+                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Red);
+                rotate_right(link_ops, x, root);
+                break;
+            }
+        } else {
+            let y = link_ops.left(link_ops.parent(link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()));
+            if !y.is_none() && link_ops.color(y.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
+                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Black);
+                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                if link_ops.parent(x).is_none() {
+                    link_ops.set_color(x, Color::Black);
+                } else {
+                    link_ops.set_color(x, Color::Red);
+                }
+                link_ops.set_color(y.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+            } else {
+                if is_left_child(link_ops, x, link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())) {
+                    x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                    rotate_right(link_ops, x, root);
+                }
+                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Black);
+                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Red);
+                rotate_left(link_ops, x, root);
+                break;
+            }
+        }
+    }
+}
+
+// This code is based on the red-black tree implementation in libc++
+unsafe fn remove<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>) 
+{
+    let y = if link_ops.left(ptr).is_none() || link_ops.right(ptr).is_none() {
+        ptr
+    } else {
+        next(link_ops, ptr).unwrap_or_else(|| hint::unreachable_unchecked())
+    };
+    let mut x = if !link_ops.left(y).is_none() {
+        link_ops.left(y)
+    } else {
+        link_ops.right(y)
+    };
+    let mut w = None;
+    if !x.is_none() {
+        link_ops.set_parent(x.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.parent(y));
+    }
+    if link_ops.parent(y).is_none() {
+        *root = x;
+    } else if is_left_child(link_ops, y, link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked())) {
+        link_ops.set_left(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()), x);
+        w = link_ops.right(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()));
+    } else {
+        link_ops.set_right(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()), x);
+        w = link_ops.left(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()));
+    }
+    let removed_black = link_ops.color(y) == Color::Black;
+    if y != ptr {
+        link_ops.set_parent(y, link_ops.parent(ptr));
+        if link_ops.parent(ptr).is_none() {
+            *root = Some(y);
+        } else if is_left_child(link_ops, ptr, link_ops.parent(ptr).unwrap_or_else(|| hint::unreachable_unchecked())) {
+            link_ops.set_left(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()), Some(y));
+        } else {
+            link_ops.set_right(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()), Some(y));
+        }
+        link_ops.set_left(y, link_ops.left(ptr));
+        link_ops.set_parent(link_ops.left(y).unwrap_or_else(|| hint::unreachable_unchecked()), Some(y));
+        link_ops.set_right(y, link_ops.right(ptr));
+        if !link_ops.right(y).is_none() {
+            link_ops.set_parent(link_ops.right(y).unwrap_or_else(|| hint::unreachable_unchecked()), Some(y));
+        }
+        link_ops.set_color(y, link_ops.color(ptr));
+    }
+    if removed_black && !root.is_none() {
+        if !x.is_none() {
+            link_ops.set_color(x.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+        } else {
+            loop {
+                if !is_left_child(link_ops, w.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) {
+                    if link_ops.color(w.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
+                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                        link_ops.set_color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
+                        rotate_left(link_ops, link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), root);
+                        w = link_ops.right(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()));
+                    }
+                    if (link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black)
+                        && (link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black)
+                    {
+                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
+                        x = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
+                        if link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(x.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
+                            link_ops.set_color(x.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
                             break;
                         }
-                    } else {
-                        if w.color(adapter) == Color::Red {
-                            w.set_color(adapter, Color::Black);
-                            w.parent(adapter).set_color(adapter, Color::Red);
-                            w.parent(adapter).rotate_right(adapter, root);
-                            w = w.right(adapter).left(adapter);
-                        }
-                        if (w.left(adapter).is_null() || w.left(adapter).color(adapter) == Color::Black)
-                            && (w.right(adapter).is_null() || w.right(adapter).color(adapter) == Color::Black)
-                        {
-                            w.set_color(adapter, Color::Red);
-                            x = w.parent(adapter);
-                            if x.parent(adapter).is_null() || x.color(adapter) == Color::Red {
-                                x.set_color(adapter, Color::Black);
-                                break;
-                            }
-                            w = if x.is_left_child(adapter) {
-                                x.parent(adapter).right(adapter)
-                            } else {
-                                x.parent(adapter).left(adapter)
-                            };
+                        w = if is_left_child(link_ops, x.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) {
+                            link_ops.right(link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()))
                         } else {
-                            if w.left(adapter).is_null() || w.left(adapter).color(adapter) == Color::Black {
-                                w.right(adapter).set_color(adapter, Color::Black);
-                                w.set_color(adapter, Color::Red);
-                                w.rotate_left(adapter, root);
-                                w = w.parent(adapter);
-                            }
-                            w.set_color(adapter, w.parent(adapter).color(adapter));
-                            w.parent(adapter).set_color(adapter, Color::Black);
-                            w.left(adapter).set_color(adapter, Color::Black);
-                            w.parent(adapter).rotate_right(adapter, root);
+                            link_ops.left(link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()))
+                        };
+                    } else {
+                        if link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black {
+                            link_ops.set_color(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                            link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
+                            rotate_right(link_ops, w.unwrap_or_else(|| hint::unreachable_unchecked()), root);
+                            w = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
+                        }
+                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())));
+                        link_ops.set_color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                        link_ops.set_color(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                        rotate_left(link_ops, link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), root);
+                        break;
+                    }
+                } else {
+                    if link_ops.color(w.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
+                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                        link_ops.set_color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
+                        rotate_right(link_ops, link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), root);
+                        w = link_ops.left(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()));
+                    }
+                    if (link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black)
+                        && (link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black)
+                    {
+                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
+                        x = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
+                        if link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(x.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
+                            link_ops.set_color(x.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
                             break;
                         }
+                        w = if is_left_child(link_ops, x.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) {
+                            link_ops.right(link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()))
+                        } else {
+                            link_ops.left(link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()))
+                        };
+                    } else {
+                        if link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black {
+                            link_ops.set_color(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                            link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
+                            rotate_left(link_ops, w.unwrap_or_else(|| hint::unreachable_unchecked()), root);
+                            w = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
+                        }
+                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())));
+                        link_ops.set_color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                        link_ops.set_color(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                        rotate_right(link_ops, link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), root);
+                        break;
                     }
                 }
             }
         }
-        self.unlink(adapter);
     }
+    link_ops.mark_unlinked(ptr);
 }
 
 // =============================================================================
@@ -559,17 +620,15 @@ pub trait NodeRef: Copy + Eq {
 /// A cursor which provides read-only access to a `RBTree`.
 pub struct Cursor<'a, A: Adapter>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
-    current: A::NodeRef,
+    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     tree: &'a RBTree<A>,
 }
 
-impl<'a, A: Adapter + 'a> Clone for Cursor<'a, A>
+impl<'a, A: Adapter> Clone for Cursor<'a, A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     #[inline]
     fn clone(&self) -> Cursor<'a, A> {
@@ -580,15 +639,14 @@ where
     }
 }
 
-impl<'a, A: Adapter + 'a> Cursor<'a, A>
+impl<'a, A: Adapter> Cursor<'a, A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
-        self.current.is_null()
+        self.current.is_none()
     }
 
     /// Returns a reference to the object that the cursor is currently
@@ -597,13 +655,8 @@ where
     /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a A::Value> {
-        if self.is_null() {
-            None
-        } else {
-            let adapter = &self.tree.adapter;
-            Some(unsafe { &*adapter.get_value(adapter.node_into_link(self.current)) })
-        }
+    pub fn get(&self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { &*self.tree.adapter.get_value(self.current?) })
     }
 
     /// Clones and returns the pointer that points to the element that the
@@ -612,12 +665,14 @@ where
     /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn clone_pointer(&self) -> Option<A::Pointer>
+    pub fn clone_pointer(&self) -> Option<<A::PointerOps as PointerOps>::Pointer>
     where
-        A::Pointer: IntrusivePointer<A::Value> + Clone,
+        <A::PointerOps as PointerOps>::Pointer: Clone,
     {
-        let raw_pointer = self.get()? as *const A::Value;
-        Some(unsafe { crate::intrusive_pointer::clone_pointer_from_raw(raw_pointer) })
+        let raw_pointer = self.get()? as *const <A::PointerOps as PointerOps>::Value;
+        Some(unsafe {
+            super::pointer_ops::clone_pointer_from_raw(self.tree.adapter.pointer_ops(), raw_pointer)
+        })
     }
 
     /// Moves the cursor to the next element of the `RBTree`.
@@ -627,10 +682,12 @@ where
     /// element of the `RBTree` then this will move it to the null object.
     #[inline]
     pub fn move_next(&mut self) {
-        if self.is_null() {
-            self.current = unsafe { self.tree.root.first_child(&self.tree.adapter) };
+        if let Some(current) = self.current {
+            self.current = next(self.tree.adapter.link_ops(), current);
+        } else if let Some(root) = self.tree.root {
+            self.current = Some(first_child(self.tree.adapter.link_ops(), root));
         } else {
-            self.current = unsafe { self.current.next(&self.tree.adapter) };
+            self.current = None;
         }
     }
 
@@ -641,10 +698,12 @@ where
     /// element of the `RBTree` then this will move it to the null object.
     #[inline]
     pub fn move_prev(&mut self) {
-        if self.is_null() {
-            self.current = unsafe { self.tree.root.last_child(&self.tree.adapter) };
+        if let Some(current) = self.current {
+            self.current = prev(self.tree.adapter.link_ops(), current);
+        } else if let Some(root) = self.tree.root {
+            self.current = Some(last_child(self.tree.adapter.link_ops(), root));
         } else {
-            self.current = unsafe { self.current.prev(&self.tree.adapter) };
+            self.current = None;
         }
     }
 
@@ -676,22 +735,20 @@ where
 /// A cursor which provides mutable access to a `RBTree`.
 pub struct CursorMut<'a, A: Adapter>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
-    current: A::NodeRef,
+    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     tree: &'a mut RBTree<A>,
 }
 
-impl<'a, A: Adapter + 'a> CursorMut<'a, A>
+impl<'a, A: Adapter> CursorMut<'a, A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
-        self.current.is_null()
+        self.current.is_none()
     }
 
     /// Returns a reference to the object that the cursor is currently
@@ -700,13 +757,8 @@ where
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&A::Value> {
-        if self.is_null() {
-            None
-        } else {
-            let adapter = &self.tree.adapter;
-            Some(unsafe { &*adapter.get_value(adapter.node_into_link(self.current)) })
-        }
+    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { &*self.tree.adapter.get_value(self.current?) })
     }
 
     /// Returns a read-only cursor pointing to the current element.
@@ -729,10 +781,12 @@ where
     /// element of the `RBTree` then this will move it to the null object.
     #[inline]
     pub fn move_next(&mut self) {
-        if self.is_null() {
-            self.current = unsafe { self.tree.root.first_child(&self.tree.adapter) };
+        if let Some(current) = self.current {
+            self.current = next(self.tree.adapter.link_ops(), current);
+        } else if let Some(root) = self.tree.root {
+            self.current = Some(first_child(self.tree.adapter.link_ops(), root));
         } else {
-            self.current = unsafe { self.current.next(&self.tree.adapter) };
+            self.current = None;
         }
     }
 
@@ -743,10 +797,12 @@ where
     /// element of the `RBTree` then this will move it to the null object.
     #[inline]
     pub fn move_prev(&mut self) {
-        if self.is_null() {
-            self.current = unsafe { self.tree.root.last_child(&self.tree.adapter) };
+        if let Some(current) = self.current {
+            self.current = prev(self.tree.adapter.link_ops(), current);
+        } else if let Some(root) = self.tree.root {
+            self.current = Some(last_child(self.tree.adapter.link_ops(), root));
         } else {
-            self.current = unsafe { self.current.prev(&self.tree.adapter) };
+            self.current = None;
         }
     }
 
@@ -782,16 +838,22 @@ where
     /// If the cursor is currently pointing to the null object then no element
     /// is removed and `None` is returned.
     #[inline]
-    pub fn remove(&mut self) -> Option<A::Pointer> {
+    pub fn remove(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         unsafe {
-            if self.is_null() {
-                return None;
+            if let Some(current) = self.current {
+                let next = next(self.tree.adapter.link_ops(), current);
+                let result = current;
+                remove(self.tree.adapter.link_ops_mut(), current, &mut self.tree.root);
+                self.current = next;
+                Some(
+                    self.tree
+                        .adapter
+                        .pointer_ops()
+                        .from_raw(self.tree.adapter.get_value(result)),
+                )
+            } else {
+                None
             }
-            let next = self.current.next(&self.tree.adapter);
-            let result = self.current;
-            self.current.remove(&self.tree.adapter, &mut self.tree.root);
-            self.current = next;
-            Some(unsafe { self.tree.adapter.node_into_pointer(result) })
         }
     }
 
@@ -814,16 +876,25 @@ where
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn replace_with(&mut self, val: A::Pointer) -> Result<A::Pointer, A::Pointer> {
-        if self.is_null() {
-            return Err(val);
-        }
+    pub fn replace_with(
+        &mut self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> Result<<A::PointerOps as PointerOps>::Pointer, <A::PointerOps as PointerOps>::Pointer>
+    {
         unsafe {
-            let new = self.tree.node_from_value(val);
-            let result = self.current;
-            self.current.replace_with(&self.tree.adapter, new, &mut self.tree.root);
-            self.current = new;
-            Ok(unsafe { self.tree.adapter.node_into_pointer(result) })
+            if let Some(current) = self.current {
+                let new = self.tree.node_from_value(val);
+                let result = current;
+                replace_with(self.tree.adapter.link_ops_mut(), current, new, &mut self.tree.root);
+                self.current = Some(new);
+                Ok(self
+                    .tree
+                    .adapter
+                    .pointer_ops()
+                    .from_raw(self.tree.adapter.get_value(result)))
+            } else {
+                Err(val)
+            }
         }
     }
 
@@ -842,20 +913,24 @@ where
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert_after(&mut self, val: A::Pointer) {
+    pub fn insert_after(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
         unsafe {
             let new = self.tree.node_from_value(val);
-            if self.tree.is_empty() {
-                self.tree.insert_root(new);
-            } else if self.is_null() {
-                self.tree
-                    .root
-                    .first_child(&self.tree.adapter)
-                    .insert_left(&self.tree.adapter, new, &mut self.tree.root);
-            } else if self.current.right(&self.tree.adapter).is_null() {
-                self.current.insert_right(&self.tree.adapter, new, &mut self.tree.root);
+            let link_ops = self.tree.adapter.link_ops_mut();
+
+            if let Some(root) = self.tree.root {
+                if let Some(current) = self.current {
+                    if let Some(right) = link_ops.right(current) {
+                        let next = next(link_ops, current).unwrap();
+                        insert_left(link_ops, next, new, &mut self.tree.root);
+                    } else {
+                        insert_right(link_ops, current, new, &mut self.tree.root);
+                    }
+                } else {
+                    insert_left(link_ops, first_child(link_ops, root), new, &mut self.tree.root);
+                }
             } else {
-                self.current.next(&self.tree.adapter).insert_left(&self.tree.adapter, new, &mut self.tree.root);
+                self.tree.insert_root(new);
             }
         }
     }
@@ -875,20 +950,24 @@ where
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert_before(&mut self, val: A::Pointer) {
+    pub fn insert_before(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
         unsafe {
             let new = self.tree.node_from_value(val);
-            if self.tree.is_empty() {
-                self.tree.insert_root(new);
-            } else if self.is_null() {
-                self.tree
-                    .root
-                    .last_child(&self.tree.adapter)
-                    .insert_right(&self.tree.adapter, new, &mut self.tree.root);
-            } else if self.current.left(&self.tree.adapter).is_null() {
-                self.current.insert_left(&self.tree.adapter, new, &mut self.tree.root);
+            let link_ops = self.tree.adapter.link_ops_mut();
+            if let Some(root) = self.tree.root {
+                if let Some(current) = self.current {
+                    if let Some(_) = link_ops.left(current) {
+                        let prev = prev(link_ops, current)
+                                        .unwrap();
+                        insert_right(link_ops, prev, new, &mut self.tree.root);
+                    } else {
+                        insert_left(link_ops, current, new, &mut self.tree.root);
+                    }
+                } else {
+                    insert_right(link_ops, last_child(link_ops, root), new, &mut self.tree.root);
+                }
             } else {
-                self.current.prev(&self.tree.adapter).insert_right(&self.tree.adapter, new, &mut self.tree.root);
+                self.tree.insert_root(new);
             }
         }
     }
@@ -896,8 +975,7 @@ where
 
 impl<'a, A: for<'b> KeyAdapter<'b>> CursorMut<'a, A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    <A as Adapter>::LinkOps: RBTreeOps,
 {
     /// Inserts a new element into the `RBTree`.
     ///
@@ -909,7 +987,7 @@ where
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert<'c>(&'c mut self, val: A::Pointer)
+    pub fn insert<'c>(&'c mut self, val: <A::PointerOps as PointerOps>::Pointer)
     where
         <A as KeyAdapter<'c>>::Key: Ord,
     {
@@ -936,31 +1014,38 @@ where
 /// `upper_bound`, `lower_bound` and `range` may return incorrect results.
 pub struct RBTree<A: Adapter>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
-    root: A::NodeRef,
+    root: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     adapter: A,
 }
 
 impl<A: Adapter> RBTree<A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     #[inline]
-    fn node_from_value(&self, val: A::Pointer) -> A::NodeRef {
-        unsafe {
-            let node = self.adapter.node_from_pointer(val);
+    fn node_from_value(
+        &self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> <A::LinkOps as super::LinkOps>::LinkPtr {
+        use link_ops::LinkOps;
 
-            if (*self.adapter.node_into_link(node)).is_linked() {
+        unsafe {
+            let raw = self.adapter.pointer_ops().into_raw(val);
+
+            if self
+                .adapter
+                .link_ops()
+                .is_linked(self.adapter.get_link(raw))
+            {
                 // convert the node back into a pointer
-                self.adapter.node_into_pointer(node);
+                self.adapter.pointer_ops().from_raw(raw);
 
                 panic!("attempted to insert an object that is already linked");
             }
 
-            node
+            self.adapter.get_link(raw)
         }
     }
 
@@ -968,7 +1053,7 @@ where
     #[inline]
     pub fn new(adapter: A) -> RBTree<A> {
         RBTree {
-            root: A::NodeRef::null(),
+            root: None,
             adapter,
         }
     }
@@ -976,14 +1061,14 @@ where
     /// Returns `true` if the `RBTree` is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.root.is_null()
+        self.root.is_none()
     }
 
     /// Returns a null `Cursor` for this tree.
     #[inline]
     pub fn cursor(&self) -> Cursor<'_, A> {
         Cursor {
-            current: A::NodeRef::null(),
+            current: None,
             tree: self,
         }
     }
@@ -992,7 +1077,7 @@ where
     #[inline]
     pub fn cursor_mut(&mut self) -> CursorMut<'_, A> {
         CursorMut {
-            current: A::NodeRef::null(),
+            current: None,
             tree: self,
         }
     }
@@ -1003,9 +1088,12 @@ where
     ///
     /// `ptr` must be a pointer to an object that is part of this tree.
     #[inline]
-    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Value) -> Cursor<'_, A> {
+    pub unsafe fn cursor_from_ptr(
+        &self,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+    ) -> Cursor<'_, A> {
         Cursor {
-            current: self.adapter.node_from_link(self.adapter.get_link(ptr)),
+            current: Some(self.adapter.get_link(ptr)),
             tree: self,
         }
     }
@@ -1016,9 +1104,12 @@ where
     ///
     /// `ptr` must be a pointer to an object that is part of this tree.
     #[inline]
-    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Value) -> CursorMut<'_, A> {
+    pub unsafe fn cursor_mut_from_ptr(
+        &mut self,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+    ) -> CursorMut<'_, A> {
         CursorMut {
-            current: self.adapter.node_from_link(self.adapter.get_link(ptr)),
+            current: Some(self.adapter.get_link(ptr)),
             tree: self,
         }
     }
@@ -1060,44 +1151,48 @@ where
     }
 
     #[inline]
-    unsafe fn insert_root(&mut self, node: A::NodeRef) {
-        node.set_parent_color(&self.adapter, A::NodeRef::null(), Color::Black);
-        node.set_left(&self.adapter, A::NodeRef::null());
-        node.set_right(&self.adapter, A::NodeRef::null());
-        self.root = node;
+    unsafe fn insert_root(&mut self, node: <A::LinkOps as super::LinkOps>::LinkPtr) {
+        set_parent_color(self.adapter.link_ops_mut(), node, None, Color::Black);
+        self.adapter.link_ops_mut().set_left(node, None);
+        self.adapter.link_ops_mut().set_right(node, None);
+        self.root = Some(node);
     }
 
-    /// Gets an iterator over the objects in the `RBTree`, in ascending key
-    /// order.
+    /// Gets an iterator over the objects in the `RBTree`.
     #[inline]
     pub fn iter(&self) -> Iter<'_, A> {
-        if self.root.is_null() {
+        let link_ops = self.adapter.link_ops();
+
+        if let Some(root) = self.root {
             Iter {
-                head: A::NodeRef::null(),
-                tail: A::NodeRef::null(),
+                head: Some(first_child(link_ops, root)),
+                tail: Some(last_child(link_ops, root)),
                 tree: self,
             }
         } else {
             Iter {
-                head: unsafe { self.root.first_child(&self.adapter) },
-                tail: unsafe { self.root.last_child(&self.adapter) },
+                head: None,
+                tail: None,
                 tree: self,
             }
         }
     }
 
     #[inline]
-    fn clear_recurse(&mut self, current: A::NodeRef) {
+    fn clear_recurse(&mut self, current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>) {
+        use super::LinkOps;
         // If adapter.get_value or Pointer::from_raw panic here, it will leak
         // the nodes and keep them linked. However this is harmless since there
         // is nothing you can do with just a Link.
-        if !current.is_null() {
+        if let Some(current) = current {
             unsafe {
-                self.clear_recurse(current.left(&self.adapter));
-                self.clear_recurse(current.right(&self.adapter));
-                current.unlink(&self.adapter);
-                self.adapter.node_into_pointer(current);
-            }
+                let left = self.adapter.link_ops_mut().left(current);
+                let right = self.adapter.link_ops_mut().right(current);
+                self.clear_recurse(left);
+                self.clear_recurse(right);
+                self.adapter.link_ops_mut().mark_unlinked(current);
+                self.adapter.pointer_ops().from_raw(self.adapter.get_value(current));
+            }   
         }
     }
 
@@ -1108,8 +1203,7 @@ where
     /// converted back to an owned pointer and then dropped.
     #[inline]
     pub fn clear(&mut self) {
-        let root = self.root;
-        self.root = A::NodeRef::null();
+        let root = self.root.take();
         self.clear_recurse(root);
     }
 
@@ -1121,7 +1215,7 @@ where
     /// `force_unlink` function on them.
     #[inline]
     pub fn fast_clear(&mut self) {
-        self.root = A::NodeRef::null();
+        self.root = None;
     }
 
     /// Takes all the elements out of the `RBTree`, leaving it empty. The
@@ -1135,32 +1229,33 @@ where
             root: self.root,
             adapter: self.adapter.clone(),
         };
-        self.root = A::NodeRef::null();
+        self.root = None;
         tree
     }
 }
 
 impl<A: for<'a> KeyAdapter<'a>> RBTree<A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    <A as Adapter>::LinkOps: RBTreeOps,
 {
     #[inline]
-    fn find_internal<'a, Q: ?Sized + Ord>(&self, key: &Q) -> A::NodeRef
+    fn find_internal<'a, Q: ?Sized + Ord>(&self, key: &Q) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
-        A::Value: 'a,
+        <A::PointerOps as PointerOps>::Value: 'a,
     {
+        let link_ops = self.adapter.link_ops();
+
         let mut tree = self.root;
-        while !tree.is_null() {
-            let current = unsafe { &*self.adapter.get_value(self.adapter.node_into_link(tree)) };
+        while let Some(x) = tree {
+            let current = unsafe { &*self.adapter.get_value(x) };
             match key.cmp(self.adapter.get_key(current).borrow()) {
-                Ordering::Less => tree = unsafe { tree.left(&self.adapter) },
+                Ordering::Less => tree = link_ops.left(x),
                 Ordering::Equal => return tree,
-                Ordering::Greater => tree = unsafe { tree.right(&self.adapter) },
+                Ordering::Greater => tree = link_ops.right(x),
             }
         }
-        A::NodeRef::null()
+        None
     }
 
     /// Returns a `Cursor` pointing to an element with the given key. If no such
@@ -1196,15 +1291,17 @@ where
     }
 
     #[inline]
-    fn lower_bound_internal<'a, Q: ?Sized + Ord>(&self, bound: Bound<&Q>) -> A::NodeRef
+    fn lower_bound_internal<'a, Q: ?Sized + Ord>(&self, bound: Bound<&Q>) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
-        A::Value: 'a,
+        <A::PointerOps as PointerOps>::Value: 'a,
     {
+        let link_ops = self.adapter.link_ops();
+
         let mut tree = self.root;
-        let mut result = A::NodeRef::null();
-        while !tree.is_null() {
-            let current = unsafe { &*self.adapter.get_value(self.adapter.node_into_link(tree)) };
+        let mut result = None;
+        while let Some(x) = tree {
+            let current = unsafe { &*self.adapter.get_value(x) };
             let cond = match bound {
                 Unbounded => true,
                 Included(key) => key <= self.adapter.get_key(current).borrow(),
@@ -1212,9 +1309,9 @@ where
             };
             if cond {
                 result = tree;
-                tree = unsafe { tree.left(&self.adapter) };
+                tree = link_ops.left(x);
             } else {
-                tree = unsafe { tree.right(&self.adapter) };
+                tree = link_ops.right(x);
             }
         }
         result
@@ -1249,25 +1346,27 @@ where
     }
 
     #[inline]
-    fn upper_bound_internal<'a, Q: ?Sized + Ord>(&self, bound: Bound<&Q>) -> A::NodeRef
+    fn upper_bound_internal<'a, Q: ?Sized + Ord>(&self, bound: Bound<&Q>) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
-        A::Value: 'a,
+        <A::PointerOps as PointerOps>::Value: 'a,
     {
+        let link_ops = self.adapter.link_ops();
+
         let mut tree = self.root;
-        let mut result = A::NodeRef::null();
-        while !tree.is_null() {
-            let current = unsafe { &*self.adapter.get_value(self.adapter.node_into_link(tree)) };
+        let mut result = None;
+        while let Some(x) = tree {
+            let current = unsafe { &*self.adapter.get_value(x) };
             let cond = match bound {
                 Unbounded => false,
                 Included(key) => key < self.adapter.get_key(current).borrow(),
                 Excluded(key) => key <= self.adapter.get_key(current).borrow(),
             };
             if cond {
-                tree = unsafe { tree.left(&self.adapter) };
+                tree = link_ops.left(x);
             } else {
                 result = tree;
-                tree = unsafe { tree.right(&self.adapter) };
+                tree = link_ops.right(x);
             }
         }
         result
@@ -1313,39 +1412,39 @@ where
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert<'a>(&'a mut self, val: A::Pointer) -> CursorMut<'_, A>
+    pub fn insert<'a>(&'a mut self, val: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'_, A>
     where
         <A as KeyAdapter<'a>>::Key: Ord,
     {
         unsafe {
             let new = self.node_from_value(val);
-            let raw = self.adapter.get_value(self.adapter.node_into_link(new));
-            if self.is_empty() {
-                self.insert_root(new);
-            } else {
+            let raw = self.adapter.get_value(new);
+            if let Some(root) = self.root {
                 let key = self.adapter.get_key(&*raw);
-                let mut tree = self.root;
+                let mut tree = root;
                 loop {
-                    let current = &*self.adapter.get_value(self.adapter.node_into_link(tree));
+                    let current = &*self.adapter.get_value(tree);
                     if key < self.adapter.get_key(current) {
-                        if tree.left(&self.adapter).is_null() {
-                            tree.insert_left(&self.adapter, new, &mut self.root);
-                            break;
+                        if let Some(left) = self.adapter.link_ops().left(tree) {
+                            tree = left;
                         } else {
-                            tree = tree.left(&self.adapter);
+                            insert_left(self.adapter.link_ops_mut(), tree, new, &mut self.root);
+                            break;
                         }
                     } else {
-                        if tree.right(&self.adapter).is_null() {
-                            tree.insert_right(&self.adapter, new, &mut self.root);
-                            break;
+                        if let Some(right) = self.adapter.link_ops().right(tree) {
+                            tree = right;
                         } else {
-                            tree = tree.right(&self.adapter);
+                            insert_right(self.adapter.link_ops_mut(), tree, new, &mut self.root);
+                            break;
                         }
                     }
                 }
+            } else {
+                self.insert_root(new);
             }
             CursorMut {
-                current: new,
+                current: Some(new),
                 tree: self,
             }
         }
@@ -1367,47 +1466,47 @@ where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
     {
         unsafe {
-            if self.is_empty() {
-                Entry::Vacant(InsertCursor {
-                    parent: A::NodeRef::null(),
-                    insert_left: false,
-                    tree: self,
-                })
-            } else {
-                let mut tree = self.root;
+            if let Some(root) = self.root {
+                let mut tree = root;
                 loop {
-                    let current = &*self.adapter.get_value(self.adapter.node_into_link(tree));
+                    let current = &*self.adapter.get_value(tree);
                     match key.cmp(self.adapter.get_key(current).borrow()) {
                         Ordering::Less => {
-                            if tree.left(&self.adapter).is_null() {
+                            if let Some(left) = self.adapter.link_ops().left(tree) {
+                                tree = left;
+                            } else {
                                 return Entry::Vacant(InsertCursor {
-                                    parent: tree,
+                                    parent: Some(tree),
                                     insert_left: true,
                                     tree: self,
                                 });
-                            } else {
-                                tree = tree.left(&self.adapter);
                             }
                         }
                         Ordering::Equal => {
                             return Entry::Occupied(CursorMut {
-                                current: tree,
+                                current: Some(tree),
                                 tree: self,
                             });
                         }
                         Ordering::Greater => {
-                            if tree.right(&self.adapter).is_null() {
+                            if let Some(right) = self.adapter.link_ops().right(tree) {
+                                tree = right;
+                            } else {
                                 return Entry::Vacant(InsertCursor {
-                                    parent: tree,
+                                    parent: Some(tree),
                                     insert_left: false,
                                     tree: self,
                                 });
-                            } else {
-                                tree = tree.right(&self.adapter);
                             }
                         }
                     }
                 }
+            } else {
+                Entry::Vacant(InsertCursor {
+                    parent: None,
+                    insert_left: false,
+                    tree: self,
+                })
             }
         }
     }
@@ -1429,39 +1528,45 @@ where
     {
         let lower = self.lower_bound_internal(min);
         let upper = self.upper_bound_internal(max);
-        if !lower.is_null() && !upper.is_null() {
-            let lower_key = unsafe { self.adapter.get_key(&*self.adapter.get_value(self.adapter.node_into_link(lower))) };
-            let upper_key = unsafe { self.adapter.get_key(&*self.adapter.get_value(self.adapter.node_into_link(upper))) };
+
+        if let (Some(lower), Some(upper)) = (lower, upper) {
+            let lower_key = unsafe { self.adapter.get_key(&*self.adapter.get_value(lower)) };
+            let upper_key = unsafe { self.adapter.get_key(&*self.adapter.get_value(upper)) };
             if upper_key >= lower_key {
                 return Iter {
-                    head: lower,
-                    tail: upper,
+                    head: Some(lower),
+                    tail: Some(upper),
                     tree: self,
                 };
             }
         }
         Iter {
-            head: A::NodeRef::null(),
-            tail: A::NodeRef::null(),
+            head: None,
+            tail: None,
             tree: self,
         }
     }
 }
 
-// Allow read-only access from multiple threads
-unsafe impl<A: Adapter + Sync> Sync for RBTree<A> where A::Value: Sync, A::NodeRef: NodeRef,
-A::Link: Link<A::NodeRef>, {}
+// Allow read-only access to values from multiple threads
+unsafe impl<A: Adapter + Sync> Sync for RBTree<A>
+where
+    <A::PointerOps as PointerOps>::Value: Sync,
+    A::LinkOps: RBTreeOps,
+{}
 
-// Allow sending to another thread if the ownership (represented by the A::Pointer owned
+// Allow sending to another thread if the ownership (represented by the <A::PointerOps as PointerOps>::Pointer owned
 // pointer type) can be transferred to another thread.
-unsafe impl<A: Adapter + Send> Send for RBTree<A> where A::Pointer: Send, A::NodeRef: NodeRef,
-A::Link: Link<A::NodeRef>, {}
+unsafe impl<A: Adapter + Send> Send for RBTree<A>
+where
+    <A::PointerOps as PointerOps>::Pointer: Send,
+    A::LinkOps: RBTreeOps,
+{}
 
 // Drop all owned pointers if the collection is dropped
 impl<A: Adapter> Drop for RBTree<A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     #[inline]
     fn drop(&mut self) {
@@ -1471,24 +1576,25 @@ where
 
 impl<A: Adapter> IntoIterator for RBTree<A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
-    type Item = A::Pointer;
+    type Item = <A::PointerOps as PointerOps>::Pointer;
     type IntoIter = IntoIter<A>;
 
     #[inline]
     fn into_iter(self) -> IntoIter<A> {
-        if self.root.is_null() {
+        let link_ops = self.adapter.link_ops();
+
+        if let Some(root) = self.root {
             IntoIter {
-                head: A::NodeRef::null(),
-                tail: A::NodeRef::null(),
+                head: Some(first_child(link_ops, root)),
+                tail: Some(last_child(link_ops, root)),
                 tree: self,
             }
         } else {
             IntoIter {
-                head: unsafe { self.root.first_child(&self.adapter) },
-                tail: unsafe { self.root.last_child(&self.adapter) },
+                head: None,
+                tail: None,
                 tree: self,
             }
         }
@@ -1497,10 +1603,9 @@ where
 
 impl<'a, A: Adapter + 'a> IntoIterator for &'a RBTree<A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
-    type Item = &'a A::Value;
+    type Item = &'a <A::PointerOps as PointerOps>::Value;
     type IntoIter = Iter<'a, A>;
 
     #[inline]
@@ -1511,8 +1616,7 @@ where
 
 impl<A: Adapter + Default> Default for RBTree<A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     fn default() -> RBTree<A> {
         RBTree::new(A::default())
@@ -1521,9 +1625,8 @@ where
 
 impl<A: Adapter> fmt::Debug for RBTree<A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
-    A::Value: fmt::Debug,
+    A::LinkOps: RBTreeOps,
+    <A::PointerOps as PointerOps>::Value: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set().entries(self.iter()).finish()
@@ -1538,18 +1641,16 @@ where
 /// `RBTree`.
 pub struct InsertCursor<'a, A: Adapter>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
-    parent: A::NodeRef,
+    parent: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     insert_left: bool,
     tree: &'a mut RBTree<A>,
 }
 
 impl<'a, A: Adapter + 'a> InsertCursor<'a, A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     /// Inserts a new element into the `RBTree` at the location indicated by
     /// this `InsertCursor`.
@@ -1558,18 +1659,21 @@ where
     ///
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
-    pub fn insert(self, val: A::Pointer) -> CursorMut<'a, A> {
+    pub fn insert(self, val: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'a, A> {
         unsafe {
             let new = self.tree.node_from_value(val);
-            if self.parent.is_null() {
-                self.tree.insert_root(new);
-            } else if self.insert_left {
-                self.parent.insert_left(&self.tree.adapter, new, &mut self.tree.root);
+            let link_ops = self.tree.adapter.link_ops_mut();
+            if let Some(parent) = self.parent {
+                if self.insert_left {
+                    insert_left(link_ops, parent, new, &mut self.tree.root);
+                } else {
+                    insert_right(link_ops, parent, new, &mut self.tree.root);
+                }
             } else {
-                self.parent.insert_right(&self.tree.adapter, new, &mut self.tree.root);
+                self.tree.insert_root(new);
             }
             CursorMut {
-                current: new,
+                current: Some(new),
                 tree: self.tree,
             }
         }
@@ -1579,10 +1683,9 @@ where
 /// An entry in a `RBTree`.
 ///
 /// See the documentation for `RBTree::entry`.
-pub enum Entry<'a, A: Adapter + 'a>
+pub enum Entry<'a, A: Adapter>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     /// An occupied entry.
     Occupied(CursorMut<'a, A>),
@@ -1593,8 +1696,7 @@ where
 
 impl<'a, A: Adapter + 'a> Entry<'a, A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     /// Inserts an element into the `RBTree` if the entry is vacant, returning
     /// a `CursorMut` to the resulting value. If the entry is occupied then a
@@ -1604,7 +1706,7 @@ where
     ///
     /// Panics if the `Entry` is vacant and the new element is already linked to
     /// a different intrusive collection.
-    pub fn or_insert(self, val: A::Pointer) -> CursorMut<'a, A> {
+    pub fn or_insert(self, val: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'a, A> {
         match self {
             Entry::Occupied(entry) => entry,
             Entry::Vacant(entry) => entry.insert(val),
@@ -1622,7 +1724,7 @@ where
     /// a different intrusive collection.
     pub fn or_insert_with<F>(self, default: F) -> CursorMut<'a, A>
     where
-        F: FnOnce() -> A::Pointer,
+        F: FnOnce() -> <A::PointerOps as PointerOps>::Pointer,
     {
         match self {
             Entry::Occupied(entry) => entry,
@@ -1638,71 +1740,51 @@ where
 /// An iterator over references to the items of a `RBTree`.
 pub struct Iter<'a, A: Adapter>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
-    head: A::NodeRef,
-    tail: A::NodeRef,
+    head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     tree: &'a RBTree<A>,
 }
 impl<'a, A: Adapter + 'a> Iterator for Iter<'a, A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
-    type Item = &'a A::Value;
+    type Item = &'a <A::PointerOps as PointerOps>::Value;
 
     #[inline]
-    fn next(&mut self) -> Option<&'a A::Value> {
-        if self.head.is_null() {
-            None
+    fn next(&mut self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        let head = self.head?;
+
+        if Some(head) == self.tail {
+            self.head = None;
+            self.tail = None;
         } else {
-            let head = self.head;
-            if head == self.tail {
-                self.head = A::NodeRef::null();
-                self.tail = A::NodeRef::null();
-            } else {
-                self.head = unsafe { head.next(&self.tree.adapter) };
-            }
-            Some(unsafe {
-                &*self
-                    .tree
-                    .adapter
-                    .get_value(self.tree.adapter.node_into_link(head))
-            })
+            self.head = next(self.tree.adapter.link_ops(), head);
         }
+        Some(unsafe { &*self.tree.adapter.get_value(head) })
     }
 }
 impl<'a, A: Adapter + 'a> DoubleEndedIterator for Iter<'a, A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     #[inline]
-    fn next_back(&mut self) -> Option<&'a A::Value> {
-        if self.tail.is_null() {
-            None
+    fn next_back(&mut self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        let tail = self.tail?;
+
+        if Some(tail) == self.head {
+            self.head = None;
+            self.tail = None;
         } else {
-            let tail = self.tail;
-            if self.head == tail {
-                self.tail = A::NodeRef::null();
-                self.head = A::NodeRef::null();
-            } else {
-                self.tail = unsafe { tail.prev(&self.tree.adapter) };
-            }
-            Some(unsafe {
-                &*self
-                    .tree
-                    .adapter
-                    .get_value(self.tree.adapter.node_into_link(tail))
-            })
+            self.tail = prev(self.tree.adapter.link_ops(), tail);
         }
+        Some(unsafe { &*self.tree.adapter.get_value(tail) })
     }
 }
 impl<'a, A: Adapter + 'a> Clone for Iter<'a, A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     #[inline]
     fn clone(&self) -> Iter<'a, A> {
@@ -1721,291 +1803,80 @@ where
 /// An iterator which consumes a `RBTree`.
 pub struct IntoIter<A: Adapter>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
-    head: A::NodeRef,
-    tail: A::NodeRef,
+    head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     tree: RBTree<A>,
 }
 impl<A: Adapter> Iterator for IntoIter<A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
-    type Item = A::Pointer;
+    type Item = <A::PointerOps as PointerOps>::Pointer;
 
     #[inline]
-    fn next(&mut self) -> Option<A::Pointer> {
-        if self.head.is_null() {
-            None
-        } else {
-            unsafe {
-                // Remove the node from the tree. Since head is always the
-                // left-most node, we can infer the following:
-                // - head.left is null.
-                // - head is a left child of its parent (or the root node).
-                let head = self.head;
-                let parent = head.parent(&self.tree.adapter);
-                let right = head.right(&self.tree.adapter);
-                if parent.is_null() {
-                    self.tree.root = right;
-                    if right.is_null() {
-                        self.tail = A::NodeRef::null();
-                    }
-                } else {
-                    parent.set_left(&self.tree.adapter, right);
+    fn next(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+        use super::LinkOps;
+
+        let head = self.head?;
+        let link_ops = self.tree.adapter.link_ops_mut();
+        unsafe {
+            // Remove the node from the tree. Since head is always the
+            // left-most node, we can infer the following:
+            // - head.left is null.
+            // - head is a left child of its parent (or the root node).
+            if let Some(parent) = link_ops.parent(head) {
+                link_ops.set_left(parent, link_ops.right(head));
+            } else {
+                self.tree.root = link_ops.right(head);
+                if link_ops.right(head).is_none() {
+                    self.tail = None;
                 }
-                if right.is_null() {
-                    self.head = parent;
-                } else {
-                    right.set_parent(&self.tree.adapter, parent);
-                    self.head = right.first_child(&self.tree.adapter);
-                }
-                head.unlink(&self.tree.adapter);
-                
-                Some(self.tree.adapter.node_into_pointer(head))
             }
+            if let Some(right) = link_ops.right(head) {
+                link_ops.set_parent(right, link_ops.parent(head));
+                self.head = Some(first_child(link_ops, right));
+            } else {
+                self.head = link_ops.parent(head);
+            }
+            link_ops.mark_unlinked(head);
+            Some(self.tree.adapter.pointer_ops().from_raw(self.tree.adapter.get_value(head)))
         }
     }
 }
 impl<A: Adapter> DoubleEndedIterator for IntoIter<A>
 where
-    A::NodeRef: NodeRef,
-    A::Link: Link<A::NodeRef>,
+    A::LinkOps: RBTreeOps,
 {
     #[inline]
-    fn next_back(&mut self) -> Option<A::Pointer> {
-        if self.tail.is_null() {
-            None
-        } else {
-            unsafe {
-                // Remove the node from the tree. Since tail is always the
-                // right-most node, we can infer the following:
-                // - tail.right is null.
-                // - tail is a right child of its parent (or the root node).
-                let tail = self.tail;
-                let parent = tail.parent(&self.tree.adapter);
-                let left = tail.left(&self.tree.adapter);
-                if parent.is_null() {
-                    self.tree.root = left;
-                    if left.is_null() {
-                        self.head = A::NodeRef::null();
-                    }
-                } else {
-                    parent.set_right(&self.tree.adapter, left);
+    fn next_back(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+        use super::LinkOps;
+
+        let tail = self.tail?;
+        let link_ops = self.tree.adapter.link_ops_mut();
+        unsafe {
+            // Remove the node from the tree. Since tail is always the
+            // right-most node, we can infer the following:
+            // - tail.right is null.
+            // - tail is a right child of its parent (or the root node).
+            if let Some(parent) = link_ops.parent(tail) {
+                link_ops.set_right(parent, link_ops.left(tail));
+            } else {
+                self.tree.root = link_ops.left(tail);
+                if link_ops.left(tail).is_none() {
+                    self.tail = None;
                 }
-                if left.is_null() {
-                    self.tail = parent;
-                } else {
-                    left.set_parent(&self.tree.adapter, parent);
-                    self.tail = left.last_child(&self.tree.adapter);
-                }
-                tail.unlink(&self.tree.adapter);
-                Some(self.tree.adapter.node_into_pointer(tail))
             }
+            if let Some(left) = link_ops.left(tail) {
+                link_ops.set_parent(left, link_ops.parent(tail));
+                self.tail = Some(last_child(link_ops, left));
+            } else {
+                self.tail = link_ops.parent(tail);
+            }
+            link_ops.mark_unlinked(tail);
+            Some(self.tree.adapter.pointer_ops().from_raw(self.tree.adapter.get_value(tail)))
         }
-    }
-}
-
-// =============================================================================
-// RawLink, RawLinkRef
-// =============================================================================
-
-/// Intrusive link that uses raw pointers to allow an object to be inserted into a `RBTree`.
-pub struct RawLink {
-    left: Cell<RawLinkRef>,
-    right: Cell<RawLinkRef>,
-    parent_color: Cell<usize>,
-}
-
-impl RawLink {
-    /// Creates a new `RawLink`.
-    #[inline]
-    pub fn new() -> RawLink {
-        RawLink {
-            left: Cell::new(RawLinkRef::null()),
-            right: Cell::new(RawLinkRef::null()),
-            parent_color: Cell::new(UNLINKED_MARKER),
-        }
-    }
-
-    /// Checks whether the `RawLink` is linked into a `RBTree`.
-    #[inline]
-    pub fn is_linked(&self) -> bool {
-        self.parent_color.get() != UNLINKED_MARKER
-    }
-
-    /// Forcibly unlinks an object from a `RBTree`.
-    ///
-    /// # Safety
-    ///
-    /// It is undefined behavior to call this function while still linked into a
-    /// `RBTree`. The only situation where this function is useful is
-    /// after calling `fast_clear` on a `RBTree`, since this clears
-    /// the collection without marking the nodes as unlinked.
-    #[inline]
-    pub unsafe fn force_unlink(&self) {
-        self.parent_color.set(UNLINKED_MARKER);
-    }
-}
-
-impl RawLink {
-    #[inline]
-    fn set_parent_color(&self, parent: RawLinkRef, color: Color) {
-        assert!(mem::align_of::<Self>() >= 2);
-        let bit = match color {
-            Color::Red => 0,
-            Color::Black => 1,
-        };
-        self.parent_color.set((parent.0 as usize & !1) | bit);
-    }
-}
-
-impl Link<RawLinkRef> for RawLink {
-    /// Returns the reference to the "left" object.
-    #[inline]
-    fn left(&self) -> RawLinkRef {
-        self.left.get()
-    }
-
-    /// Returns the reference to the "right" object.
-    #[inline]
-    fn right(&self) -> RawLinkRef {
-        self.right.get()
-    }
-
-    /// Returns the reference to the "parent" object.
-    #[inline]
-    fn parent(&self) -> RawLinkRef {
-        RawLinkRef((self.parent_color.get() & !1) as *const _)
-    }
-
-    #[inline]
-    fn color(&self) -> Color {
-        if self.parent_color.get() & 1 == 1 {
-            Color::Black
-        } else {
-            Color::Red
-        }
-    }
-
-    /// Sets the reference to the "left" object.
-    #[inline]
-    unsafe fn set_left(&self, left: RawLinkRef) {
-        self.left.set(left);
-    }
-
-    /// Sets the reference to the "right" object.
-    #[inline]
-    unsafe fn set_right(&self, right: RawLinkRef) {
-        self.right.set(right);
-    }
-
-    /// Sets the reference to the "parent" object.
-    #[inline]
-    unsafe fn set_parent(&self, parent: RawLinkRef) {
-        self.set_parent_color(parent, self.color());
-    }
-
-    #[inline]
-    unsafe fn set_color(&self, color: Color) {
-        self.set_parent_color(self.parent(), color);
-    }
-
-    /// Checks whether the `Link` is linked into a `RBTree`.
-    #[inline]
-    fn is_linked(&self) -> bool {
-        self.parent_color.get() != UNLINKED_MARKER
-    }
-
-    /// Forcibly unlinks an object from a `RBTree`.
-    ///
-    /// # Safety
-    ///
-    /// It is undefined behavior to call this function while still linked into a
-    /// `RBTree`. The only situation where this function is useful is
-    /// after calling `fast_clear` on a `RBTree`, since this clears
-    /// the collection without marking the nodes as unlinked.
-    #[inline]
-    unsafe fn force_unlink(&self) {
-        self.parent_color.set(UNLINKED_MARKER);
-    }
-}
-
-// An object containing a link can be sent to another thread if it is unlinked.
-unsafe impl Send for RawLink {}
-
-// Provide an implementation of Clone which simply initializes the new link as
-// unlinked. This allows structs containing a link to derive Clone.
-impl Clone for RawLink {
-    #[inline]
-    fn clone(&self) -> RawLink {
-        RawLink::new()
-    }
-}
-
-// Same as above
-impl Default for RawLink {
-    #[inline]
-    fn default() -> RawLink {
-        RawLink::new()
-    }
-}
-
-// Provide an implementation of Debug so that structs containing a link can
-// still derive Debug.
-impl fmt::Debug for RawLink {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // There isn't anything sensible to print here except whether the link
-        // is currently in a tree.
-        if self.is_linked() {
-            write!(f, "linked")
-        } else {
-            write!(f, "unlinked")
-        }
-    }
-}
-
-/// A concrete `NodeRef` that uses raw pointers.
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub struct RawLinkRef(*const RawLink);
-
-// Use a special value to indicate an unlinked node. This value represents a
-// red root node, which is impossible in a valid red-black tree.
-const UNLINKED_MARKER: usize = 0;
-
-impl NodeRef for RawLinkRef {
-    /// Constructs a "null" `NodeRef`.
-    #[inline]
-    fn null() -> Self {
-        RawLinkRef(ptr::null())
-    }
-
-
-    /// Returns `true` if `self == Self::null()`.
-    #[inline]
-    fn is_null(self) -> bool {
-        self.0.is_null()
-    }
-
-    #[inline]
-    unsafe fn set_parent_color<A>(self, adapter: &A, parent: Self, color: Color)
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>
-    {
-        (*self.0).set_parent_color(parent, color)
-    }
-
-    #[inline]
-    unsafe fn unlink<A>(self, adapter: &A) 
-    where
-        A: Adapter<NodeRef = Self>,
-        A::Link: Link<Self>
-    {
-        (*self.0).parent_color.set(UNLINKED_MARKER)
     }
 }
 
@@ -2016,17 +1887,19 @@ impl NodeRef for RawLinkRef {
 #[cfg(test)]
 mod tests {
     use self::rand::{Rng, XorShiftRng};
-    use super::{Entry, Link, RBTree, RawLink, RawLinkRef};
+    use super::{link_ops, Adapter, DefaultLinkOps, Link, LinkOps, PointerOps, RBTree, Entry, KeyAdapter, RBTreeOps};
+    use crate::custom_links::pointer_ops::DefaultPointerOps;
+    use crate::UnsafeRef;
     use crate::Bound::*;
-    use crate::{KeyAdapter, UnsafeRef, IntrusivePointer};
     use rand;
+    use core::ptr::NonNull;
     use std::boxed::Box;
     use std::fmt;
     use std::vec::Vec;
 
     #[derive(Clone)]
     struct Obj {
-        link: RawLink,
+        link: Link,
         value: i32,
     }
     impl fmt::Debug for Obj {
@@ -2034,70 +1907,82 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    intrusive_adapter!(ObjAdapter = UnsafeRef<Obj>: Obj { link: RawLink });
+    struct ObjAdapter(
+        LinkOps,
+        DefaultPointerOps<UnsafeRef<Obj>>,
+        core::marker::PhantomData<UnsafeRef<Obj>>,
+    );
+    unsafe impl Send for ObjAdapter {}
+    unsafe impl Sync for ObjAdapter {}
+    impl Clone for ObjAdapter {
+        #[inline]
+        fn clone(&self) -> Self {
+            *self
+        }
+    }
+    impl Copy for ObjAdapter {}
+    impl Default for ObjAdapter {
+        #[inline]
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+    #[allow(dead_code)]
+    impl ObjAdapter {
+        pub const NEW: Self =
+            ObjAdapter(LinkOps, DefaultPointerOps::new(), core::marker::PhantomData);
+        #[inline]
+        pub fn new() -> Self {
+            Self::NEW
+        }
+    }
+    #[allow(dead_code, unsafe_code)]
+    unsafe impl Adapter for ObjAdapter {
+        type LinkOps = LinkOps;
+        type PointerOps = DefaultPointerOps<UnsafeRef<Obj>>;
+
+        #[inline]
+        unsafe fn get_value(
+            &self,
+            link: <Self::LinkOps as link_ops::LinkOps>::LinkPtr,
+        ) -> *const <Self::PointerOps as PointerOps>::Value {
+            container_of!(link.as_ptr(), Obj, link)
+        }
+        #[inline]
+        unsafe fn get_link(
+            &self,
+            value: *const <Self::PointerOps as PointerOps>::Value,
+        ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
+            NonNull::new_unchecked(&(*value).link as *const Link as *mut Link)
+        }
+
+        #[inline]
+        fn link_ops(&self) -> &Self::LinkOps {
+            &self.0
+        }
+
+        #[inline]
+        fn link_ops_mut(&mut self) -> &mut Self::LinkOps {
+            &mut self.0
+        }
+
+        #[inline]
+        fn pointer_ops(&self) -> &Self::PointerOps {
+            &self.1
+        }
+    }
     impl<'a> KeyAdapter<'a> for ObjAdapter {
         type Key = i32;
-        fn get_key(&self, value: &'a Self::Value) -> i32 {
+        fn get_key(&self, value: &'a <Self::PointerOps as PointerOps>::Value) -> i32 {
             value.value
         }
     }
     fn make_obj(value: i32) -> UnsafeRef<Obj> {
         UnsafeRef::from_box(Box::new(Obj {
-            link: RawLink::new(),
+            link: Link::new(),
             value: value,
         }))
     }
-    unsafe impl crate::custom_links::Adapter for ObjAdapter {
-        type Link = RawLink;
-        type NodeRef = RawLinkRef;
-        type Value = <Self as crate::Adapter>::Value;
-        type Pointer = <Self as crate::Adapter>::Pointer;
-
-        /// Gets a reference to an object from a reference to a link in that object.
-        #[inline]
-        unsafe fn get_value(&self, link: *const Self::Link) -> *const Self::Value {
-            <Self as crate::Adapter>::get_value(self, link)
-        }
-
-        /// Gets a reference to the link for the given object.
-        #[inline]
-        unsafe fn get_link(&self, value: *const Self::Value) -> *const Self::Link {
-            <Self as crate::Adapter>::get_link(self, value)
-        }
-
-        /// Converts an object pointer into a node reference.
-        #[inline]
-        unsafe fn node_from_pointer(&self, pointer: Self::Pointer) -> Self::NodeRef {
-            self.node_from_link(self.get_link(Self::Pointer::into_raw(pointer)))
-        }
-
-        /// Converts a node reference into an object pointer.
-        #[inline]
-        unsafe fn node_into_pointer(&self, node: Self::NodeRef) -> Self::Pointer {
-            Self::Pointer::from_raw(self.get_value(self.node_into_link(node)))
-        }
-
-        /// Converts a node reference into a link reference.
-        #[inline]
-        unsafe fn node_from_link(&self, link: *const Self::Link) -> Self::NodeRef {
-            RawLinkRef(link)
-        }
-
-        /// Converts a link reference to a node reference.
-        #[inline]
-        unsafe fn node_into_link(&self, node: Self::NodeRef) -> *const Self::Link {
-            node.0
-        }
-    }
-    impl<'a> crate::custom_links::KeyAdapter<'a> for ObjAdapter {
-        type Key = <Self as crate::KeyAdapter<'a>>::Key;
-
-        #[inline]
-        fn get_key(&self, value: &'a Self::Value) -> Self::Key {
-            <Self as crate::KeyAdapter<'a>>::get_key(self, value)
-        }
-    }
-
 
     #[test]
     fn test_link() {
@@ -2768,62 +2653,84 @@ mod tests {
     fn test_non_static() {
         #[derive(Clone)]
         struct Obj<'a, T> {
-            link: RawLink,
+            link: Link,
             value: &'a T,
         }
-        intrusive_adapter!(ObjAdapter<'a, T> = &'a Obj<'a, T>: Obj<'a, T> {link: RawLink} where T: 'a);
+        struct ObjAdapter<'a, T>(
+            LinkOps,
+            DefaultPointerOps<&'a Obj<'a, T>>,
+            core::marker::PhantomData<&'a Obj<'a, T>>,
+        );
+        unsafe impl<'a, T> Send for ObjAdapter<'a, T> where T: 'a {}
+        unsafe impl<'a, T> Sync for ObjAdapter<'a, T> where T: 'a {}
+        impl<'a, T> Clone for ObjAdapter<'a, T>
+        where
+            T: 'a,
+        {
+            #[inline]
+            fn clone(&self) -> Self {
+                *self
+            }
+        }
+        impl<'a, T> Copy for ObjAdapter<'a, T> where T: 'a {}
+        impl<'a, T> Default for ObjAdapter<'a, T>
+        where
+            T: 'a,
+        {
+            #[inline]
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+        #[allow(dead_code)]
+        impl<'a, T> ObjAdapter<'a, T>
+        where
+            T: 'a,
+        {
+            pub const NEW: Self =
+                ObjAdapter(LinkOps, DefaultPointerOps::new(), core::marker::PhantomData);
+            #[inline]
+            pub fn new() -> Self {
+                Self::NEW
+            }
+        }
+        #[allow(dead_code, unsafe_code)]
+        unsafe impl<'a, T: 'a> Adapter for ObjAdapter<'a, T> {
+            type LinkOps = LinkOps;
+            type PointerOps = DefaultPointerOps<&'a Obj<'a, T>>;
+
+            #[inline]
+            unsafe fn get_value(
+                &self,
+                link: <Self::LinkOps as link_ops::LinkOps>::LinkPtr,
+            ) -> *const <Self::PointerOps as PointerOps>::Value {
+                container_of!(link.as_ptr(), Obj<'a, T>, link)
+            }
+            #[inline]
+            unsafe fn get_link(
+                &self,
+                value: *const <Self::PointerOps as PointerOps>::Value,
+            ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
+                NonNull::new_unchecked(&(*value).link as *const Link as *mut Link)
+            }
+
+            #[inline]
+            fn link_ops(&self) -> &Self::LinkOps {
+                &self.0
+            }
+
+            #[inline]
+            fn link_ops_mut(&mut self) -> &mut Self::LinkOps {
+                &mut self.0
+            }
+
+            #[inline]
+            fn pointer_ops(&self) -> &Self::PointerOps {
+                &self.1
+            }
+        }
         impl<'a, 'b, T: 'a + 'b> KeyAdapter<'a> for ObjAdapter<'b, T> {
             type Key = &'a T;
-            fn get_key(&self, value: &'a Obj<'b, T>) -> &'a T {
-                value.value
-            }
-        }
-        unsafe impl<'a, T: 'a> crate::custom_links::Adapter for ObjAdapter<'a, T> {
-            type Link = RawLink;
-            type NodeRef = RawLinkRef;
-            type Value = <Self as crate::Adapter>::Value;
-            type Pointer = <Self as crate::Adapter>::Pointer;
-    
-            /// Gets a reference to an object from a reference to a link in that object.
-            #[inline]
-            unsafe fn get_value(&self, link: *const Self::Link) -> *const Self::Value {
-                <Self as crate::Adapter>::get_value(self, link)
-            }
-    
-            /// Gets a reference to the link for the given object.
-            #[inline]
-            unsafe fn get_link(&self, value: *const Self::Value) -> *const Self::Link {
-                <Self as crate::Adapter>::get_link(self, value)
-            }
-    
-            /// Converts an object pointer into a node reference.
-            #[inline]
-            unsafe fn node_from_pointer(&self, pointer: Self::Pointer) -> Self::NodeRef {
-                self.node_from_link(self.get_link(Self::Pointer::into_raw(pointer)))
-            }
-    
-            /// Converts a node reference into an object pointer.
-            #[inline]
-            unsafe fn node_into_pointer(&self, node: Self::NodeRef) -> Self::Pointer {
-                Self::Pointer::from_raw(self.get_value(self.node_into_link(node)))
-            }
-    
-            /// Converts a node reference into a link reference.
-            #[inline]
-            unsafe fn node_from_link(&self, link: *const Self::Link) -> Self::NodeRef {
-                RawLinkRef(link)
-            }
-    
-            /// Converts a link reference to a node reference.
-            #[inline]
-            unsafe fn node_into_link(&self, node: Self::NodeRef) -> *const Self::Link {
-                node.0
-            }
-        }
-        impl<'a, 'b, T: 'a + 'b> crate::custom_links::KeyAdapter<'a> for ObjAdapter<'b, T> {
-            type Key = &'a T;
-    
-            #[inline]
             fn get_key(&self, value: &'a Obj<'b, T>) -> &'a T {
                 value.value
             }
@@ -2831,7 +2738,7 @@ mod tests {
 
         let v = 5;
         let a = Obj {
-            link: RawLink::default(),
+            link: Link::default(),
             value: &v,
         };
         let b = a.clone();
@@ -2848,69 +2755,82 @@ mod tests {
 
             #[derive(Clone)]
             struct Obj {
-                link: RawLink,
+                link: Link,
                 value: usize,
             }
-            intrusive_adapter!(ObjAdapter = $ptr<Obj>: Obj { link: RawLink });
+            struct ObjAdapter(
+                LinkOps,
+                DefaultPointerOps<$ptr<Obj>>,
+                core::marker::PhantomData<$ptr<Obj>>,
+            );
+            unsafe impl Send for ObjAdapter {}
+            unsafe impl Sync for ObjAdapter {}
+            impl Clone for ObjAdapter {
+                #[inline]
+                fn clone(&self) -> Self {
+                    *self
+                }
+            }
+            impl Copy for ObjAdapter {}
+            impl Default for ObjAdapter {
+                #[inline]
+                fn default() -> Self {
+                    Self::new()
+                }
+            }
+            #[allow(dead_code)]
+            impl ObjAdapter {
+                pub const NEW: Self =
+                    ObjAdapter(LinkOps, DefaultPointerOps::new(), core::marker::PhantomData);
+                #[inline]
+                pub fn new() -> Self {
+                    Self::NEW
+                }
+            }
+            #[allow(dead_code, unsafe_code)]
+            unsafe impl Adapter for ObjAdapter {
+                type LinkOps = LinkOps;
+                type PointerOps = DefaultPointerOps<$ptr<Obj>>;
+
+                #[inline]
+                unsafe fn get_value(
+                    &self,
+                    link: <Self::LinkOps as link_ops::LinkOps>::LinkPtr,
+                ) -> *const <Self::PointerOps as PointerOps>::Value {
+                    container_of!(link.as_ptr(), Obj, link)
+                }
+                #[inline]
+                unsafe fn get_link(
+                    &self,
+                    value: *const <Self::PointerOps as PointerOps>::Value,
+                ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
+                    NonNull::new_unchecked(&(*value).link as *const Link as *mut Link)
+                }
+
+                #[inline]
+                fn link_ops(&self) -> &Self::LinkOps {
+                    &self.0
+                }
+
+                #[inline]
+                fn link_ops_mut(&mut self) -> &mut Self::LinkOps {
+                    &mut self.0
+                }
+
+                #[inline]
+                fn pointer_ops(&self) -> &Self::PointerOps {
+                    &self.1
+                }
+            }
             impl<'a> KeyAdapter<'a> for ObjAdapter {
                 type Key = usize;
                 fn get_key(&self, value: &'a Obj) -> usize {
                     value.value
                 }
             }
-            unsafe impl crate::custom_links::Adapter for ObjAdapter {
-                type Link = RawLink;
-                type NodeRef = RawLinkRef;
-                type Value = <Self as crate::Adapter>::Value;
-                type Pointer = <Self as crate::Adapter>::Pointer;
-        
-                /// Gets a reference to an object from a reference to a link in that object.
-                #[inline]
-                unsafe fn get_value(&self, link: *const Self::Link) -> *const Self::Value {
-                    <Self as crate::Adapter>::get_value(self, link)
-                }
-        
-                /// Gets a reference to the link for the given object.
-                #[inline]
-                unsafe fn get_link(&self, value: *const Self::Value) -> *const Self::Link {
-                    <Self as crate::Adapter>::get_link(self, value)
-                }
-        
-                /// Converts an object pointer into a node reference.
-                #[inline]
-                unsafe fn node_from_pointer(&self, pointer: Self::Pointer) -> Self::NodeRef {
-                    self.node_from_link(self.get_link(Self::Pointer::into_raw(pointer)))
-                }
-        
-                /// Converts a node reference into an object pointer.
-                #[inline]
-                unsafe fn node_into_pointer(&self, node: Self::NodeRef) -> Self::Pointer {
-                    Self::Pointer::from_raw(self.get_value(self.node_into_link(node)))
-                }
-        
-                /// Converts a node reference into a link reference.
-                #[inline]
-                unsafe fn node_from_link(&self, link: *const Self::Link) -> Self::NodeRef {
-                    RawLinkRef(link)
-                }
-        
-                /// Converts a link reference to a node reference.
-                #[inline]
-                unsafe fn node_into_link(&self, node: Self::NodeRef) -> *const Self::Link {
-                    node.0
-                }
-            }
-            impl<'a> crate::custom_links::KeyAdapter<'a> for ObjAdapter {
-                type Key = <Self as crate::KeyAdapter<'a>>::Key;
-        
-                #[inline]
-                fn get_key(&self, value: &'a Self::Value) -> Self::Key {
-                    <Self as crate::KeyAdapter<'a>>::get_key(self, value)
-                }
-            }
 
             let a = $ptr::new(Obj {
-                link: RawLink::new(),
+                link: Link::new(),
                 value: 5,
             });
             let mut l = RBTree::new(ObjAdapter::new());
@@ -2923,7 +2843,7 @@ mod tests {
 
             l.front_mut().remove();
             assert!(l.front().clone_pointer().is_none());
-        }
+        };
     }
 
     #[test]
