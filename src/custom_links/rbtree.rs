@@ -19,6 +19,8 @@ use super::link_ops::{self, DefaultLinkOps};
 use super::pointer_ops::PointerOps;
 use super::Adapter;
 use super::KeyAdapter;
+use super::singly_linked_list::SinglyLinkedListOps;
+use super::linked_list::LinkedListOps;
 
 // =============================================================================
 // RBTreeOps
@@ -239,6 +241,40 @@ unsafe impl RBTreeOps for LinkOps {
         color: Color,
     ) {
         self.set_parent_color(ptr, self.parent(ptr), color);
+    }
+}
+
+unsafe impl SinglyLinkedListOps for LinkOps {
+    #[inline]
+    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        self.right(ptr)
+    }
+
+    #[inline]
+    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
+        self.set_right(ptr, next);
+    }
+}
+
+unsafe impl LinkedListOps for LinkOps {
+    #[inline]
+    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        self.right(ptr)
+    }
+
+    #[inline]
+    fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        self.left(ptr)
+    }
+
+    #[inline]
+    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
+        self.set_right(ptr, next);
+    }
+
+    #[inline]
+    unsafe fn set_prev(&mut self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>) {
+        self.set_left(ptr, prev);
     }
 }
 
