@@ -7,13 +7,13 @@
 
 use core::cell::Cell;
 use core::fmt;
-use core::ptr::NonNull;
 use core::hint;
+use core::ptr::NonNull;
 
 use super::link_ops::{self, DefaultLinkOps};
 use super::pointer_ops::PointerOps;
-use super::Adapter;
 use super::singly_linked_list::SinglyLinkedListOps;
+use super::Adapter;
 
 // =============================================================================
 // XorLinkedListOps
@@ -21,13 +21,25 @@ use super::singly_linked_list::SinglyLinkedListOps;
 
 /// Link operations for `XorLinkedList`.
 pub unsafe trait XorLinkedListOps: super::LinkOps {
-    unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>) -> Option<Self::LinkPtr>;
-    
-    unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) -> Option<Self::LinkPtr>;
+    unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>;
 
-    unsafe fn set(&mut self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>, next: Option<Self::LinkPtr>);
+    unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>;
 
-    unsafe fn replace_next_or_prev(&mut self, ptr: Self::LinkPtr, old: Option<Self::LinkPtr>, new: Option<Self::LinkPtr>);
+    unsafe fn set(
+        &mut self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+        next: Option<Self::LinkPtr>,
+    );
+
+    unsafe fn replace_next_or_prev(
+        &mut self,
+        ptr: Self::LinkPtr,
+        old: Option<Self::LinkPtr>,
+        new: Option<Self::LinkPtr>,
+    );
 }
 
 // =============================================================================
@@ -135,39 +147,56 @@ impl link_ops::LinkOps for LinkOps {
 
 unsafe impl XorLinkedListOps for LinkOps {
     #[inline]
-    unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>) -> Option<Self::LinkPtr> {
+    unsafe fn next(
+        &self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
         let raw = ptr.as_ref().packed.get() ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
         if raw > 0 {
-            Some(NonNull::new_unchecked(
-                raw as *mut Link
-            ))
-        } else {
-            None
-        }
-    }
-    
-    #[inline]
-    unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) -> Option<Self::LinkPtr> {
-        let raw = ptr.as_ref().packed.get() ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        if raw > 0 {
-            Some(NonNull::new_unchecked(
-                raw as *mut Link
-            ))
+            Some(NonNull::new_unchecked(raw as *mut Link))
         } else {
             None
         }
     }
 
     #[inline]
-    unsafe fn set(&mut self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>, next: Option<Self::LinkPtr>) {
-        let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0) ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+    unsafe fn prev(
+        &self,
+        ptr: Self::LinkPtr,
+        next: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
+        let raw = ptr.as_ref().packed.get() ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        if raw > 0 {
+            Some(NonNull::new_unchecked(raw as *mut Link))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    unsafe fn set(
+        &mut self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+        next: Option<Self::LinkPtr>,
+    ) {
+        let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
         ptr.as_ref().packed.set(new_packed);
     }
 
     #[inline]
-    unsafe fn replace_next_or_prev(&mut self, ptr: Self::LinkPtr, old: Option<Self::LinkPtr>, new: Option<Self::LinkPtr>) {
-        let new_packed = ptr.as_ref().packed.get() ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0) ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        
+    unsafe fn replace_next_or_prev(
+        &mut self,
+        ptr: Self::LinkPtr,
+        old: Option<Self::LinkPtr>,
+        new: Option<Self::LinkPtr>,
+    ) {
+        let new_packed = ptr.as_ref().packed.get()
+            ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
+
         ptr.as_ref().packed.set(new_packed);
     }
 }
@@ -184,10 +213,12 @@ unsafe impl SinglyLinkedListOps for LinkOps {
             }
         }
     }
-    
+
     #[inline]
     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
-        ptr.as_ref().packed.set(next.map(|x| x.as_ptr() as usize).unwrap_or(0));
+        ptr.as_ref()
+            .packed
+            .set(next.map(|x| x.as_ptr() as usize).unwrap_or(0));
     }
 }
 
@@ -469,10 +500,18 @@ where
 
             self.list.adapter.link_ops_mut().mark_unlinked(current);
             if let Some(prev) = self.prev {
-                self.list.adapter.link_ops_mut().replace_next_or_prev(prev, Some(current), self.next);
+                self.list.adapter.link_ops_mut().replace_next_or_prev(
+                    prev,
+                    Some(current),
+                    self.next,
+                );
             }
             if let Some(next) = self.next {
-                self.list.adapter.link_ops_mut().replace_next_or_prev(next, Some(current), self.prev);
+                self.list.adapter.link_ops_mut().replace_next_or_prev(
+                    next,
+                    Some(current),
+                    self.prev,
+                );
             }
             if self.list.head == Some(current) {
                 self.list.head = self.next;
@@ -489,7 +528,10 @@ where
             }
 
             Some(
-                self.list.adapter.pointer_ops().from_raw(self.list.adapter.get_value(result))
+                self.list
+                    .adapter
+                    .pointer_ops()
+                    .from_raw(self.list.adapter.get_value(result)),
             )
         }
     }
@@ -514,30 +556,41 @@ where
     ) -> Result<<A::PointerOps as PointerOps>::Pointer, <A::PointerOps as PointerOps>::Pointer>
     {
         use super::LinkOps;
-        
+
         unsafe {
             if let Some(current) = self.current {
                 let new = self.list.node_from_value(val);
                 let result = current;
-    
+
                 if self.list.head == Some(current) {
                     self.list.head = Some(new);
                 }
                 if self.list.tail == Some(current) {
                     self.list.tail = Some(new);
                 }
-    
+
                 if let Some(prev) = self.prev {
-                    self.list.adapter.link_ops_mut().replace_next_or_prev(prev, Some(current), Some(new));
+                    self.list.adapter.link_ops_mut().replace_next_or_prev(
+                        prev,
+                        Some(current),
+                        Some(new),
+                    );
                 }
                 if let Some(next) = self.next {
-                    self.list.adapter.link_ops_mut().replace_next_or_prev(next, Some(current), Some(new));
+                    self.list.adapter.link_ops_mut().replace_next_or_prev(
+                        next,
+                        Some(current),
+                        Some(new),
+                    );
                 }
-    
-                self.list.adapter.link_ops_mut().set(new, self.prev, self.next);
+
+                self.list
+                    .adapter
+                    .link_ops_mut()
+                    .set(new, self.prev, self.next);
                 self.list.adapter.link_ops_mut().mark_unlinked(result);
                 self.current = Some(new);
-                
+
                 Ok(self
                     .list
                     .adapter
@@ -563,7 +616,12 @@ where
         unsafe {
             let new = self.list.node_from_value(val);
             if let Some(current) = self.current {
-                link_between(self.list.adapter.link_ops_mut(), new, Some(current), self.next);
+                link_between(
+                    self.list.adapter.link_ops_mut(),
+                    new,
+                    Some(current),
+                    self.next,
+                );
                 if self.next.is_none() {
                     // Current pointer was tail
                     self.list.tail = Some(new);
@@ -595,7 +653,12 @@ where
         unsafe {
             let new = self.list.node_from_value(val);
             if let Some(current) = self.current {
-                link_between(self.list.adapter.link_ops_mut(), new, self.prev, Some(current));
+                link_between(
+                    self.list.adapter.link_ops_mut(),
+                    new,
+                    self.prev,
+                    Some(current),
+                );
                 if self.prev.is_none() {
                     // Current pointer was tail
                     self.list.head = Some(new);
@@ -716,12 +779,19 @@ where
                     adapter: self.list.adapter.clone(),
                 };
                 if let Some(head) = list.head {
-                    self.list.adapter.link_ops_mut().replace_next_or_prev(head, Some(current), None);
+                    self.list.adapter.link_ops_mut().replace_next_or_prev(
+                        head,
+                        Some(current),
+                        None,
+                    );
                     self.next = None;
                 } else {
                     list.tail = None;
                 }
-                self.list.adapter.link_ops_mut().set(current, self.prev, None);
+                self.list
+                    .adapter
+                    .link_ops_mut()
+                    .set(current, self.prev, None);
                 self.list.tail = self.current;
                 list
             }
@@ -756,12 +826,19 @@ where
                     adapter: self.list.adapter.clone(),
                 };
                 if let Some(tail) = list.tail {
-                    self.list.adapter.link_ops_mut().replace_next_or_prev(tail, Some(current), None);
+                    self.list.adapter.link_ops_mut().replace_next_or_prev(
+                        tail,
+                        Some(current),
+                        None,
+                    );
                     self.prev = None;
                 } else {
                     list.head = None;
                 }
-                self.list.adapter.link_ops_mut().set(current, None, self.next);
+                self.list
+                    .adapter
+                    .link_ops_mut()
+                    .set(current, None, self.next);
                 self.list.head = self.current;
                 list
             }
@@ -874,7 +951,9 @@ where
         let current = self.adapter.get_link(ptr);
         let prev = if !prev.is_null() {
             Some(self.adapter.get_link(prev))
-        } else { None };
+        } else {
+            None
+        };
         let next = self.adapter.link_ops().next(current, prev);
 
         Cursor {
@@ -899,7 +978,9 @@ where
         let current = self.adapter.get_link(ptr);
         let prev = if !prev.is_null() {
             Some(self.adapter.get_link(prev))
-        } else { None };
+        } else {
+            None
+        };
         let next = self.adapter.link_ops().next(current, prev);
 
         CursorMut {
@@ -924,7 +1005,9 @@ where
         let current = self.adapter.get_link(ptr);
         let next = if !next.is_null() {
             Some(self.adapter.get_link(next))
-        } else { None };
+        } else {
+            None
+        };
         let prev = self.adapter.link_ops().prev(current, next);
 
         Cursor {
@@ -949,7 +1032,9 @@ where
         let current = self.adapter.get_link(ptr);
         let next = if !next.is_null() {
             Some(self.adapter.get_link(next))
-        } else { None };
+        } else {
+            None
+        };
         let prev = self.adapter.link_ops().prev(current, next);
 
         CursorMut {
@@ -1274,14 +1359,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{link_ops, Adapter, DefaultLinkOps, Link, LinkOps, XorLinkedList, PointerOps};
+    use super::{link_ops, Adapter, DefaultLinkOps, Link, LinkOps, PointerOps, XorLinkedList};
     use crate::custom_links::pointer_ops::DefaultPointerOps;
     use crate::UnsafeRef;
+    use core::cell::Cell;
     use core::ptr::{self, NonNull};
     use std::boxed::Box;
     use std::fmt;
     use std::vec::Vec;
-    use core::cell::Cell;
 
     struct Obj {
         link1: Link,
@@ -1946,7 +2031,7 @@ mod tests {
         unsafe impl<'a> Adapter for ObjAdapter<'a> {
             type LinkOps = LinkOps;
             type PointerOps = DefaultPointerOps<Box<Obj<'a>>>;
-    
+
             #[inline]
             unsafe fn get_value(
                 &self,
@@ -1961,23 +2046,22 @@ mod tests {
             ) -> <Self::LinkOps as link_ops::LinkOps>::LinkPtr {
                 NonNull::new_unchecked(&(*value).link as *const Link as *mut Link)
             }
-    
+
             #[inline]
             fn link_ops(&self) -> &Self::LinkOps {
                 &self.0
             }
-    
+
             #[inline]
             fn link_ops_mut(&mut self) -> &mut Self::LinkOps {
                 &mut self.0
             }
-    
+
             #[inline]
             fn pointer_ops(&self) -> &Self::PointerOps {
                 &self.1
             }
         }
-    
 
         let v = Cell::new(0);
         let obj = Obj {

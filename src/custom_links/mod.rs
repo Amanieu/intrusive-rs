@@ -10,11 +10,12 @@ mod key_adapter;
 mod link_ops;
 mod pointer_ops;
 
-pub mod singly_linked_list;
 pub mod linked_list;
 pub mod rbtree;
+pub mod singly_linked_list;
+pub mod xor_linked_list;
 
 pub use self::adapter::Adapter;
 pub use self::key_adapter::KeyAdapter;
-pub use self::link_ops::{LinkOps, DefaultLinkOps};
+pub use self::link_ops::{DefaultLinkOps, LinkOps};
 pub use self::pointer_ops::{DefaultPointerOps, PointerOps};

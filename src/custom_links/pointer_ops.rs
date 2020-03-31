@@ -14,13 +14,12 @@ use crate::alloc::sync::Arc;
 use crate::UnsafeRef;
 use core::marker::PhantomData;
 
-
 pub unsafe trait PointerOps {
     type Value: ?Sized;
     type Pointer;
 
     /// Constructs an owned pointer from a raw pointer.
-    /// 
+    ///
     /// # Safety
     /// The raw pointer must have been previously returned by `into_raw`.
     unsafe fn from_raw(&self, value: *const Self::Value) -> Self::Pointer;

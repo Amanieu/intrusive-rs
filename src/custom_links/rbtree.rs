@@ -5,22 +5,22 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+use core::borrow::Borrow;
 use core::cell::Cell;
+use core::cmp::Ordering;
 use core::fmt;
+use core::hint;
 use core::mem;
 use core::ptr::NonNull;
-use core::cmp::Ordering;
-use core::borrow::Borrow;
-use core::hint;
 
 use crate::Bound::{self, Excluded, Included, Unbounded};
 
 use super::link_ops::{self, DefaultLinkOps};
+use super::linked_list::LinkedListOps;
 use super::pointer_ops::PointerOps;
+use super::singly_linked_list::SinglyLinkedListOps;
 use super::Adapter;
 use super::KeyAdapter;
-use super::singly_linked_list::SinglyLinkedListOps;
-use super::linked_list::LinkedListOps;
 
 // =============================================================================
 // RBTreeOps
@@ -180,16 +180,12 @@ impl link_ops::LinkOps for LinkOps {
 unsafe impl RBTreeOps for LinkOps {
     #[inline]
     fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        unsafe {
-            ptr.as_ref().left.get()
-        }
+        unsafe { ptr.as_ref().left.get() }
     }
 
     #[inline]
     fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        unsafe {
-            ptr.as_ref().right.get()
-        }
+        unsafe { ptr.as_ref().right.get() }
     }
 
     #[inline]
@@ -226,20 +222,12 @@ unsafe impl RBTreeOps for LinkOps {
     }
 
     #[inline]
-    unsafe fn set_parent(
-        &self,
-        ptr: Self::LinkPtr,
-        parent: Option<Self::LinkPtr>,
-    ) {
+    unsafe fn set_parent(&self, ptr: Self::LinkPtr, parent: Option<Self::LinkPtr>) {
         self.set_parent_color(ptr, parent, self.color(ptr));
     }
 
     #[inline]
-    unsafe fn set_color(
-        &self,
-        ptr: Self::LinkPtr,
-        color: Color,
-    ) {
+    unsafe fn set_color(&self, ptr: Self::LinkPtr, color: Color) {
         self.set_parent_color(ptr, self.parent(ptr), color);
     }
 }
@@ -284,18 +272,13 @@ unsafe fn set_parent_color<T: RBTreeOps>(
     ptr: T::LinkPtr,
     parent: Option<T::LinkPtr>,
     color: Color,
-)
-{
+) {
     link_ops.set_parent(ptr, parent);
     link_ops.set_color(ptr, color);
 }
 
 #[inline]
-fn is_left_child<T: RBTreeOps>(
-    link_ops: &T,
-    ptr: T::LinkPtr,
-    parent: T::LinkPtr,
-) -> bool {
+fn is_left_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr, parent: T::LinkPtr) -> bool {
     link_ops.left(parent) == Some(ptr)
 }
 
@@ -390,8 +373,8 @@ unsafe fn insert_left<T: RBTreeOps>(
     link_ops: &mut T,
     ptr: T::LinkPtr,
     new: T::LinkPtr,
-    root: &mut Option<T::LinkPtr>) 
-{
+    root: &mut Option<T::LinkPtr>,
+) {
     set_parent_color(link_ops, new, Some(ptr), Color::Red);
     link_ops.set_left(new, None);
     link_ops.set_right(new, None);
@@ -404,8 +387,8 @@ unsafe fn insert_right<T: RBTreeOps>(
     link_ops: &mut T,
     ptr: T::LinkPtr,
     new: T::LinkPtr,
-    root: &mut Option<T::LinkPtr>) 
-{
+    root: &mut Option<T::LinkPtr>,
+) {
     set_parent_color(link_ops, new, Some(ptr), Color::Red);
     link_ops.set_left(new, None);
     link_ops.set_right(new, None);
@@ -416,9 +399,11 @@ unsafe fn insert_right<T: RBTreeOps>(
 unsafe fn rotate_left<T: RBTreeOps>(
     link_ops: &mut T,
     ptr: T::LinkPtr,
-    root: &mut Option<T::LinkPtr>) 
-{
-    let y = link_ops.right(ptr).unwrap_or_else(|| hint::unreachable_unchecked());
+    root: &mut Option<T::LinkPtr>,
+) {
+    let y = link_ops
+        .right(ptr)
+        .unwrap_or_else(|| hint::unreachable_unchecked());
     link_ops.set_right(ptr, link_ops.left(y));
     if let Some(right) = link_ops.right(ptr) {
         link_ops.set_parent(right, Some(ptr));
@@ -440,9 +425,11 @@ unsafe fn rotate_left<T: RBTreeOps>(
 unsafe fn rotate_right<T: RBTreeOps>(
     link_ops: &mut T,
     ptr: T::LinkPtr,
-    root: &mut Option<T::LinkPtr>) 
-{
-    let y = link_ops.left(ptr).unwrap_or_else(|| hint::unreachable_unchecked());
+    root: &mut Option<T::LinkPtr>,
+) {
+    let y = link_ops
+        .left(ptr)
+        .unwrap_or_else(|| hint::unreachable_unchecked());
     link_ops.set_left(ptr, link_ops.right(y));
     if let Some(left) = link_ops.left(ptr) {
         link_ops.set_parent(left, Some(ptr));
@@ -465,55 +452,131 @@ unsafe fn rotate_right<T: RBTreeOps>(
 unsafe fn post_insert<T: RBTreeOps>(
     link_ops: &mut T,
     ptr: T::LinkPtr,
-    root: &mut Option<T::LinkPtr>) 
-{
+    root: &mut Option<T::LinkPtr>,
+) {
     let mut x = ptr;
-    while !link_ops.parent(x).is_none() && link_ops.color(link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
-        if is_left_child(link_ops, link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.parent(link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) {
-            let y = link_ops.right(link_ops.parent(link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()));
-            if !y.is_none() && link_ops.color(y.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
-                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+    while !link_ops.parent(x).is_none()
+        && link_ops.color(
+            link_ops
+                .parent(x)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+        ) == Color::Red
+    {
+        if is_left_child(
+            link_ops,
+            link_ops
+                .parent(x)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+            link_ops
+                .parent(
+                    link_ops
+                        .parent(x)
+                        .unwrap_or_else(|| hint::unreachable_unchecked()),
+                )
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+        ) {
+            let y = link_ops.right(
+                link_ops
+                    .parent(
+                        link_ops
+                            .parent(x)
+                            .unwrap_or_else(|| hint::unreachable_unchecked()),
+                    )
+                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+            );
+            if !y.is_none()
+                && link_ops.color(y.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red
+            {
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
                 link_ops.set_color(x, Color::Black);
-                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
 
                 if link_ops.parent(x).is_none() {
                     link_ops.set_color(x, Color::Black);
                 } else {
                     link_ops.set_color(x, Color::Red);
                 }
-                link_ops.set_color(y.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                link_ops.set_color(
+                    y.unwrap_or_else(|| hint::unreachable_unchecked()),
+                    Color::Black,
+                );
             } else {
-                if !is_left_child(link_ops, x, link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())) {
-                    x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                if !is_left_child(
+                    link_ops,
+                    x,
+                    link_ops
+                        .parent(x)
+                        .unwrap_or_else(|| hint::unreachable_unchecked()),
+                ) {
+                    x = link_ops
+                        .parent(x)
+                        .unwrap_or_else(|| hint::unreachable_unchecked());
                     rotate_left(link_ops, x, root);
                 }
-                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
                 link_ops.set_color(x, Color::Black);
-                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
                 link_ops.set_color(x, Color::Red);
                 rotate_right(link_ops, x, root);
                 break;
             }
         } else {
-            let y = link_ops.left(link_ops.parent(link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()));
-            if !y.is_none() && link_ops.color(y.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
-                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+            let y = link_ops.left(
+                link_ops
+                    .parent(
+                        link_ops
+                            .parent(x)
+                            .unwrap_or_else(|| hint::unreachable_unchecked()),
+                    )
+                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+            );
+            if !y.is_none()
+                && link_ops.color(y.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red
+            {
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
                 link_ops.set_color(x, Color::Black);
-                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
                 if link_ops.parent(x).is_none() {
                     link_ops.set_color(x, Color::Black);
                 } else {
                     link_ops.set_color(x, Color::Red);
                 }
-                link_ops.set_color(y.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                link_ops.set_color(
+                    y.unwrap_or_else(|| hint::unreachable_unchecked()),
+                    Color::Black,
+                );
             } else {
-                if is_left_child(link_ops, x, link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked())) {
-                    x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                if is_left_child(
+                    link_ops,
+                    x,
+                    link_ops
+                        .parent(x)
+                        .unwrap_or_else(|| hint::unreachable_unchecked()),
+                ) {
+                    x = link_ops
+                        .parent(x)
+                        .unwrap_or_else(|| hint::unreachable_unchecked());
                     rotate_right(link_ops, x, root);
                 }
-                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
                 link_ops.set_color(x, Color::Black);
-                x = link_ops.parent(x).unwrap_or_else(|| hint::unreachable_unchecked());
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
                 link_ops.set_color(x, Color::Red);
                 rotate_left(link_ops, x, root);
                 break;
@@ -523,11 +586,7 @@ unsafe fn post_insert<T: RBTreeOps>(
 }
 
 // This code is based on the red-black tree implementation in libc++
-unsafe fn remove<T: RBTreeOps>(
-    link_ops: &mut T,
-    ptr: T::LinkPtr,
-    root: &mut Option<T::LinkPtr>) 
-{
+unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Option<T::LinkPtr>) {
     let y = if link_ops.left(ptr).is_none() || link_ops.right(ptr).is_none() {
         ptr
     } else {
@@ -540,106 +599,372 @@ unsafe fn remove<T: RBTreeOps>(
     };
     let mut w = None;
     if !x.is_none() {
-        link_ops.set_parent(x.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.parent(y));
+        link_ops.set_parent(
+            x.unwrap_or_else(|| hint::unreachable_unchecked()),
+            link_ops.parent(y),
+        );
     }
     if link_ops.parent(y).is_none() {
         *root = x;
-    } else if is_left_child(link_ops, y, link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked())) {
-        link_ops.set_left(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()), x);
-        w = link_ops.right(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()));
+    } else if is_left_child(
+        link_ops,
+        y,
+        link_ops
+            .parent(y)
+            .unwrap_or_else(|| hint::unreachable_unchecked()),
+    ) {
+        link_ops.set_left(
+            link_ops
+                .parent(y)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+            x,
+        );
+        w = link_ops.right(
+            link_ops
+                .parent(y)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+        );
     } else {
-        link_ops.set_right(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()), x);
-        w = link_ops.left(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()));
+        link_ops.set_right(
+            link_ops
+                .parent(y)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+            x,
+        );
+        w = link_ops.left(
+            link_ops
+                .parent(y)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+        );
     }
     let removed_black = link_ops.color(y) == Color::Black;
     if y != ptr {
         link_ops.set_parent(y, link_ops.parent(ptr));
         if link_ops.parent(ptr).is_none() {
             *root = Some(y);
-        } else if is_left_child(link_ops, ptr, link_ops.parent(ptr).unwrap_or_else(|| hint::unreachable_unchecked())) {
-            link_ops.set_left(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()), Some(y));
+        } else if is_left_child(
+            link_ops,
+            ptr,
+            link_ops
+                .parent(ptr)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+        ) {
+            link_ops.set_left(
+                link_ops
+                    .parent(y)
+                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                Some(y),
+            );
         } else {
-            link_ops.set_right(link_ops.parent(y).unwrap_or_else(|| hint::unreachable_unchecked()), Some(y));
+            link_ops.set_right(
+                link_ops
+                    .parent(y)
+                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                Some(y),
+            );
         }
         link_ops.set_left(y, link_ops.left(ptr));
-        link_ops.set_parent(link_ops.left(y).unwrap_or_else(|| hint::unreachable_unchecked()), Some(y));
+        link_ops.set_parent(
+            link_ops
+                .left(y)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+            Some(y),
+        );
         link_ops.set_right(y, link_ops.right(ptr));
         if !link_ops.right(y).is_none() {
-            link_ops.set_parent(link_ops.right(y).unwrap_or_else(|| hint::unreachable_unchecked()), Some(y));
+            link_ops.set_parent(
+                link_ops
+                    .right(y)
+                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                Some(y),
+            );
         }
         link_ops.set_color(y, link_ops.color(ptr));
     }
     if removed_black && !root.is_none() {
         if !x.is_none() {
-            link_ops.set_color(x.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+            link_ops.set_color(
+                x.unwrap_or_else(|| hint::unreachable_unchecked()),
+                Color::Black,
+            );
         } else {
             loop {
-                if !is_left_child(link_ops, w.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) {
-                    if link_ops.color(w.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
-                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
-                        link_ops.set_color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
-                        rotate_left(link_ops, link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), root);
-                        w = link_ops.right(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()));
-                    }
-                    if (link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black)
-                        && (link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black)
+                if !is_left_child(
+                    link_ops,
+                    w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                    link_ops
+                        .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                        .unwrap_or_else(|| hint::unreachable_unchecked()),
+                ) {
+                    if link_ops.color(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                        == Color::Red
                     {
-                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Red,
+                        );
+                        rotate_left(
+                            link_ops,
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            root,
+                        );
+                        w = link_ops.right(
+                            link_ops
+                                .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        );
+                    }
+                    if (link_ops
+                        .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                        .is_none()
+                        || link_ops.color(
+                            link_ops
+                                .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        ) == Color::Black)
+                        && (link_ops
+                            .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(
+                                link_ops
+                                    .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ) == Color::Black)
+                    {
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Red,
+                        );
                         x = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
-                        if link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(x.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
-                            link_ops.set_color(x.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                        if link_ops
+                            .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                == Color::Red
+                        {
+                            link_ops.set_color(
+                                x.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Black,
+                            );
                             break;
                         }
-                        w = if is_left_child(link_ops, x.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) {
-                            link_ops.right(link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()))
+                        w = if is_left_child(
+                            link_ops,
+                            x.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            link_ops
+                                .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        ) {
+                            link_ops.right(
+                                link_ops
+                                    .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            )
                         } else {
-                            link_ops.left(link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()))
+                            link_ops.left(
+                                link_ops
+                                    .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            )
                         };
                     } else {
-                        if link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black {
-                            link_ops.set_color(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
-                            link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
-                            rotate_right(link_ops, w.unwrap_or_else(|| hint::unreachable_unchecked()), root);
+                        if link_ops
+                            .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(
+                                link_ops
+                                    .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ) == Color::Black
+                        {
+                            link_ops.set_color(
+                                link_ops
+                                    .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Black,
+                            );
+                            link_ops.set_color(
+                                w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Red,
+                            );
+                            rotate_right(
+                                link_ops,
+                                w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                root,
+                            );
                             w = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
                         }
-                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())));
-                        link_ops.set_color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
-                        link_ops.set_color(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
-                        rotate_left(link_ops, link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), root);
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            link_ops.color(
+                                link_ops
+                                    .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ),
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        rotate_left(
+                            link_ops,
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            root,
+                        );
                         break;
                     }
                 } else {
-                    if link_ops.color(w.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
-                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
-                        link_ops.set_color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
-                        rotate_right(link_ops, link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), root);
-                        w = link_ops.left(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()));
-                    }
-                    if (link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black)
-                        && (link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black)
+                    if link_ops.color(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                        == Color::Red
                     {
-                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Red,
+                        );
+                        rotate_right(
+                            link_ops,
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            root,
+                        );
+                        w = link_ops.left(
+                            link_ops
+                                .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        );
+                    }
+                    if (link_ops
+                        .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                        .is_none()
+                        || link_ops.color(
+                            link_ops
+                                .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        ) == Color::Black)
+                        && (link_ops
+                            .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(
+                                link_ops
+                                    .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ) == Color::Black)
+                    {
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Red,
+                        );
                         x = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
-                        if link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(x.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red {
-                            link_ops.set_color(x.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
+                        if link_ops
+                            .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                == Color::Red
+                        {
+                            link_ops.set_color(
+                                x.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Black,
+                            );
                             break;
                         }
-                        w = if is_left_child(link_ops, x.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) {
-                            link_ops.right(link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()))
+                        w = if is_left_child(
+                            link_ops,
+                            x.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            link_ops
+                                .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        ) {
+                            link_ops.right(
+                                link_ops
+                                    .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            )
                         } else {
-                            link_ops.left(link_ops.parent(x.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()))
+                            link_ops.left(
+                                link_ops
+                                    .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            )
                         };
                     } else {
-                        if link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).is_none() || link_ops.color(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Black {
-                            link_ops.set_color(link_ops.right(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
-                            link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), Color::Red);
-                            rotate_left(link_ops, w.unwrap_or_else(|| hint::unreachable_unchecked()), root);
+                        if link_ops
+                            .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(
+                                link_ops
+                                    .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ) == Color::Black
+                        {
+                            link_ops.set_color(
+                                link_ops
+                                    .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Black,
+                            );
+                            link_ops.set_color(
+                                w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Red,
+                            );
+                            rotate_left(
+                                link_ops,
+                                w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                root,
+                            );
                             w = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
                         }
-                        link_ops.set_color(w.unwrap_or_else(|| hint::unreachable_unchecked()), link_ops.color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked())));
-                        link_ops.set_color(link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
-                        link_ops.set_color(link_ops.left(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), Color::Black);
-                        rotate_right(link_ops, link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked())).unwrap_or_else(|| hint::unreachable_unchecked()), root);
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            link_ops.color(
+                                link_ops
+                                    .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ),
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        rotate_right(
+                            link_ops,
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            root,
+                        );
                         break;
                     }
                 }
@@ -879,7 +1204,11 @@ where
             if let Some(current) = self.current {
                 let next = next(self.tree.adapter.link_ops(), current);
                 let result = current;
-                remove(self.tree.adapter.link_ops_mut(), current, &mut self.tree.root);
+                remove(
+                    self.tree.adapter.link_ops_mut(),
+                    current,
+                    &mut self.tree.root,
+                );
                 self.current = next;
                 Some(
                     self.tree
@@ -921,7 +1250,12 @@ where
             if let Some(current) = self.current {
                 let new = self.tree.node_from_value(val);
                 let result = current;
-                replace_with(self.tree.adapter.link_ops_mut(), current, new, &mut self.tree.root);
+                replace_with(
+                    self.tree.adapter.link_ops_mut(),
+                    current,
+                    new,
+                    &mut self.tree.root,
+                );
                 self.current = Some(new);
                 Ok(self
                     .tree
@@ -963,7 +1297,12 @@ where
                         insert_right(link_ops, current, new, &mut self.tree.root);
                     }
                 } else {
-                    insert_left(link_ops, first_child(link_ops, root), new, &mut self.tree.root);
+                    insert_left(
+                        link_ops,
+                        first_child(link_ops, root),
+                        new,
+                        &mut self.tree.root,
+                    );
                 }
             } else {
                 self.tree.insert_root(new);
@@ -993,14 +1332,18 @@ where
             if let Some(root) = self.tree.root {
                 if let Some(current) = self.current {
                     if let Some(_) = link_ops.left(current) {
-                        let prev = prev(link_ops, current)
-                                        .unwrap();
+                        let prev = prev(link_ops, current).unwrap();
                         insert_right(link_ops, prev, new, &mut self.tree.root);
                     } else {
                         insert_left(link_ops, current, new, &mut self.tree.root);
                     }
                 } else {
-                    insert_right(link_ops, last_child(link_ops, root), new, &mut self.tree.root);
+                    insert_right(
+                        link_ops,
+                        last_child(link_ops, root),
+                        new,
+                        &mut self.tree.root,
+                    );
                 }
             } else {
                 self.tree.insert_root(new);
@@ -1227,8 +1570,10 @@ where
                 self.clear_recurse(left);
                 self.clear_recurse(right);
                 self.adapter.link_ops_mut().mark_unlinked(current);
-                self.adapter.pointer_ops().from_raw(self.adapter.get_value(current));
-            }   
+                self.adapter
+                    .pointer_ops()
+                    .from_raw(self.adapter.get_value(current));
+            }
         }
     }
 
@@ -1275,7 +1620,10 @@ where
     <A as Adapter>::LinkOps: RBTreeOps,
 {
     #[inline]
-    fn find_internal<'a, Q: ?Sized + Ord>(&self, key: &Q) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
+    fn find_internal<'a, Q: ?Sized + Ord>(
+        &self,
+        key: &Q,
+    ) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'a,
@@ -1327,7 +1675,10 @@ where
     }
 
     #[inline]
-    fn lower_bound_internal<'a, Q: ?Sized + Ord>(&self, bound: Bound<&Q>) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
+    fn lower_bound_internal<'a, Q: ?Sized + Ord>(
+        &self,
+        bound: Bound<&Q>,
+    ) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'a,
@@ -1382,7 +1733,10 @@ where
     }
 
     #[inline]
-    fn upper_bound_internal<'a, Q: ?Sized + Ord>(&self, bound: Bound<&Q>) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
+    fn upper_bound_internal<'a, Q: ?Sized + Ord>(
+        &self,
+        bound: Bound<&Q>,
+    ) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'a,
@@ -1589,7 +1943,8 @@ unsafe impl<A: Adapter + Sync> Sync for RBTree<A>
 where
     <A::PointerOps as PointerOps>::Value: Sync,
     A::LinkOps: RBTreeOps,
-{}
+{
+}
 
 // Allow sending to another thread if the ownership (represented by the <A::PointerOps as PointerOps>::Pointer owned
 // pointer type) can be transferred to another thread.
@@ -1597,7 +1952,8 @@ unsafe impl<A: Adapter + Send> Send for RBTree<A>
 where
     <A::PointerOps as PointerOps>::Pointer: Send,
     A::LinkOps: RBTreeOps,
-{}
+{
+}
 
 // Drop all owned pointers if the collection is dropped
 impl<A: Adapter> Drop for RBTree<A>
@@ -1877,7 +2233,12 @@ where
                 self.head = link_ops.parent(head);
             }
             link_ops.mark_unlinked(head);
-            Some(self.tree.adapter.pointer_ops().from_raw(self.tree.adapter.get_value(head)))
+            Some(
+                self.tree
+                    .adapter
+                    .pointer_ops()
+                    .from_raw(self.tree.adapter.get_value(head)),
+            )
         }
     }
 }
@@ -1911,7 +2272,12 @@ where
                 self.tail = link_ops.parent(tail);
             }
             link_ops.mark_unlinked(tail);
-            Some(self.tree.adapter.pointer_ops().from_raw(self.tree.adapter.get_value(tail)))
+            Some(
+                self.tree
+                    .adapter
+                    .pointer_ops()
+                    .from_raw(self.tree.adapter.get_value(tail)),
+            )
         }
     }
 }
@@ -1923,12 +2289,15 @@ where
 #[cfg(test)]
 mod tests {
     use self::rand::{Rng, XorShiftRng};
-    use super::{link_ops, Adapter, DefaultLinkOps, Link, LinkOps, PointerOps, RBTree, Entry, KeyAdapter, RBTreeOps};
+    use super::{
+        link_ops, Adapter, DefaultLinkOps, Entry, KeyAdapter, Link, LinkOps, PointerOps, RBTree,
+        RBTreeOps,
+    };
     use crate::custom_links::pointer_ops::DefaultPointerOps;
-    use crate::UnsafeRef;
     use crate::Bound::*;
-    use rand;
+    use crate::UnsafeRef;
     use core::ptr::NonNull;
+    use rand;
     use std::boxed::Box;
     use std::fmt;
     use std::vec::Vec;
