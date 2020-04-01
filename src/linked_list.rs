@@ -15,6 +15,7 @@ use core::ptr::NonNull;
 use crate::link_ops::{self, DefaultLinkOps};
 use crate::pointer_ops::PointerOps;
 use crate::singly_linked_list::SinglyLinkedListOps;
+use crate::unchecked_option::UncheckedOptionExt;
 use crate::xor_linked_list::XorLinkedListOps;
 use crate::Adapter;
 
@@ -670,12 +671,8 @@ where
     pub fn splice_after(&mut self, mut list: LinkedList<A>) {
         if !list.is_empty() {
             unsafe {
-                let head = list
-                    .head
-                    .unwrap_or_else(|| core::hint::unreachable_unchecked());
-                let tail = list
-                    .tail
-                    .unwrap_or_else(|| core::hint::unreachable_unchecked());
+                let head = list.head.unwrap_unchecked();
+                let tail = list.tail.unwrap_unchecked();
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
@@ -702,12 +699,8 @@ where
     pub fn splice_before(&mut self, mut list: LinkedList<A>) {
         if !list.is_empty() {
             unsafe {
-                let head = list
-                    .head
-                    .unwrap_or_else(|| core::hint::unreachable_unchecked());
-                let tail = list
-                    .tail
-                    .unwrap_or_else(|| core::hint::unreachable_unchecked());
+                let head = list.head.unwrap_unchecked();
+                let tail = list.tail.unwrap_unchecked();
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
