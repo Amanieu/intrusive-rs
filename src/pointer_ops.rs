@@ -13,6 +13,8 @@ use crate::alloc::rc::Rc;
 use crate::alloc::sync::Arc;
 use crate::UnsafeRef;
 use core::marker::PhantomData;
+use core::mem::ManuallyDrop;
+use core::ops::Deref;
 
 /// Base trait for pointer conversion operations.
 ///
@@ -155,9 +157,6 @@ pub(crate) unsafe fn clone_pointer_from_raw<T: PointerOps>(
 where
     T::Pointer: Clone,
 {
-    use core::mem::ManuallyDrop;
-    use core::ops::Deref;
-
     /// Guard which converts an pointer back into its raw version
     /// when it gets dropped. This makes sure we also perform a full
     /// `from_raw` and `into_raw` round trip - even in the case of panics.
