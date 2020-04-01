@@ -174,7 +174,10 @@ macro_rules! intrusive_adapter {
     ) => {
         #[allow(explicit_outlives_requirements)]
         $(#[$attr])*
-        $($privacy)* struct $name<$($args),*>(<$link as $crate::DefaultLinkOps>::Ops, $crate::DefaultPointerOps<$pointer>) $($where_)*;
+        $($privacy)* struct $name<$($args),*> $($where_)* {
+            link_ops: <$link as $crate::DefaultLinkOps>::Ops,
+            pointer_ops: $crate::DefaultPointerOps<$pointer>,
+        }
         unsafe impl<$($args $(: ?$bound)*),*> Send for $name<$($args),*> $($where_)* {}
         unsafe impl<$($args $(: ?$bound)*),*> Sync for $name<$($args),*> $($where_)* {}
         impl<$($args $(: ?$bound)*),*> Copy for $name<$($args),*> $($where_)* {}
@@ -192,7 +195,10 @@ macro_rules! intrusive_adapter {
         }
         #[allow(dead_code)]
         impl<$($args $(: ?$bound)*),*> $name<$($args),*> $($where_)* {
-            pub const NEW: Self = $name(<$link as $crate::DefaultLinkOps>::NEW, $crate::DefaultPointerOps::<$pointer>::new());
+            pub const NEW: Self = $name {
+                link_ops: <$link as $crate::DefaultLinkOps>::NEW,
+                pointer_ops: $crate::DefaultPointerOps::<$pointer>::new(),
+            };
             #[inline]
             pub fn new() -> Self {
                 Self::NEW
@@ -213,15 +219,15 @@ macro_rules! intrusive_adapter {
             }
             #[inline]
             fn link_ops(&self) -> &Self::LinkOps {
-                &self.0
+                &self.link_ops
             }
             #[inline]
             fn link_ops_mut(&mut self) -> &mut Self::LinkOps {
-                &mut self.0
+                &mut self.link_ops
             }
             #[inline]
             fn pointer_ops(&self) -> &Self::PointerOps {
-                &self.1
+                &self.pointer_ops
             }
         }
     };
