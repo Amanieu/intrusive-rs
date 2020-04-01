@@ -41,16 +41,16 @@ pub enum Color {
 /// Link operations for `RBTree`.
 pub unsafe trait RBTreeOps: link_ops::LinkOps {
     /// Returns the left child of `ptr`.
-    fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+    unsafe fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
     /// Returns the right child of `ptr`.
-    fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+    unsafe fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
     /// Returns the parent of `ptr`.
-    fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+    unsafe fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
     /// Returns the color of `ptr`.
-    fn color(&self, ptr: Self::LinkPtr) -> Color;
+    unsafe fn color(&self, ptr: Self::LinkPtr) -> Color;
 
     /// Sets the left child of `ptr`.
     unsafe fn set_left(&mut self, ptr: Self::LinkPtr, left: Option<Self::LinkPtr>);
@@ -59,10 +59,10 @@ pub unsafe trait RBTreeOps: link_ops::LinkOps {
     unsafe fn set_right(&mut self, ptr: Self::LinkPtr, right: Option<Self::LinkPtr>);
 
     /// Sets the parent of `ptr`.
-    unsafe fn set_parent(&self, ptr: Self::LinkPtr, parent: Option<Self::LinkPtr>);
+    unsafe fn set_parent(&mut self, ptr: Self::LinkPtr, parent: Option<Self::LinkPtr>);
 
     /// Sets the color of `ptr`.
-    unsafe fn set_color(&self, ptr: Self::LinkPtr, color: Color);
+    unsafe fn set_color(&mut self, ptr: Self::LinkPtr, color: Color);
 }
 
 // =============================================================================
@@ -183,8 +183,8 @@ impl link_ops::LinkOps for LinkOps {
     type LinkPtr = NonNull<Link>;
 
     #[inline]
-    fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
-        unsafe { ptr.as_ref().is_linked() }
+    unsafe fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
+        ptr.as_ref().is_linked()
     }
 
     #[inline]
@@ -195,31 +195,27 @@ impl link_ops::LinkOps for LinkOps {
 
 unsafe impl RBTreeOps for LinkOps {
     #[inline]
-    fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        unsafe { ptr.as_ref().left.get() }
+    unsafe fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        ptr.as_ref().left.get()
     }
 
     #[inline]
-    fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        unsafe { ptr.as_ref().right.get() }
+    unsafe fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        ptr.as_ref().right.get()
     }
 
     #[inline]
-    fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        unsafe {
-            let parent_usize = ptr.as_ref().parent_color.get() & !1;
-            NonNull::new(parent_usize as *mut Link)
-        }
+    unsafe fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        let parent_usize = ptr.as_ref().parent_color.get() & !1;
+        NonNull::new(parent_usize as *mut Link)
     }
 
     #[inline]
-    fn color(&self, ptr: Self::LinkPtr) -> Color {
-        unsafe {
-            if ptr.as_ref().parent_color.get() & 1 == 1 {
-                Color::Black
-            } else {
-                Color::Red
-            }
+    unsafe fn color(&self, ptr: Self::LinkPtr) -> Color {
+        if ptr.as_ref().parent_color.get() & 1 == 1 {
+            Color::Black
+        } else {
+            Color::Red
         }
     }
 
@@ -234,19 +230,19 @@ unsafe impl RBTreeOps for LinkOps {
     }
 
     #[inline]
-    unsafe fn set_parent(&self, ptr: Self::LinkPtr, parent: Option<Self::LinkPtr>) {
+    unsafe fn set_parent(&mut self, ptr: Self::LinkPtr, parent: Option<Self::LinkPtr>) {
         self.set_parent_color(ptr, parent, self.color(ptr));
     }
 
     #[inline]
-    unsafe fn set_color(&self, ptr: Self::LinkPtr, color: Color) {
+    unsafe fn set_color(&mut self, ptr: Self::LinkPtr, color: Color) {
         self.set_parent_color(ptr, self.parent(ptr), color);
     }
 }
 
 unsafe impl SinglyLinkedListOps for LinkOps {
     #[inline]
-    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
         self.right(ptr)
     }
 
@@ -258,12 +254,12 @@ unsafe impl SinglyLinkedListOps for LinkOps {
 
 unsafe impl LinkedListOps for LinkOps {
     #[inline]
-    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
         self.right(ptr)
     }
 
     #[inline]
-    fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+    unsafe fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
         self.left(ptr)
     }
 
@@ -334,7 +330,7 @@ unsafe impl XorLinkedListOps for LinkOps {
 
 #[inline]
 unsafe fn set_parent_color<T: RBTreeOps>(
-    link_ops: &T,
+    link_ops: &mut T,
     ptr: T::LinkPtr,
     parent: Option<T::LinkPtr>,
     color: Color,
@@ -344,12 +340,12 @@ unsafe fn set_parent_color<T: RBTreeOps>(
 }
 
 #[inline]
-fn is_left_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr, parent: T::LinkPtr) -> bool {
+unsafe fn is_left_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr, parent: T::LinkPtr) -> bool {
     link_ops.left(parent) == Some(ptr)
 }
 
 #[inline]
-fn first_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> T::LinkPtr {
+unsafe fn first_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> T::LinkPtr {
     let mut x = ptr;
     while let Some(y) = link_ops.left(x) {
         x = y;
@@ -358,7 +354,7 @@ fn first_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> T::LinkPtr {
 }
 
 #[inline]
-fn last_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> T::LinkPtr {
+unsafe fn last_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> T::LinkPtr {
     let mut x = ptr;
     while let Some(y) = link_ops.right(x) {
         x = y;
@@ -367,7 +363,7 @@ fn last_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> T::LinkPtr {
 }
 
 #[inline]
-fn next<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> Option<T::LinkPtr> {
+unsafe fn next<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> Option<T::LinkPtr> {
     if let Some(right) = link_ops.right(ptr) {
         Some(first_child(link_ops, right))
     } else {
@@ -387,7 +383,7 @@ fn next<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> Option<T::LinkPtr> {
 }
 
 #[inline]
-fn prev<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> Option<T::LinkPtr> {
+unsafe fn prev<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> Option<T::LinkPtr> {
     if let Some(left) = link_ops.left(ptr) {
         Some(last_child(link_ops, left))
     } else {
@@ -1110,9 +1106,9 @@ where
     #[inline]
     pub fn move_next(&mut self) {
         if let Some(current) = self.current {
-            self.current = next(self.tree.adapter.link_ops(), current);
+            self.current = unsafe { next(self.tree.adapter.link_ops(), current) };
         } else if let Some(root) = self.tree.root {
-            self.current = Some(first_child(self.tree.adapter.link_ops(), root));
+            self.current = Some(unsafe { first_child(self.tree.adapter.link_ops(), root) });
         } else {
             self.current = None;
         }
@@ -1126,9 +1122,9 @@ where
     #[inline]
     pub fn move_prev(&mut self) {
         if let Some(current) = self.current {
-            self.current = prev(self.tree.adapter.link_ops(), current);
+            self.current = unsafe { prev(self.tree.adapter.link_ops(), current) };
         } else if let Some(root) = self.tree.root {
-            self.current = Some(last_child(self.tree.adapter.link_ops(), root));
+            self.current = Some(unsafe { last_child(self.tree.adapter.link_ops(), root) });
         } else {
             self.current = None;
         }
@@ -1209,9 +1205,9 @@ where
     #[inline]
     pub fn move_next(&mut self) {
         if let Some(current) = self.current {
-            self.current = next(self.tree.adapter.link_ops(), current);
+            self.current = unsafe { next(self.tree.adapter.link_ops(), current) };
         } else if let Some(root) = self.tree.root {
-            self.current = Some(first_child(self.tree.adapter.link_ops(), root));
+            self.current = Some(unsafe { first_child(self.tree.adapter.link_ops(), root) });
         } else {
             self.current = None;
         }
@@ -1225,9 +1221,9 @@ where
     #[inline]
     pub fn move_prev(&mut self) {
         if let Some(current) = self.current {
-            self.current = prev(self.tree.adapter.link_ops(), current);
+            self.current = unsafe { prev(self.tree.adapter.link_ops(), current) };
         } else if let Some(root) = self.tree.root {
-            self.current = Some(last_child(self.tree.adapter.link_ops(), root));
+            self.current = Some(unsafe { last_child(self.tree.adapter.link_ops(), root) });
         } else {
             self.current = None;
         }
@@ -1610,8 +1606,8 @@ where
 
         if let Some(root) = self.root {
             Iter {
-                head: Some(first_child(link_ops, root)),
-                tail: Some(last_child(link_ops, root)),
+                head: Some(unsafe { first_child(link_ops, root) }),
+                tail: Some(unsafe { last_child(link_ops, root) }),
                 tree: self,
             }
         } else {
@@ -1700,9 +1696,9 @@ where
         while let Some(x) = tree {
             let current = unsafe { &*self.adapter.get_value(x) };
             match key.cmp(self.adapter.get_key(current).borrow()) {
-                Ordering::Less => tree = link_ops.left(x),
+                Ordering::Less => tree = unsafe { link_ops.left(x) },
                 Ordering::Equal => return tree,
-                Ordering::Greater => tree = link_ops.right(x),
+                Ordering::Greater => tree = unsafe { link_ops.right(x) },
             }
         }
         None
@@ -1762,9 +1758,9 @@ where
             };
             if cond {
                 result = tree;
-                tree = link_ops.left(x);
+                tree = unsafe { link_ops.left(x) };
             } else {
-                tree = link_ops.right(x);
+                tree = unsafe { link_ops.right(x) };
             }
         }
         result
@@ -1819,10 +1815,10 @@ where
                 Excluded(key) => key <= self.adapter.get_key(current).borrow(),
             };
             if cond {
-                tree = link_ops.left(x);
+                tree = unsafe { link_ops.left(x) };
             } else {
                 result = tree;
-                tree = link_ops.right(x);
+                tree = unsafe { link_ops.right(x) };
             }
         }
         result
@@ -2045,8 +2041,8 @@ where
 
         if let Some(root) = self.root {
             IntoIter {
-                head: Some(first_child(link_ops, root)),
-                tail: Some(last_child(link_ops, root)),
+                head: Some(unsafe { first_child(link_ops, root) }),
+                tail: Some(unsafe { last_child(link_ops, root) }),
                 tree: self,
             }
         } else {
@@ -2218,7 +2214,7 @@ where
             self.head = None;
             self.tail = None;
         } else {
-            self.head = next(self.tree.adapter.link_ops(), head);
+            self.head = unsafe { next(self.tree.adapter.link_ops(), head) };
         }
         Some(unsafe { &*self.tree.adapter.get_value(head) })
     }
@@ -2235,7 +2231,7 @@ where
             self.head = None;
             self.tail = None;
         } else {
-            self.tail = prev(self.tree.adapter.link_ops(), tail);
+            self.tail = unsafe { prev(self.tree.adapter.link_ops(), tail) };
         }
         Some(unsafe { &*self.tree.adapter.get_value(tail) })
     }

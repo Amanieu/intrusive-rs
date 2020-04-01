@@ -15,7 +15,7 @@ pub trait LinkOps {
     type LinkPtr: Copy + Eq;
 
     /// Returns `true` if `ptr` is currently linked into an intrusive collection.
-    fn is_linked(&self, ptr: Self::LinkPtr) -> bool;
+    unsafe fn is_linked(&self, ptr: Self::LinkPtr) -> bool;
 
     /// Forcibly unlinks `ptr` from an intrusive collection.
     ///

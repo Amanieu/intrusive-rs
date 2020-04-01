@@ -163,8 +163,8 @@ impl link_ops::LinkOps for LinkOps {
     type LinkPtr = NonNull<Link>;
 
     #[inline]
-    fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
-        unsafe { ptr.as_ref().is_linked() }
+    unsafe fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
+        ptr.as_ref().is_linked()
     }
 
     #[inline]
@@ -223,11 +223,9 @@ unsafe impl XorLinkedListOps for LinkOps {
 
 unsafe impl SinglyLinkedListOps for LinkOps {
     #[inline]
-    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        unsafe {
-            let raw = ptr.as_ref().packed.get();
-            NonNull::new(raw as *mut _)
-        }
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        let raw = ptr.as_ref().packed.get();
+        NonNull::new(raw as *mut _)
     }
 
     #[inline]

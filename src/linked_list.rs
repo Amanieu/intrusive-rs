@@ -25,10 +25,10 @@ use crate::Adapter;
 /// Link operations for `LinkedList`.
 pub unsafe trait LinkedListOps: link_ops::LinkOps {
     /// Returns the "next" link pointer of `ptr`.
-    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
     /// Returns the "prev" link pointer of `ptr`.
-    fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+    unsafe fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
     /// Sets the "next" link pointer of `ptr`.
     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>);
@@ -135,8 +135,8 @@ impl link_ops::LinkOps for LinkOps {
     type LinkPtr = NonNull<Link>;
 
     #[inline]
-    fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
-        unsafe { ptr.as_ref().is_linked() }
+    unsafe fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
+        ptr.as_ref().is_linked()
     }
 
     #[inline]
@@ -147,13 +147,13 @@ impl link_ops::LinkOps for LinkOps {
 
 unsafe impl LinkedListOps for LinkOps {
     #[inline]
-    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        unsafe { ptr.as_ref().next.get() }
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        ptr.as_ref().next.get()
     }
 
     #[inline]
-    fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        unsafe { ptr.as_ref().prev.get() }
+    unsafe fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        ptr.as_ref().prev.get()
     }
 
     #[inline]
@@ -169,8 +169,8 @@ unsafe impl LinkedListOps for LinkOps {
 
 unsafe impl SinglyLinkedListOps for LinkOps {
     #[inline]
-    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        unsafe { ptr.as_ref().next.get() }
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        ptr.as_ref().next.get()
     }
 
     #[inline]
@@ -394,7 +394,7 @@ where
     #[inline]
     pub fn move_next(&mut self) {
         if let Some(current) = self.current {
-            self.current = self.list.adapter.link_ops().next(current);
+            self.current = unsafe { self.list.adapter.link_ops().next(current) };
         } else {
             self.current = self.list.head;
         }
@@ -408,7 +408,7 @@ where
     #[inline]
     pub fn move_prev(&mut self) {
         if let Some(current) = self.current {
-            self.current = self.list.adapter.link_ops().prev(current);
+            self.current = unsafe { self.list.adapter.link_ops().prev(current) };
         } else {
             self.current = self.list.tail;
         }
@@ -490,7 +490,7 @@ where
     #[inline]
     pub fn move_next(&mut self) {
         if let Some(current) = self.current {
-            self.current = self.list.adapter.link_ops().next(current);
+            self.current = unsafe { self.list.adapter.link_ops().next(current) };
         } else {
             self.current = self.list.head;
         }
@@ -504,7 +504,7 @@ where
     #[inline]
     pub fn move_prev(&mut self) {
         if let Some(current) = self.current {
-            self.current = self.list.adapter.link_ops().prev(current);
+            self.current = unsafe { self.list.adapter.link_ops().prev(current) };
         } else {
             self.current = self.list.tail;
         }
@@ -1145,7 +1145,7 @@ where
             self.head = None;
             self.tail = None;
         } else {
-            self.head = self.list.adapter.link_ops().next(head);
+            self.head = unsafe { self.list.adapter.link_ops().next(head) };
         }
         Some(unsafe { &*self.list.adapter.get_value(head) })
     }
@@ -1162,7 +1162,7 @@ where
             self.head = None;
             self.tail = None;
         } else {
-            self.tail = self.list.adapter.link_ops().prev(tail);
+            self.tail = unsafe { self.list.adapter.link_ops().prev(tail) };
         }
         Some(unsafe { &*self.list.adapter.get_value(tail) })
     }

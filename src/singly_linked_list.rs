@@ -24,7 +24,7 @@ use crate::Adapter;
 /// Link operations for `SinglyLinkedList`.
 pub unsafe trait SinglyLinkedListOps: link_ops::LinkOps {
     /// Returns the "next" link pointer of `ptr`.
-    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
     /// Sets the "next" link pointer of `ptr`.
     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>);
@@ -126,8 +126,8 @@ impl link_ops::LinkOps for LinkOps {
     type LinkPtr = NonNull<Link>;
 
     #[inline]
-    fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
-        unsafe { ptr.as_ref().is_linked() }
+    unsafe fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
+        ptr.as_ref().is_linked()
     }
 
     #[inline]
@@ -138,8 +138,8 @@ impl link_ops::LinkOps for LinkOps {
 
 unsafe impl SinglyLinkedListOps for LinkOps {
     #[inline]
-    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        unsafe { ptr.as_ref().next.get() }
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        ptr.as_ref().next.get()
     }
 
     #[inline]
@@ -347,7 +347,7 @@ where
     #[inline]
     pub fn move_next(&mut self) {
         if let Some(current) = self.current {
-            self.current = self.list.adapter.link_ops().next(current);
+            self.current = unsafe { self.list.adapter.link_ops().next(current) };
         } else {
             self.current = self.list.head;
         }
@@ -417,7 +417,7 @@ where
     #[inline]
     pub fn move_next(&mut self) {
         if let Some(current) = self.current {
-            self.current = self.list.adapter.link_ops().next(current);
+            self.current = unsafe { self.list.adapter.link_ops().next(current) };
         } else {
             self.current = self.list.head;
         }
@@ -906,7 +906,7 @@ where
     fn next(&mut self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
         let current = self.current?;
 
-        self.current = self.list.adapter.link_ops().next(current);
+        self.current = unsafe { self.list.adapter.link_ops().next(current) };
         Some(unsafe { &*self.list.adapter.get_value(current) })
     }
 }
