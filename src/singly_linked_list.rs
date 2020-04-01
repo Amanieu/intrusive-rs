@@ -162,11 +162,8 @@ unsafe impl XorLinkedListOps for LinkOps {
             .map(|x| x.as_ptr() as usize)
             .unwrap_or(0);
         let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        if raw > 0 {
-            Some(NonNull::new_unchecked(raw as *mut _))
-        } else {
-            None
-        }
+
+        NonNull::new(raw as *mut _)
     }
 
     #[inline]
@@ -182,11 +179,7 @@ unsafe impl XorLinkedListOps for LinkOps {
             .map(|x| x.as_ptr() as usize)
             .unwrap_or(0);
         let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        if raw > 0 {
-            Some(NonNull::new_unchecked(raw as *mut _))
-        } else {
-            None
-        }
+        NonNull::new(raw as *mut _)
     }
 
     #[inline]
@@ -199,11 +192,7 @@ unsafe impl XorLinkedListOps for LinkOps {
         let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
             ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
 
-        let new_next = if new_packed > 0 {
-            Some(NonNull::new_unchecked(new_packed as *mut _))
-        } else {
-            None
-        };
+        let new_next = NonNull::new(new_packed as *mut _);
         ptr.as_ref().next.set(new_next);
     }
 
@@ -224,11 +213,7 @@ unsafe impl XorLinkedListOps for LinkOps {
             ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
             ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
 
-        let new_next = if new_packed > 0 {
-            Some(NonNull::new_unchecked(new_packed as *mut _))
-        } else {
-            None
-        };
+        let new_next = NonNull::new(new_packed as *mut _);
         ptr.as_ref().next.set(new_next);
     }
 }
@@ -686,6 +671,7 @@ where
     }
 
     /// Returns a null `Cursor` for this list.
+    #[inline]
     pub fn cursor(&self) -> Cursor<'_, A> {
         Cursor {
             current: None,
@@ -694,6 +680,7 @@ where
     }
 
     /// Returns a null `CursorMut` for this list.
+    #[inline]
     pub fn cursor_mut(&mut self) -> CursorMut<'_, A> {
         CursorMut {
             current: None,
@@ -706,6 +693,7 @@ where
     /// # Safety
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
+    #[inline]
     pub unsafe fn cursor_from_ptr(
         &self,
         ptr: *const <A::PointerOps as PointerOps>::Value,
@@ -721,6 +709,7 @@ where
     /// # Safety
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
+    #[inline]
     pub unsafe fn cursor_mut_from_ptr(
         &mut self,
         ptr: *const <A::PointerOps as PointerOps>::Value,
@@ -733,6 +722,7 @@ where
 
     /// Returns a `Cursor` pointing to the first element of the list. If the
     /// list is empty then a null cursor is returned.
+    #[inline]
     pub fn front(&self) -> Cursor<'_, A> {
         let mut cursor = self.cursor();
         cursor.move_next();
@@ -741,6 +731,7 @@ where
 
     /// Returns a `CursorMut` pointing to the first element of the list. If the
     /// the list is empty then a null cursor is returned.
+    #[inline]
     pub fn front_mut(&mut self) -> CursorMut<'_, A> {
         let mut cursor = self.cursor_mut();
         cursor.move_next();
@@ -785,12 +776,14 @@ where
     /// objects into another `SinglyLinkedList` will fail but will not cause any
     /// memory unsafety. To unlink those objects manually, you must call the
     /// `force_unlink` function on them.
+    #[inline]
     pub fn fast_clear(&mut self) {
         self.head = None;
     }
 
     /// Takes all the elements out of the `SinglyLinkedList`, leaving it empty.
     /// The taken elements are returned as a new `SinglyLinkedList`.
+    #[inline]
     pub fn take(&mut self) -> SinglyLinkedList<A>
     where
         A: Clone,

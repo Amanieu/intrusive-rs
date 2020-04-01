@@ -208,11 +208,7 @@ unsafe impl RBTreeOps for LinkOps {
     fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
         unsafe {
             let parent_usize = ptr.as_ref().parent_color.get() & !1;
-            if parent_usize > 0 {
-                Some(NonNull::new_unchecked(parent_usize as *mut Link))
-            } else {
-                None
-            }
+            NonNull::new(parent_usize as *mut Link)
         }
     }
 
@@ -291,11 +287,7 @@ unsafe impl XorLinkedListOps for LinkOps {
     ) -> Option<Self::LinkPtr> {
         let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
         let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        if raw > 0 {
-            Some(NonNull::new_unchecked(raw as *mut _))
-        } else {
-            None
-        }
+        NonNull::new(raw as *mut _)
     }
 
     #[inline]
@@ -306,11 +298,7 @@ unsafe impl XorLinkedListOps for LinkOps {
     ) -> Option<Self::LinkPtr> {
         let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
         let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        if raw > 0 {
-            Some(NonNull::new_unchecked(raw as *mut _))
-        } else {
-            None
-        }
+        NonNull::new(raw as *mut _)
     }
 
     #[inline]
@@ -323,11 +311,7 @@ unsafe impl XorLinkedListOps for LinkOps {
         let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
             ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
 
-        let new_next = if new_packed > 0 {
-            Some(NonNull::new_unchecked(new_packed as *mut _))
-        } else {
-            None
-        };
+        let new_next = NonNull::new(new_packed as *mut _);
         self.set_right(ptr, new_next);
     }
 
@@ -343,11 +327,7 @@ unsafe impl XorLinkedListOps for LinkOps {
             ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
             ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
 
-        let new_next = if new_packed > 0 {
-            Some(NonNull::new_unchecked(new_packed as *mut _))
-        } else {
-            None
-        };
+        let new_next = NonNull::new(new_packed as *mut _);
         self.set_right(ptr, new_next);
     }
 }

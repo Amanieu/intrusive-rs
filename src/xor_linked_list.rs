@@ -181,11 +181,7 @@ unsafe impl XorLinkedListOps for LinkOps {
         prev: Option<Self::LinkPtr>,
     ) -> Option<Self::LinkPtr> {
         let raw = ptr.as_ref().packed.get() ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        if raw > 0 {
-            Some(NonNull::new_unchecked(raw as *mut Link))
-        } else {
-            None
-        }
+        NonNull::new(raw as *mut _)
     }
 
     #[inline]
@@ -195,11 +191,7 @@ unsafe impl XorLinkedListOps for LinkOps {
         next: Option<Self::LinkPtr>,
     ) -> Option<Self::LinkPtr> {
         let raw = ptr.as_ref().packed.get() ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        if raw > 0 {
-            Some(NonNull::new_unchecked(raw as *mut Link))
-        } else {
-            None
-        }
+        NonNull::new(raw as *mut _)
     }
 
     #[inline]
@@ -234,11 +226,7 @@ unsafe impl SinglyLinkedListOps for LinkOps {
     fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
         unsafe {
             let raw = ptr.as_ref().packed.get();
-            if raw > 0 {
-                Some(NonNull::new_unchecked(raw as *mut _))
-            } else {
-                None
-            }
+            NonNull::new(raw as *mut _)
         }
     }
 
@@ -487,7 +475,7 @@ where
         }
     }
 
-    ///Returns a cursor pointing to the next element of the `XorLinkedList`.
+    /// Returns a cursor pointing to the next element of the `XorLinkedList`.
     ///
     /// If the cursor is pointer to the null object then this will return the
     /// first element of the `XorLinkedList`. If it is pointing to the last
