@@ -13,12 +13,12 @@
 
 use core::cell::Cell;
 use core::fmt;
-use core::hint;
 use core::ptr::NonNull;
 
 use crate::link_ops::{self, DefaultLinkOps};
 use crate::pointer_ops::PointerOps;
 use crate::singly_linked_list::SinglyLinkedListOps;
+use crate::unchecked_option::UncheckedOptionExt;
 use crate::Adapter;
 
 // =============================================================================
@@ -698,8 +698,8 @@ where
     pub fn splice_after(&mut self, mut list: XorLinkedList<A>) {
         if !list.is_empty() {
             unsafe {
-                let head = list.head.unwrap_or_else(|| hint::unreachable_unchecked());
-                let tail = list.tail.unwrap_or_else(|| hint::unreachable_unchecked());
+                let head = list.head.unwrap_unchecked();
+                let tail = list.tail.unwrap_unchecked();
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
@@ -736,8 +736,8 @@ where
     pub fn splice_before(&mut self, mut list: XorLinkedList<A>) {
         if !list.is_empty() {
             unsafe {
-                let head = list.head.unwrap_or_else(|| hint::unreachable_unchecked());
-                let tail = list.tail.unwrap_or_else(|| hint::unreachable_unchecked());
+                let head = list.head.unwrap_unchecked();
+                let tail = list.tail.unwrap_unchecked();
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
@@ -865,7 +865,10 @@ where
 // XorLinkedList
 // =============================================================================
 
-/// An intrusive singly-linked list.
+/// Intrusive xor doubly-linked list which uses less memory than a regular doubly linked list
+///
+/// In exchange for less memory use, it is impossible to create a cursor from a pointer to
+/// an element.
 ///
 /// When this collection is dropped, all elements linked into it will be
 /// converted back to owned pointers and dropped.
@@ -908,8 +911,20 @@ where
     }
 
     /// Creates an empty `XorLinkedList`.
+    #[cfg(not(feature = "nightly"))]
     #[inline]
     pub fn new(adapter: A) -> XorLinkedList<A> {
+        XorLinkedList {
+            head: None,
+            tail: None,
+            adapter,
+        }
+    }
+
+    /// Creates an empty `XorLinkedList`.
+    #[cfg(feature = "nightly")]
+    #[inline]
+    pub const fn new(adapter: A) -> XorLinkedList<A> {
         XorLinkedList {
             head: None,
             tail: None,
@@ -924,6 +939,7 @@ where
     }
 
     /// Returns a null `Cursor` for this list.
+    #[inline]
     pub fn cursor(&self) -> Cursor<'_, A> {
         Cursor {
             current: None,
@@ -934,6 +950,7 @@ where
     }
 
     /// Returns a null `CursorMut` for this list.
+    #[inline]
     pub fn cursor_mut(&mut self) -> CursorMut<'_, A> {
         CursorMut {
             current: None,
@@ -949,6 +966,7 @@ where
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
     /// `prev` must be a pointer to an object that is the previous object in this list (null for the head)
+    #[inline]
     pub unsafe fn cursor_from_ptr_and_prev(
         &self,
         ptr: *const <A::PointerOps as PointerOps>::Value,
@@ -976,6 +994,7 @@ where
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
     /// `prev` must be a pointer to an object that is the previous object in this list (null for the head)
+    #[inline]
     pub unsafe fn cursor_mut_from_ptr_and_prev(
         &mut self,
         ptr: *const <A::PointerOps as PointerOps>::Value,
@@ -1002,7 +1021,8 @@ where
     /// # Safety
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
-    /// `next` must be a pointer to an object that is the next object in this list (null for the head)
+    /// `next` must be a pointer to an object that is the next object in this list (null for the tail)
+    #[inline]
     pub unsafe fn cursor_from_ptr_and_next(
         &self,
         ptr: *const <A::PointerOps as PointerOps>::Value,
@@ -1029,7 +1049,8 @@ where
     /// # Safety
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
-    /// `next` must be a pointer to an object that is the next object in this list (null for the head)
+    /// `next` must be a pointer to an object that is the next object in this list (null for the tail)
+    #[inline]
     pub unsafe fn cursor_mut_from_ptr_and_next(
         &mut self,
         ptr: *const <A::PointerOps as PointerOps>::Value,
@@ -1053,6 +1074,7 @@ where
 
     /// Returns a `Cursor` pointing to the first element of the list. If the
     /// list is empty then a null cursor is returned.
+    #[inline]
     pub fn front(&self) -> Cursor<'_, A> {
         let mut cursor = self.cursor();
         cursor.move_next();
@@ -1061,6 +1083,7 @@ where
 
     /// Returns a `CursorMut` pointing to the first element of the list. If the
     /// the list is empty then a null cursor is returned.
+    #[inline]
     pub fn front_mut(&mut self) -> CursorMut<'_, A> {
         let mut cursor = self.cursor_mut();
         cursor.move_next();
@@ -1129,6 +1152,7 @@ where
     /// objects into another `XorLinkedList` will fail but will not cause any
     /// memory unsafety. To unlink those objects manually, you must call the
     /// `force_unlink` function on them.
+    #[inline]
     pub fn fast_clear(&mut self) {
         self.head = None;
         self.tail = None;
@@ -1136,6 +1160,7 @@ where
 
     /// Takes all the elements out of the `XorLinkedList`, leaving it empty.
     /// The taken elements are returned as a new `XorLinkedList`.
+    #[inline]
     pub fn take(&mut self) -> XorLinkedList<A>
     where
         A: Clone,
