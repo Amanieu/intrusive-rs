@@ -84,6 +84,8 @@ impl Link {
 
 impl DefaultLinkOps for Link {
     type Ops = LinkOps;
+
+    const NEW: Self::Ops = LinkOps;
 }
 
 // An object containing a link can be sent to another thread if it is unlinked.

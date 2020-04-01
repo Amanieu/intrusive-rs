@@ -31,4 +31,9 @@ pub trait LinkOps {
 pub trait DefaultLinkOps {
     /// The default link operations.
     type Ops: LinkOps + Default;
+
+    /// The associated constant that represents `Ops::default()`.
+    /// 
+    /// This exists because `Default::default()` is not a constant function.
+    const NEW: Self::Ops;
 }

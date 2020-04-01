@@ -119,8 +119,8 @@ macro_rules! container_of {
 /// intrusive_adapter!(Adapter = Pointer: Value { link_field: LinkType });
 /// ```
 ///
-/// You can create a new instance of an adapter using the `new` method.
-/// The adapter also implements the `Default` trait.
+/// You can create a new instance of an adapter using the `new` method or the
+/// `NEW` associated constant. The adapter also implements the `Default` trait.
 ///
 /// # Generics
 ///
@@ -187,14 +187,15 @@ macro_rules! intrusive_adapter {
         impl<$($args $(: ?$bound)*),*> Default for $name<$($args),*> $($where_)* {
             #[inline]
             fn default() -> Self {
-                Self::new()
+                Self::NEW
             }
         }
         #[allow(dead_code)]
         impl<$($args $(: ?$bound)*),*> $name<$($args),*> $($where_)* {
+            pub const NEW: Self = $name(<$link as $crate::DefaultLinkOps>::NEW, $crate::DefaultPointerOps::<$pointer>::new());
             #[inline]
-            pub const fn new() -> Self {
-                $name(Default::default(), Default::default())
+            pub fn new() -> Self {
+                Self::NEW
             }
         }
         #[allow(dead_code, unsafe_code)]
