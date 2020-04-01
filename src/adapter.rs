@@ -5,12 +5,12 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use super::link_ops::LinkOps;
+use crate::link_ops::LinkOps;
 use crate::pointer_ops::PointerOps;
 
 /// Trait for a adapter which allows a type to be inserted into an intrusive
 /// collection.
-/// 
+///
 /// `LinkOps` implements the collection-specific operations which
 /// allows an object to be inserted into an intrusive collection. This type
 /// needs to implement the appropriate trait for the collection type
@@ -20,7 +20,7 @@ use crate::pointer_ops::PointerOps;
 /// `PointerOps` implements the collection-specific pointer conversions which
 /// allow an object to be inserted into an intrusive collection.
 /// `PointerOps` type may be stateful, allowing custom pointer types.
-/// 
+///
 /// A single object type may have multiple adapters, which allows it to be part
 /// of multiple intrusive collections simultaneously.
 ///
@@ -276,4 +276,3 @@ mod tests {
         ObjAdapter1 = Rc<Obj>: Obj { link: LinkedListLink }
     }
 }
-

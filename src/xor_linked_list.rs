@@ -15,31 +15,31 @@ use core::fmt;
 use core::hint;
 use core::ptr::NonNull;
 
-use super::link_ops::{self, DefaultLinkOps};
+use crate::link_ops::{self, DefaultLinkOps};
 use crate::pointer_ops::PointerOps;
-use super::singly_linked_list::SinglyLinkedListOps;
-use super::Adapter;
+use crate::singly_linked_list::SinglyLinkedListOps;
+use crate::Adapter;
 
 // =============================================================================
 // XorLinkedListOps
 // =============================================================================
 
 /// Link operations for `XorLinkedList`.
-pub unsafe trait XorLinkedListOps: super::LinkOps {
+pub unsafe trait XorLinkedListOps: link_ops::LinkOps {
     /// Returns the "next" link pointer of `ptr`.
-    /// 
+    ///
     /// # Safety
     /// `prev` must be have been previously passed to the [`set`] method.
-    /// 
+    ///
     /// [`set`]: #tymethod.set
     unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>)
         -> Option<Self::LinkPtr>;
 
     /// Returns the "prev" link pointer of `ptr`.
-    /// 
+    ///
     /// # Safety
     /// `next` must be have been previously passed to the [`set`] method.
-    /// 
+    ///
     /// [`set`]: #tymethod.set
     unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>)
         -> Option<Self::LinkPtr>;
@@ -53,11 +53,11 @@ pub unsafe trait XorLinkedListOps: super::LinkOps {
     );
 
     /// Replaces the "next" or "prev" link pointer of `ptr`.
-    /// 
+    ///
     /// # Safety
     /// `old` must be equal to either the `next` or `prev` argument previously passed to the [`set`] method, or
     /// `old` must be equal to `new` argument previously passed to `replace_next_or_prev`.
-    /// 
+    ///
     /// [`set`]: #tymethod.set
     unsafe fn replace_next_or_prev(
         &mut self,
@@ -274,9 +274,9 @@ pub struct Cursor<'a, A: Adapter>
 where
     A::LinkOps: XorLinkedListOps,
 {
-    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    prev: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    next: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    prev: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    next: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     list: &'a XorLinkedList<A>,
 }
 
@@ -402,9 +402,9 @@ pub struct CursorMut<'a, A: Adapter>
 where
     A::LinkOps: XorLinkedListOps,
 {
-    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    prev: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    next: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    prev: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    next: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     list: &'a mut XorLinkedList<A>,
 }
 
@@ -517,7 +517,7 @@ where
     /// is removed and `None` is returned.
     #[inline]
     pub fn remove(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
-        use super::LinkOps;
+        use link_ops::LinkOps;
 
         unsafe {
             let current = self.current?;
@@ -580,7 +580,7 @@ where
         val: <A::PointerOps as PointerOps>::Pointer,
     ) -> Result<<A::PointerOps as PointerOps>::Pointer, <A::PointerOps as PointerOps>::Pointer>
     {
-        use super::LinkOps;
+        use link_ops::LinkOps;
 
         unsafe {
             if let Some(current) = self.current {
@@ -709,12 +709,8 @@ where
     pub fn splice_after(&mut self, mut list: XorLinkedList<A>) {
         if !list.is_empty() {
             unsafe {
-                let head = list
-                    .head
-                    .unwrap_or_else(|| hint::unreachable_unchecked());
-                let tail = list
-                    .tail
-                    .unwrap_or_else(|| hint::unreachable_unchecked());
+                let head = list.head.unwrap_or_else(|| hint::unreachable_unchecked());
+                let tail = list.tail.unwrap_or_else(|| hint::unreachable_unchecked());
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
@@ -751,12 +747,8 @@ where
     pub fn splice_before(&mut self, mut list: XorLinkedList<A>) {
         if !list.is_empty() {
             unsafe {
-                let head = list
-                    .head
-                    .unwrap_or_else(|| hint::unreachable_unchecked());
-                let tail = list
-                    .tail
-                    .unwrap_or_else(|| hint::unreachable_unchecked());
+                let head = list.head.unwrap_or_else(|| hint::unreachable_unchecked());
+                let tail = list.tail.unwrap_or_else(|| hint::unreachable_unchecked());
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
@@ -892,8 +884,8 @@ pub struct XorLinkedList<A: Adapter>
 where
     A::LinkOps: XorLinkedListOps,
 {
-    head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    tail: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     adapter: A,
 }
 
@@ -905,7 +897,7 @@ where
     fn node_from_value(
         &self,
         val: <A::PointerOps as PointerOps>::Pointer,
-    ) -> <A::LinkOps as super::LinkOps>::LinkPtr {
+    ) -> <A::LinkOps as link_ops::LinkOps>::LinkPtr {
         use link_ops::LinkOps;
 
         unsafe {
@@ -1280,10 +1272,10 @@ pub struct Iter<'a, A: Adapter>
 where
     A::LinkOps: XorLinkedListOps,
 {
-    prev_head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    tail: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    next_tail: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    prev_head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    next_tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     list: &'a XorLinkedList<A>,
 }
 impl<'a, A: Adapter + 'a> Iterator for Iter<'a, A>

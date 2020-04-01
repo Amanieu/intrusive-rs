@@ -17,13 +17,13 @@ use core::ptr::NonNull;
 
 use crate::Bound::{self, Excluded, Included, Unbounded};
 
-use super::link_ops::{self, DefaultLinkOps};
-use super::linked_list::LinkedListOps;
+use crate::link_ops::{self, DefaultLinkOps};
+use crate::linked_list::LinkedListOps;
 use crate::pointer_ops::PointerOps;
-use super::singly_linked_list::SinglyLinkedListOps;
-use super::xor_linked_list::XorLinkedListOps;
-use super::Adapter;
-use super::KeyAdapter;
+use crate::singly_linked_list::SinglyLinkedListOps;
+use crate::xor_linked_list::XorLinkedListOps;
+use crate::Adapter;
+use crate::KeyAdapter;
 
 // =============================================================================
 // RBTreeOps
@@ -38,7 +38,7 @@ pub enum Color {
 }
 
 /// Link operations for `RBTree`.
-pub unsafe trait RBTreeOps: super::LinkOps {
+pub unsafe trait RBTreeOps: link_ops::LinkOps {
     /// Returns the left child of `ptr`.
     fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
@@ -162,8 +162,8 @@ impl LinkOps {
     #[inline]
     unsafe fn set_parent_color(
         &self,
-        ptr: <Self as super::LinkOps>::LinkPtr,
-        parent: Option<<Self as super::LinkOps>::LinkPtr>,
+        ptr: <Self as link_ops::LinkOps>::LinkPtr,
+        parent: Option<<Self as link_ops::LinkOps>::LinkPtr>,
         color: Color,
     ) {
         assert!(mem::align_of::<Link>() >= 2);
@@ -281,9 +281,11 @@ unsafe impl LinkedListOps for LinkOps {
 
 unsafe impl XorLinkedListOps for LinkOps {
     #[inline]
-    unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>)
-        -> Option<Self::LinkPtr>
-    {
+    unsafe fn next(
+        &self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
         let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
         let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
         if raw > 0 {
@@ -294,9 +296,11 @@ unsafe impl XorLinkedListOps for LinkOps {
     }
 
     #[inline]
-    unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>)
-        -> Option<Self::LinkPtr>
-    {
+    unsafe fn prev(
+        &self,
+        ptr: Self::LinkPtr,
+        next: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
         let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
         let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
         if raw > 0 {
@@ -312,11 +316,10 @@ unsafe impl XorLinkedListOps for LinkOps {
         ptr: Self::LinkPtr,
         prev: Option<Self::LinkPtr>,
         next: Option<Self::LinkPtr>,
-    )
-    {
+    ) {
         let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
             ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        
+
         let new_next = if new_packed > 0 {
             Some(NonNull::new_unchecked(new_packed as *mut _))
         } else {
@@ -331,8 +334,7 @@ unsafe impl XorLinkedListOps for LinkOps {
         ptr: Self::LinkPtr,
         old: Option<Self::LinkPtr>,
         new: Option<Self::LinkPtr>,
-    )
-    {
+    ) {
         let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
         let new_packed = packed
             ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
@@ -1064,7 +1066,7 @@ pub struct Cursor<'a, A: Adapter>
 where
     A::LinkOps: RBTreeOps,
 {
-    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     tree: &'a RBTree<A>,
 }
 
@@ -1179,7 +1181,7 @@ pub struct CursorMut<'a, A: Adapter>
 where
     A::LinkOps: RBTreeOps,
 {
-    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     tree: &'a mut RBTree<A>,
 }
 
@@ -1476,7 +1478,7 @@ pub struct RBTree<A: Adapter>
 where
     A::LinkOps: RBTreeOps,
 {
-    root: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    root: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     adapter: A,
 }
 
@@ -1488,7 +1490,7 @@ where
     fn node_from_value(
         &self,
         val: <A::PointerOps as PointerOps>::Pointer,
-    ) -> <A::LinkOps as super::LinkOps>::LinkPtr {
+    ) -> <A::LinkOps as link_ops::LinkOps>::LinkPtr {
         use link_ops::LinkOps;
 
         unsafe {
@@ -1611,7 +1613,7 @@ where
     }
 
     #[inline]
-    unsafe fn insert_root(&mut self, node: <A::LinkOps as super::LinkOps>::LinkPtr) {
+    unsafe fn insert_root(&mut self, node: <A::LinkOps as link_ops::LinkOps>::LinkPtr) {
         set_parent_color(self.adapter.link_ops_mut(), node, None, Color::Black);
         self.adapter.link_ops_mut().set_left(node, None);
         self.adapter.link_ops_mut().set_right(node, None);
@@ -1639,8 +1641,8 @@ where
     }
 
     #[inline]
-    fn clear_recurse(&mut self, current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>) {
-        use super::LinkOps;
+    fn clear_recurse(&mut self, current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>) {
+        use link_ops::LinkOps;
         // If adapter.get_value or Pointer::from_raw panic here, it will leak
         // the nodes and keep them linked. However this is harmless since there
         // is nothing you can do with just a Link.
@@ -1704,7 +1706,7 @@ where
     fn find_internal<'a, Q: ?Sized + Ord>(
         &self,
         key: &Q,
-    ) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
+    ) -> Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'a,
@@ -1759,7 +1761,7 @@ where
     fn lower_bound_internal<'a, Q: ?Sized + Ord>(
         &self,
         bound: Bound<&Q>,
-    ) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
+    ) -> Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'a,
@@ -1817,7 +1819,7 @@ where
     fn upper_bound_internal<'a, Q: ?Sized + Ord>(
         &self,
         bound: Bound<&Q>,
-    ) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
+    ) -> Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'a,
@@ -2116,7 +2118,7 @@ pub struct InsertCursor<'a, A: Adapter>
 where
     A::LinkOps: RBTreeOps,
 {
-    parent: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    parent: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     insert_left: bool,
     tree: &'a mut RBTree<A>,
 }
@@ -2215,8 +2217,8 @@ pub struct Iter<'a, A: Adapter>
 where
     A::LinkOps: RBTreeOps,
 {
-    head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    tail: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     tree: &'a RBTree<A>,
 }
 impl<'a, A: Adapter + 'a> Iterator for Iter<'a, A>
@@ -2278,8 +2280,8 @@ pub struct IntoIter<A: Adapter>
 where
     A::LinkOps: RBTreeOps,
 {
-    head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    tail: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     tree: RBTree<A>,
 }
 impl<A: Adapter> Iterator for IntoIter<A>
@@ -2290,7 +2292,7 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
-        use super::LinkOps;
+        use link_ops::LinkOps;
 
         let head = self.head?;
         let link_ops = self.tree.adapter.link_ops_mut();
@@ -2329,7 +2331,7 @@ where
 {
     #[inline]
     fn next_back(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
-        use super::LinkOps;
+        use link_ops::LinkOps;
 
         let tail = self.tail?;
         let link_ops = self.tree.adapter.link_ops_mut();
@@ -2370,9 +2372,7 @@ where
 #[cfg(test)]
 mod tests {
     use self::rand::{Rng, XorShiftRng};
-    use super::{
-        Entry, KeyAdapter, Link, PointerOps, RBTree,
-    };
+    use super::{Entry, KeyAdapter, Link, PointerOps, RBTree};
     use crate::Bound::*;
     use crate::UnsafeRef;
     use rand;

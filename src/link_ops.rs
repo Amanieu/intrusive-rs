@@ -6,9 +6,9 @@
 // copied, modified, or distributed except according to those terms.
 
 /// Base trait for link operations.
-/// 
+///
 /// `LinkPtr` is the representation of a link pointer.
-/// Typically this is `NonNull`, but compact representations such 
+/// Typically this is `NonNull`, but compact representations such
 /// as `u8` or `u16` are possible.
 pub trait LinkOps {
     /// The link pointer type.
@@ -18,11 +18,11 @@ pub trait LinkOps {
     fn is_linked(&self, ptr: Self::LinkPtr) -> bool;
 
     /// Forcibly unlinks `ptr` from an intrusive collection.
-    /// 
+    ///
     /// # Safety
-    /// This function should only be used after calling the `fast_clear` method of the intrusive collection 
+    /// This function should only be used after calling the `fast_clear` method of the intrusive collection
     /// since `fast_clear` "clears" the collection without unlinking the nodes.
-    /// 
+    ///
     /// Otherwise, it is undefined behavior to call this function while `ptr` is still linked into an intrusive collection.
     unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr);
 }

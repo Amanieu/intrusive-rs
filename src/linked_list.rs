@@ -11,18 +11,18 @@ use core::cell::Cell;
 use core::fmt;
 use core::ptr::NonNull;
 
-use super::link_ops::{self, DefaultLinkOps};
+use crate::link_ops::{self, DefaultLinkOps};
 use crate::pointer_ops::PointerOps;
-use super::singly_linked_list::SinglyLinkedListOps;
-use super::xor_linked_list::XorLinkedListOps;
-use super::Adapter;
+use crate::singly_linked_list::SinglyLinkedListOps;
+use crate::xor_linked_list::XorLinkedListOps;
+use crate::Adapter;
 
 // =============================================================================
 // LinkedListOps
 // =============================================================================
 
 /// Link operations for `LinkedList`.
-pub unsafe trait LinkedListOps: super::LinkOps {
+pub unsafe trait LinkedListOps: link_ops::LinkOps {
     /// Returns the "next" link pointer of `ptr`.
     fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
@@ -178,10 +178,17 @@ unsafe impl SinglyLinkedListOps for LinkOps {
 
 unsafe impl XorLinkedListOps for LinkOps {
     #[inline]
-    unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>)
-        -> Option<Self::LinkPtr>
-    {
-        let packed = ptr.as_ref().next.get().map(|x| x.as_ptr() as usize).unwrap_or(0);
+    unsafe fn next(
+        &self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
+        let packed = ptr
+            .as_ref()
+            .next
+            .get()
+            .map(|x| x.as_ptr() as usize)
+            .unwrap_or(0);
         let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
         if raw > 0 {
             Some(NonNull::new_unchecked(raw as *mut _))
@@ -191,10 +198,17 @@ unsafe impl XorLinkedListOps for LinkOps {
     }
 
     #[inline]
-    unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>)
-        -> Option<Self::LinkPtr>
-    {
-        let packed = ptr.as_ref().next.get().map(|x| x.as_ptr() as usize).unwrap_or(0);
+    unsafe fn prev(
+        &self,
+        ptr: Self::LinkPtr,
+        next: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
+        let packed = ptr
+            .as_ref()
+            .next
+            .get()
+            .map(|x| x.as_ptr() as usize)
+            .unwrap_or(0);
         let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
         if raw > 0 {
             Some(NonNull::new_unchecked(raw as *mut _))
@@ -209,11 +223,10 @@ unsafe impl XorLinkedListOps for LinkOps {
         ptr: Self::LinkPtr,
         prev: Option<Self::LinkPtr>,
         next: Option<Self::LinkPtr>,
-    )
-    {
+    ) {
         let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
             ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        
+
         let new_next = if new_packed > 0 {
             Some(NonNull::new_unchecked(new_packed as *mut _))
         } else {
@@ -228,9 +241,13 @@ unsafe impl XorLinkedListOps for LinkOps {
         ptr: Self::LinkPtr,
         old: Option<Self::LinkPtr>,
         new: Option<Self::LinkPtr>,
-    )
-    {
-        let packed = ptr.as_ref().next.get().map(|x| x.as_ptr() as usize).unwrap_or(0);
+    ) {
+        let packed = ptr
+            .as_ref()
+            .next
+            .get()
+            .map(|x| x.as_ptr() as usize)
+            .unwrap_or(0);
         let new_packed = packed
             ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
             ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
@@ -328,7 +345,7 @@ pub struct Cursor<'a, A: Adapter>
 where
     A::LinkOps: LinkedListOps,
 {
-    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     list: &'a LinkedList<A>,
 }
 
@@ -440,7 +457,7 @@ pub struct CursorMut<'a, A: Adapter>
 where
     A::LinkOps: LinkedListOps,
 {
-    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     list: &'a mut LinkedList<A>,
 }
 
@@ -813,8 +830,8 @@ pub struct LinkedList<A: Adapter>
 where
     A::LinkOps: LinkedListOps,
 {
-    head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    tail: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     adapter: A,
 }
 
@@ -826,7 +843,7 @@ where
     fn node_from_value(
         &self,
         val: <A::PointerOps as PointerOps>::Pointer,
-    ) -> <A::LinkOps as super::LinkOps>::LinkPtr {
+    ) -> <A::LinkOps as link_ops::LinkOps>::LinkPtr {
         use link_ops::LinkOps;
 
         unsafe {
@@ -1115,8 +1132,8 @@ pub struct Iter<'a, A: Adapter>
 where
     A::LinkOps: LinkedListOps,
 {
-    head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
-    tail: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     list: &'a LinkedList<A>,
 }
 impl<'a, A: Adapter + 'a> Iterator for Iter<'a, A>

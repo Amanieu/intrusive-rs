@@ -15,7 +15,7 @@ use crate::UnsafeRef;
 use core::marker::PhantomData;
 
 /// Base trait for pointer conversion operations.
-/// 
+///
 /// `Value` is the actual object type managed by the collection. This type will
 /// typically have a link as a struct field.
 ///
@@ -187,7 +187,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{PointerOps, DefaultPointerOps};
+    use super::{DefaultPointerOps, PointerOps};
     use std::boxed::Box;
     use std::fmt::Debug;
     use std::mem;
@@ -311,4 +311,3 @@ mod tests {
         }
     }
 }
-
