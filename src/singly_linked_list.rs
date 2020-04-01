@@ -1,4 +1,4 @@
-// Copyright 2016 Amanieu d'Antras
+// Copyright 2020 Amari Robinson
 //
 // Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
@@ -7,11 +7,27 @@
 
 //! Intrusive singly-linked list.
 
-use crate::Adapter;
-use crate::IntrusivePointer;
 use core::cell::Cell;
 use core::fmt;
-use core::ptr;
+use core::ptr::NonNull;
+
+use super::link_ops::{self, DefaultLinkOps};
+use crate::pointer_ops::PointerOps;
+use super::xor_linked_list::XorLinkedListOps;
+use super::Adapter;
+
+// =============================================================================
+// SinglyLinkedListOps
+// =============================================================================
+
+/// Link operations for `SinglyLinkedList`.
+pub unsafe trait SinglyLinkedListOps: super::LinkOps {
+    /// Returns the "next" link pointer of `ptr`.
+    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+
+    /// Sets the "next" link pointer of `ptr`.
+    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>);
+}
 
 // =============================================================================
 // Link
@@ -20,8 +36,12 @@ use core::ptr;
 /// Intrusive link that allows an object to be inserted into a
 /// `SinglyLinkedList`.
 pub struct Link {
-    next: Cell<NodePtr>,
+    next: Cell<Option<NonNull<Link>>>,
 }
+
+// Use a special value to indicate an unlinked node
+const UNLINKED_MARKER: Option<NonNull<Link>> =
+    unsafe { Some(NonNull::new_unchecked(1 as *mut Link)) };
 
 impl Link {
     /// Creates a new `Link`.
@@ -50,6 +70,10 @@ impl Link {
     pub unsafe fn force_unlink(&self) {
         self.next.set(UNLINKED_MARKER);
     }
+}
+
+impl DefaultLinkOps for Link {
+    type Ops = LinkOps;
 }
 
 // An object containing a link can be sent to another thread if it is unlinked.
@@ -88,77 +112,162 @@ impl fmt::Debug for Link {
 }
 
 // =============================================================================
-// NodePtr
+// LinkOps
 // =============================================================================
 
-#[derive(Copy, Clone, PartialEq, Eq)]
-struct NodePtr(*const Link);
+/// Default `LinkOps` implementation for `SinglyLinkedList`.
+#[derive(Clone, Copy, Default)]
+pub struct LinkOps;
 
-// Use a special value to indicate an unlinked node
-const UNLINKED_MARKER: NodePtr = NodePtr(1 as *const _);
+impl link_ops::LinkOps for LinkOps {
+    type LinkPtr = NonNull<Link>;
 
-impl NodePtr {
     #[inline]
-    fn null() -> NodePtr {
-        NodePtr(ptr::null())
+    fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
+        unsafe { ptr.as_ref().is_linked() }
     }
 
     #[inline]
-    fn is_null(self) -> bool {
-        self.0.is_null()
+    unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr) {
+        ptr.as_ref().next.set(UNLINKED_MARKER);
+    }
+}
+
+unsafe impl SinglyLinkedListOps for LinkOps {
+    #[inline]
+    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        unsafe { ptr.as_ref().next.get() }
     }
 
     #[inline]
-    unsafe fn next(self) -> NodePtr {
-        (*self.0).next.get()
+    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
+        ptr.as_ref().next.set(next);
     }
+}
 
+unsafe impl XorLinkedListOps for LinkOps {
     #[inline]
-    unsafe fn set_next(self, next: NodePtr) {
-        (*self.0).next.set(next);
-    }
-
-    #[inline]
-    unsafe fn unlink(self) {
-        self.set_next(UNLINKED_MARKER);
-    }
-
-    #[inline]
-    unsafe fn link_between(self, prev: NodePtr, next: NodePtr) {
-        if !prev.is_null() {
-            prev.set_next(self);
+    unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>
+    {
+        let packed = ptr.as_ref().next.get().map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        if raw > 0 {
+            Some(NonNull::new_unchecked(raw as *mut _))
+        } else {
+            None
         }
-        self.set_next(next);
     }
 
     #[inline]
-    unsafe fn link_after(self, prev: NodePtr) {
-        self.link_between(prev, prev.next());
-    }
-
-    #[inline]
-    unsafe fn replace_with(self, prev: NodePtr, new: NodePtr) {
-        if !prev.is_null() {
-            prev.set_next(new);
+    unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>
+    {
+        let packed = ptr.as_ref().next.get().map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        if raw > 0 {
+            Some(NonNull::new_unchecked(raw as *mut _))
+        } else {
+            None
         }
-        new.set_next(self.next());
-        self.unlink();
     }
 
     #[inline]
-    unsafe fn remove(self, prev: NodePtr) {
-        if !prev.is_null() {
-            prev.set_next(self.next());
-        }
-        self.unlink();
+    unsafe fn set(
+        &mut self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+        next: Option<Self::LinkPtr>,
+    )
+    {
+        let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        
+        let new_next = if new_packed > 0 {
+            Some(NonNull::new_unchecked(new_packed as *mut _))
+        } else {
+            None
+        };
+        ptr.as_ref().next.set(new_next);
     }
 
     #[inline]
-    unsafe fn splice(start: NodePtr, end: NodePtr, prev: NodePtr, next: NodePtr) {
-        end.set_next(next);
-        if !prev.is_null() {
-            prev.set_next(start);
-        }
+    unsafe fn replace_next_or_prev(
+        &mut self,
+        ptr: Self::LinkPtr,
+        old: Option<Self::LinkPtr>,
+        new: Option<Self::LinkPtr>,
+    )
+    {
+        let packed = ptr.as_ref().next.get().map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let new_packed = packed
+            ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
+
+        let new_next = if new_packed > 0 {
+            Some(NonNull::new_unchecked(new_packed as *mut _))
+        } else {
+            None
+        };
+        ptr.as_ref().next.set(new_next);
+    }
+}
+
+#[inline]
+unsafe fn link_between<T: SinglyLinkedListOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    prev: Option<T::LinkPtr>,
+    next: Option<T::LinkPtr>,
+) {
+    if let Some(prev) = prev {
+        link_ops.set_next(prev, Some(ptr));
+    }
+    link_ops.set_next(ptr, next);
+}
+
+#[inline]
+unsafe fn link_after<T: SinglyLinkedListOps>(link_ops: &mut T, ptr: T::LinkPtr, prev: T::LinkPtr) {
+    link_between(link_ops, ptr, Some(prev), link_ops.next(prev));
+}
+
+#[inline]
+unsafe fn replace_with<T: SinglyLinkedListOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    prev: Option<T::LinkPtr>,
+    new: T::LinkPtr,
+) {
+    if let Some(prev) = prev {
+        link_ops.set_next(prev, Some(new));
+    }
+    link_ops.set_next(new, link_ops.next(ptr));
+    link_ops.mark_unlinked(ptr);
+}
+
+#[inline]
+unsafe fn remove<T: SinglyLinkedListOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    prev: Option<T::LinkPtr>,
+) {
+    if let Some(prev) = prev {
+        link_ops.set_next(prev, link_ops.next(ptr));
+    }
+    link_ops.mark_unlinked(ptr);
+}
+
+#[inline]
+unsafe fn splice<T: SinglyLinkedListOps>(
+    link_ops: &mut T,
+    start: T::LinkPtr,
+    end: T::LinkPtr,
+    prev: Option<T::LinkPtr>,
+    next: Option<T::LinkPtr>,
+) {
+    link_ops.set_next(end, next);
+    if let Some(prev) = prev {
+        link_ops.set_next(prev, Some(start));
     }
 }
 
@@ -167,12 +276,18 @@ impl NodePtr {
 // =============================================================================
 
 /// A cursor which provides read-only access to a `SinglyLinkedList`.
-pub struct Cursor<'a, A: Adapter<Link = Link>> {
-    current: NodePtr,
+pub struct Cursor<'a, A: Adapter>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
+    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     list: &'a SinglyLinkedList<A>,
 }
 
-impl<'a, A: Adapter<Link = Link> + 'a> Clone for Cursor<'a, A> {
+impl<'a, A: Adapter> Clone for Cursor<'a, A>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
     #[inline]
     fn clone(&self) -> Cursor<'a, A> {
         Cursor {
@@ -182,11 +297,14 @@ impl<'a, A: Adapter<Link = Link> + 'a> Clone for Cursor<'a, A> {
     }
 }
 
-impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
+impl<'a, A: Adapter> Cursor<'a, A>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
-        self.current.is_null()
+        self.current.is_none()
     }
 
     /// Returns a reference to the object that the cursor is currently
@@ -195,12 +313,8 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
     /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a A::Value> {
-        if self.is_null() {
-            None
-        } else {
-            Some(unsafe { &*self.list.adapter.get_value(self.current.0) })
-        }
+    pub fn get(&self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { &*self.list.adapter.get_value(self.current?) })
     }
 
     /// Clones and returns the pointer that points to the element that the
@@ -209,12 +323,14 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
     /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn clone_pointer(&self) -> Option<A::Pointer>
+    pub fn clone_pointer(&self) -> Option<<A::PointerOps as PointerOps>::Pointer>
     where
-        A::Pointer: Clone,
+        <A::PointerOps as PointerOps>::Pointer: Clone,
     {
-        let raw_pointer = self.get()? as *const A::Value;
-        Some(unsafe { crate::intrusive_pointer::clone_pointer_from_raw(raw_pointer) })
+        let raw_pointer = self.get()? as *const <A::PointerOps as PointerOps>::Value;
+        Some(unsafe {
+            crate::pointer_ops::clone_pointer_from_raw(self.list.adapter.pointer_ops(), raw_pointer)
+        })
     }
 
     /// Moves the cursor to the next element of the `SinglyLinkedList`.
@@ -225,10 +341,10 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
     /// null object.
     #[inline]
     pub fn move_next(&mut self) {
-        if self.is_null() {
-            self.current = self.list.head;
+        if let Some(current) = self.current {
+            self.current = self.list.adapter.link_ops().next(current);
         } else {
-            self.current = unsafe { self.current.next() };
+            self.current = self.list.head;
         }
     }
 
@@ -246,16 +362,22 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
 }
 
 /// A cursor which provides mutable access to a `SinglyLinkedList`.
-pub struct CursorMut<'a, A: Adapter<Link = Link>> {
-    current: NodePtr,
+pub struct CursorMut<'a, A: Adapter>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
+    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     list: &'a mut SinglyLinkedList<A>,
 }
 
-impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
+impl<'a, A: Adapter> CursorMut<'a, A>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
-        self.current.is_null()
+        self.current.is_none()
     }
 
     /// Returns a reference to the object that the cursor is currently
@@ -264,12 +386,8 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&A::Value> {
-        if self.is_null() {
-            None
-        } else {
-            Some(unsafe { &*self.list.adapter.get_value(self.current.0) })
-        }
+    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { &*self.list.adapter.get_value(self.current?) })
     }
 
     /// Returns a read-only cursor pointing to the current element.
@@ -293,10 +411,10 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// null object.
     #[inline]
     pub fn move_next(&mut self) {
-        if self.is_null() {
-            self.current = self.list.head;
+        if let Some(current) = self.current {
+            self.current = self.list.adapter.link_ops().next(current);
         } else {
-            self.current = unsafe { self.current.next() };
+            self.current = self.list.head;
         }
     }
 
@@ -320,21 +438,25 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// If the cursor is currently pointing to the last element of the
     /// `SinglyLinkedList` then no element is removed and `None` is returned.
     #[inline]
-    pub fn remove_next(&mut self) -> Option<A::Pointer> {
+    pub fn remove_next(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         unsafe {
-            let next = if self.is_null() {
-                self.list.head
+            let next = if let Some(current) = self.current {
+                self.list.adapter.link_ops().next(current)
             } else {
-                self.current.next()
-            };
-            if next.is_null() {
-                return None;
-            }
+                self.list.head
+            }?;
+
             if self.is_null() {
-                self.list.head = next.next();
+                self.list.head = self.list.adapter.link_ops().next(next);
             }
-            next.remove(self.current);
-            Some(A::Pointer::from_raw(self.list.adapter.get_value(next.0)))
+            remove(self.list.adapter.link_ops_mut(), next, self.current);
+
+            Some(
+                self.list
+                    .adapter
+                    .pointer_ops()
+                    .from_raw(self.list.adapter.get_value(next)),
+            )
         }
     }
 
@@ -353,22 +475,32 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn replace_next_with(&mut self, val: A::Pointer) -> Result<A::Pointer, A::Pointer> {
+    pub fn replace_next_with(
+        &mut self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> Result<<A::PointerOps as PointerOps>::Pointer, <A::PointerOps as PointerOps>::Pointer>
+    {
         unsafe {
-            let next = if self.is_null() {
-                self.list.head
+            let next = if let Some(current) = self.current {
+                self.list.adapter.link_ops().next(current)
             } else {
-                self.current.next()
+                self.list.head
             };
-            if next.is_null() {
-                return Err(val);
+            match next {
+                Some(next) => {
+                    let new = self.list.node_from_value(val);
+                    if self.is_null() {
+                        self.list.head = Some(new);
+                    }
+                    replace_with(self.list.adapter.link_ops_mut(), next, self.current, new);
+                    Ok(self
+                        .list
+                        .adapter
+                        .pointer_ops()
+                        .from_raw(self.list.adapter.get_value(next)))
+                }
+                None => Err(val),
             }
-            let new = self.list.node_from_value(val);
-            if self.is_null() {
-                self.list.head = new;
-            }
-            next.replace_with(self.current, new);
-            Ok(A::Pointer::from_raw(self.list.adapter.get_value(next.0)))
         }
     }
 
@@ -382,14 +514,14 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert_after(&mut self, val: A::Pointer) {
+    pub fn insert_after(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
         unsafe {
             let new = self.list.node_from_value(val);
-            if self.is_null() {
-                new.link_between(NodePtr::null(), self.list.head);
-                self.list.head = new;
+            if let Some(current) = self.current {
+                link_after(self.list.adapter.link_ops_mut(), new, current);
             } else {
-                new.link_after(self.current);
+                link_between(self.list.adapter.link_ops_mut(), new, None, self.list.head);
+                self.list.head = Some(new);
             }
         }
     }
@@ -405,30 +537,39 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// element. This has linear time complexity.
     #[inline]
     pub fn splice_after(&mut self, mut list: SinglyLinkedList<A>) {
-        if !list.is_empty() {
+        if let Some(head) = list.head {
             unsafe {
-                let next = if self.is_null() {
-                    self.list.head
+                let next = if let Some(current) = self.current {
+                    self.list.adapter.link_ops().next(current)
                 } else {
-                    self.current.next()
+                    self.list.head
                 };
-                if next.is_null() {
+                if let Some(next) = next {
+                    let mut tail = head;
+                    while let Some(x) = self.list.adapter.link_ops().next(tail) {
+                        tail = x;
+                    }
+                    splice(
+                        self.list.adapter.link_ops_mut(),
+                        head,
+                        tail,
+                        self.current,
+                        Some(next),
+                    );
                     if self.is_null() {
                         self.list.head = list.head;
-                    } else {
-                        self.current.set_next(list.head);
                     }
                 } else {
-                    let mut tail = list.head;
-                    while !tail.next().is_null() {
-                        tail = tail.next();
-                    }
-                    NodePtr::splice(list.head, tail, self.current, next);
-                    if self.is_null() {
+                    if let Some(current) = self.current {
+                        self.list
+                            .adapter
+                            .link_ops_mut()
+                            .set_next(current, list.head);
+                    } else {
                         self.list.head = list.head;
                     }
                 }
-                list.head = NodePtr::null();
+                list.head = None;
             }
         }
     }
@@ -444,22 +585,22 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     where
         A: Clone,
     {
-        if self.is_null() {
+        if let Some(current) = self.current {
+            unsafe {
+                let list = SinglyLinkedList {
+                    head: self.list.adapter.link_ops().next(current),
+                    adapter: self.list.adapter.clone(),
+                };
+                self.list.adapter.link_ops_mut().set_next(current, None);
+                list
+            }
+        } else {
             let list = SinglyLinkedList {
                 head: self.list.head,
                 adapter: self.list.adapter.clone(),
             };
-            self.list.head = NodePtr::null();
+            self.list.head = None;
             list
-        } else {
-            unsafe {
-                let list = SinglyLinkedList {
-                    head: self.current.next(),
-                    adapter: self.list.adapter.clone(),
-                };
-                self.current.set_next(NodePtr::null());
-                list
-            }
         }
     }
 }
@@ -472,39 +613,48 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
 ///
 /// When this collection is dropped, all elements linked into it will be
 /// converted back to owned pointers and dropped.
-pub struct SinglyLinkedList<A: Adapter<Link = Link>> {
-    head: NodePtr,
+pub struct SinglyLinkedList<A: Adapter>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
+    head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     adapter: A,
 }
 
-impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
+impl<A: Adapter> SinglyLinkedList<A>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
     #[inline]
-    fn node_from_value(&self, val: A::Pointer) -> NodePtr {
+    fn node_from_value(
+        &self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> <A::LinkOps as super::LinkOps>::LinkPtr {
+        use link_ops::LinkOps;
+
         unsafe {
-            assert!(
-                !(*self.adapter.get_link(&*val)).is_linked(),
-                "attempted to insert an object that is already linked"
-            );
-            NodePtr(self.adapter.get_link(val.into_raw()))
+            let raw = self.adapter.pointer_ops().into_raw(val);
+
+            if self
+                .adapter
+                .link_ops()
+                .is_linked(self.adapter.get_link(raw))
+            {
+                // convert the node back into a pointer
+                self.adapter.pointer_ops().from_raw(raw);
+
+                panic!("attempted to insert an object that is already linked");
+            }
+
+            self.adapter.get_link(raw)
         }
     }
 
     /// Creates an empty `SinglyLinkedList`.
-    #[cfg(feature = "nightly")]
-    #[inline]
-    pub const fn new(adapter: A) -> SinglyLinkedList<A> {
-        SinglyLinkedList {
-            head: NodePtr(ptr::null()),
-            adapter,
-        }
-    }
-
-    /// Creates an empty `SinglyLinkedList`.
-    #[cfg(not(feature = "nightly"))]
     #[inline]
     pub fn new(adapter: A) -> SinglyLinkedList<A> {
         SinglyLinkedList {
-            head: NodePtr::null(),
+            head: None,
             adapter,
         }
     }
@@ -512,23 +662,21 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
     /// Returns `true` if the `SinglyLinkedList` is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.head.is_null()
+        self.head.is_none()
     }
 
     /// Returns a null `Cursor` for this list.
-    #[inline]
     pub fn cursor(&self) -> Cursor<'_, A> {
         Cursor {
-            current: NodePtr::null(),
+            current: None,
             list: self,
         }
     }
 
     /// Returns a null `CursorMut` for this list.
-    #[inline]
     pub fn cursor_mut(&mut self) -> CursorMut<'_, A> {
         CursorMut {
-            current: NodePtr::null(),
+            current: None,
             list: self,
         }
     }
@@ -538,10 +686,12 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
     /// # Safety
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
-    #[inline]
-    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Value) -> Cursor<'_, A> {
+    pub unsafe fn cursor_from_ptr(
+        &self,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+    ) -> Cursor<'_, A> {
         Cursor {
-            current: NodePtr(self.adapter.get_link(ptr)),
+            current: Some(self.adapter.get_link(ptr)),
             list: self,
         }
     }
@@ -551,17 +701,18 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
     /// # Safety
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
-    #[inline]
-    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Value) -> CursorMut<'_, A> {
+    pub unsafe fn cursor_mut_from_ptr(
+        &mut self,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+    ) -> CursorMut<'_, A> {
         CursorMut {
-            current: NodePtr(self.adapter.get_link(ptr)),
+            current: Some(self.adapter.get_link(ptr)),
             list: self,
         }
     }
 
     /// Returns a `Cursor` pointing to the first element of the list. If the
     /// list is empty then a null cursor is returned.
-    #[inline]
     pub fn front(&self) -> Cursor<'_, A> {
         let mut cursor = self.cursor();
         cursor.move_next();
@@ -570,7 +721,6 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
 
     /// Returns a `CursorMut` pointing to the first element of the list. If the
     /// the list is empty then a null cursor is returned.
-    #[inline]
     pub fn front_mut(&mut self) -> CursorMut<'_, A> {
         let mut cursor = self.cursor_mut();
         cursor.move_next();
@@ -593,13 +743,17 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
     /// converted back to an owned pointer and then dropped.
     #[inline]
     pub fn clear(&mut self) {
+        use link_ops::LinkOps;
+
         let mut current = self.head;
-        self.head = NodePtr::null();
-        while !current.is_null() {
+        self.head = None;
+        while let Some(x) = current {
             unsafe {
-                let next = current.next();
-                current.unlink();
-                A::Pointer::from_raw(self.adapter.get_value(current.0));
+                let next = self.adapter.link_ops().next(x);
+                self.adapter.link_ops_mut().mark_unlinked(x);
+                self.adapter
+                    .pointer_ops()
+                    .from_raw(self.adapter.get_value(x));
                 current = next;
             }
         }
@@ -611,14 +765,12 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
     /// objects into another `SinglyLinkedList` will fail but will not cause any
     /// memory unsafety. To unlink those objects manually, you must call the
     /// `force_unlink` function on them.
-    #[inline]
     pub fn fast_clear(&mut self) {
-        self.head = NodePtr::null();
+        self.head = None;
     }
 
     /// Takes all the elements out of the `SinglyLinkedList`, leaving it empty.
     /// The taken elements are returned as a new `SinglyLinkedList`.
-    #[inline]
     pub fn take(&mut self) -> SinglyLinkedList<A>
     where
         A: Clone,
@@ -627,13 +779,13 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
             head: self.head,
             adapter: self.adapter.clone(),
         };
-        self.head = NodePtr::null();
+        self.head = None;
         list
     }
 
     /// Inserts a new element at the start of the `SinglyLinkedList`.
     #[inline]
-    pub fn push_front(&mut self, val: A::Pointer) {
+    pub fn push_front(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
         self.cursor_mut().insert_after(val);
     }
 
@@ -641,28 +793,44 @@ impl<A: Adapter<Link = Link>> SinglyLinkedList<A> {
     ///
     /// This returns `None` if the `SinglyLinkedList` is empty.
     #[inline]
-    pub fn pop_front(&mut self) -> Option<A::Pointer> {
+    pub fn pop_front(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         self.cursor_mut().remove_next()
     }
 }
 
 // Allow read-only access to values from multiple threads
-unsafe impl<A: Adapter<Link = Link> + Sync> Sync for SinglyLinkedList<A> where A::Value: Sync {}
+unsafe impl<A: Adapter + Sync> Sync for SinglyLinkedList<A>
+where
+    <A::PointerOps as PointerOps>::Value: Sync,
+    A::LinkOps: SinglyLinkedListOps,
+{
+}
 
-// Allow sending to another thread if the ownership (represented by the A::Pointer owned
+// Allow sending to another thread if the ownership (represented by the <A::PointerOps as PointerOps>::Pointer owned
 // pointer type) can be transferred to another thread.
-unsafe impl<A: Adapter<Link = Link> + Send> Send for SinglyLinkedList<A> where A::Pointer: Send {}
+unsafe impl<A: Adapter + Send> Send for SinglyLinkedList<A>
+where
+    <A::PointerOps as PointerOps>::Pointer: Send,
+    A::LinkOps: SinglyLinkedListOps,
+{
+}
 
 // Drop all owned pointers if the collection is dropped
-impl<A: Adapter<Link = Link>> Drop for SinglyLinkedList<A> {
+impl<A: Adapter> Drop for SinglyLinkedList<A>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
     #[inline]
     fn drop(&mut self) {
         self.clear();
     }
 }
 
-impl<A: Adapter<Link = Link>> IntoIterator for SinglyLinkedList<A> {
-    type Item = A::Pointer;
+impl<A: Adapter> IntoIterator for SinglyLinkedList<A>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
+    type Item = <A::PointerOps as PointerOps>::Pointer;
     type IntoIter = IntoIter<A>;
 
     #[inline]
@@ -671,8 +839,11 @@ impl<A: Adapter<Link = Link>> IntoIterator for SinglyLinkedList<A> {
     }
 }
 
-impl<'a, A: Adapter<Link = Link> + 'a> IntoIterator for &'a SinglyLinkedList<A> {
-    type Item = &'a A::Value;
+impl<'a, A: Adapter + 'a> IntoIterator for &'a SinglyLinkedList<A>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
+    type Item = &'a <A::PointerOps as PointerOps>::Value;
     type IntoIter = Iter<'a, A>;
 
     #[inline]
@@ -681,15 +852,19 @@ impl<'a, A: Adapter<Link = Link> + 'a> IntoIterator for &'a SinglyLinkedList<A> 
     }
 }
 
-impl<A: Adapter<Link = Link> + Default> Default for SinglyLinkedList<A> {
+impl<A: Adapter + Default> Default for SinglyLinkedList<A>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
     fn default() -> SinglyLinkedList<A> {
         SinglyLinkedList::new(A::default())
     }
 }
 
-impl<A: Adapter<Link = Link>> fmt::Debug for SinglyLinkedList<A>
+impl<A: Adapter> fmt::Debug for SinglyLinkedList<A>
 where
-    A::Value: fmt::Debug,
+    A::LinkOps: SinglyLinkedListOps,
+    <A::PointerOps as PointerOps>::Value: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
@@ -701,25 +876,31 @@ where
 // =============================================================================
 
 /// An iterator over references to the items of a `SinglyLinkedList`.
-pub struct Iter<'a, A: Adapter<Link = Link>> {
-    current: NodePtr,
+pub struct Iter<'a, A: Adapter>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
+    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     list: &'a SinglyLinkedList<A>,
 }
-impl<'a, A: Adapter<Link = Link> + 'a> Iterator for Iter<'a, A> {
-    type Item = &'a A::Value;
+impl<'a, A: Adapter + 'a> Iterator for Iter<'a, A>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
+    type Item = &'a <A::PointerOps as PointerOps>::Value;
 
     #[inline]
-    fn next(&mut self) -> Option<&'a A::Value> {
-        if self.current.is_null() {
-            None
-        } else {
-            let current = self.current;
-            self.current = unsafe { current.next() };
-            Some(unsafe { &*self.list.adapter.get_value(current.0) })
-        }
+    fn next(&mut self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        let current = self.current?;
+
+        self.current = self.list.adapter.link_ops().next(current);
+        Some(unsafe { &*self.list.adapter.get_value(current) })
     }
 }
-impl<'a, A: Adapter<Link = Link> + 'a> Clone for Iter<'a, A> {
+impl<'a, A: Adapter + 'a> Clone for Iter<'a, A>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
     #[inline]
     fn clone(&self) -> Iter<'a, A> {
         Iter {
@@ -734,14 +915,20 @@ impl<'a, A: Adapter<Link = Link> + 'a> Clone for Iter<'a, A> {
 // =============================================================================
 
 /// An iterator which consumes a `SinglyLinkedList`.
-pub struct IntoIter<A: Adapter<Link = Link>> {
+pub struct IntoIter<A: Adapter>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
     list: SinglyLinkedList<A>,
 }
-impl<A: Adapter<Link = Link>> Iterator for IntoIter<A> {
-    type Item = A::Pointer;
+impl<A: Adapter> Iterator for IntoIter<A>
+where
+    A::LinkOps: SinglyLinkedListOps,
+{
+    type Item = <A::PointerOps as PointerOps>::Pointer;
 
     #[inline]
-    fn next(&mut self) -> Option<A::Pointer> {
+    fn next(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         self.list.pop_front()
     }
 }
@@ -1124,7 +1311,7 @@ mod tests {
 
             l.clear();
             assert!(l.front().clone_pointer().is_none());
-        }
+        };
     }
 
     #[test]

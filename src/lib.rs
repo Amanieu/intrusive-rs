@@ -296,21 +296,21 @@ pub extern crate core as __core;
 #[doc(hidden)]
 pub extern crate memoffset as __memoffset;
 
-mod intrusive_pointer;
 mod unsafe_ref;
 #[macro_use]
 mod adapter;
 mod key_adapter;
+mod link_ops;
+mod pointer_ops;
 pub mod linked_list;
 pub mod rbtree;
 pub mod singly_linked_list;
 pub mod xor_linked_list;
 
-pub mod custom_links;
-
 pub use crate::adapter::Adapter;
-pub use crate::intrusive_pointer::IntrusivePointer;
 pub use crate::key_adapter::KeyAdapter;
+pub use crate::link_ops::{LinkOps, DefaultLinkOps};
+pub use crate::pointer_ops::{DefaultPointerOps, PointerOps};
 pub use crate::linked_list::Link as LinkedListLink;
 pub use crate::linked_list::LinkedList;
 pub use crate::rbtree::Link as RBTreeLink;

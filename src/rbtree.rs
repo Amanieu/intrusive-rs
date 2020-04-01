@@ -1,4 +1,4 @@
-// Copyright 2016 Amanieu d'Antras
+// Copyright 2020 Amari Robinson
 //
 // Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
@@ -7,34 +7,86 @@
 
 //! Intrusive red-black tree.
 
-use crate::Bound::{self, Excluded, Included, Unbounded};
-use crate::IntrusivePointer;
-use crate::{Adapter, KeyAdapter};
 use core::borrow::Borrow;
 use core::cell::Cell;
 use core::cmp::Ordering;
 use core::fmt;
+use core::hint;
 use core::mem;
-use core::ptr;
+use core::ptr::NonNull;
+
+use crate::Bound::{self, Excluded, Included, Unbounded};
+
+use super::link_ops::{self, DefaultLinkOps};
+use super::linked_list::LinkedListOps;
+use crate::pointer_ops::PointerOps;
+use super::singly_linked_list::SinglyLinkedListOps;
+use super::xor_linked_list::XorLinkedListOps;
+use super::Adapter;
+use super::KeyAdapter;
+
+// =============================================================================
+// RBTreeOps
+// =============================================================================
+
+/// The color of a red-black tree node.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[allow(missing_docs)]
+pub enum Color {
+    Red,
+    Black,
+}
+
+/// Link operations for `RBTree`.
+pub unsafe trait RBTreeOps: super::LinkOps {
+    /// Returns the left child of `ptr`.
+    fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+
+    /// Returns the right child of `ptr`.
+    fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+
+    /// Returns the parent of `ptr`.
+    fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
+
+    /// Returns the color of `ptr`.
+    fn color(&self, ptr: Self::LinkPtr) -> Color;
+
+    /// Sets the left child of `ptr`.
+    unsafe fn set_left(&mut self, ptr: Self::LinkPtr, left: Option<Self::LinkPtr>);
+
+    /// Sets the right child of `ptr`.
+    unsafe fn set_right(&mut self, ptr: Self::LinkPtr, right: Option<Self::LinkPtr>);
+
+    /// Sets the parent of `ptr`.
+    unsafe fn set_parent(&self, ptr: Self::LinkPtr, parent: Option<Self::LinkPtr>);
+
+    /// Sets the color of `ptr`.
+    unsafe fn set_color(&self, ptr: Self::LinkPtr, color: Color);
+}
 
 // =============================================================================
 // Link
 // =============================================================================
 
-/// Intrusive link that allows an object to be inserted into a `RBTree`.
+/// Intrusive link that allows an object to be inserted into a
+/// `RBTree`.
 pub struct Link {
-    left: Cell<NodePtr>,
-    right: Cell<NodePtr>,
+    left: Cell<Option<NonNull<Link>>>,
+    right: Cell<Option<NonNull<Link>>>,
     parent_color: Cell<usize>,
 }
+
+// Use a special value to indicate an unlinked node. This value represents a
+// red root node, which is impossible in a valid red-black tree.
+const UNLINKED_MARKER: usize = 0;
 
 impl Link {
     /// Creates a new `Link`.
     #[inline]
     pub const fn new() -> Link {
         Link {
-            left: Cell::new(NodePtr(ptr::null())),
-            right: Cell::new(NodePtr(ptr::null())),
+            left: Cell::new(None),
+            right: Cell::new(None),
             parent_color: Cell::new(UNLINKED_MARKER),
         }
     }
@@ -57,6 +109,10 @@ impl Link {
     pub unsafe fn force_unlink(&self) {
         self.parent_color.set(UNLINKED_MARKER);
     }
+}
+
+impl DefaultLinkOps for Link {
+    type Ops = LinkOps;
 }
 
 // An object containing a link can be sent to another thread if it is unlinked.
@@ -95,409 +151,908 @@ impl fmt::Debug for Link {
 }
 
 // =============================================================================
-// NodePtr
+// LinkOps
 // =============================================================================
 
-#[derive(Copy, Clone, PartialEq, Eq)]
-enum Color {
-    Red,
-    Black,
-}
+/// Default `LinkOps` implementation for `RBTree`.
+#[derive(Clone, Copy, Default)]
+pub struct LinkOps;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
-struct NodePtr(*const Link);
-
-// Use a special value to indicate an unlinked node. This value represents a
-// red root node, which is impossible in a valid red-black tree.
-const UNLINKED_MARKER: usize = 0;
-
-impl NodePtr {
+impl LinkOps {
     #[inline]
-    fn null() -> NodePtr {
-        NodePtr(ptr::null())
-    }
-
-    #[inline]
-    fn is_null(self) -> bool {
-        self.0.is_null()
-    }
-
-    #[inline]
-    unsafe fn unlink(self) {
-        (*self.0).parent_color.set(UNLINKED_MARKER);
-    }
-
-    #[inline]
-    unsafe fn parent(self) -> NodePtr {
-        NodePtr(((*self.0).parent_color.get() & !1) as *const _)
-    }
-
-    #[inline]
-    unsafe fn color(self) -> Color {
-        if (*self.0).parent_color.get() & 1 == 1 {
-            Color::Black
-        } else {
-            Color::Red
-        }
-    }
-
-    #[inline]
-    unsafe fn set_parent_color(self, parent: NodePtr, color: Color) {
+    unsafe fn set_parent_color(
+        &self,
+        ptr: <Self as super::LinkOps>::LinkPtr,
+        parent: Option<<Self as super::LinkOps>::LinkPtr>,
+        color: Color,
+    ) {
         assert!(mem::align_of::<Link>() >= 2);
         let bit = match color {
             Color::Red => 0,
             Color::Black => 1,
         };
-        (*self.0).parent_color.set((parent.0 as usize & !1) | bit);
+        let parent_usize = parent.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        ptr.as_ref().parent_color.set((parent_usize & !1) | bit);
+    }
+}
+
+impl link_ops::LinkOps for LinkOps {
+    type LinkPtr = NonNull<Link>;
+
+    #[inline]
+    fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
+        unsafe { ptr.as_ref().is_linked() }
     }
 
     #[inline]
-    unsafe fn set_parent(self, parent: NodePtr) {
-        self.set_parent_color(parent, self.color());
+    unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr) {
+        ptr.as_ref().parent_color.set(UNLINKED_MARKER);
+    }
+}
+
+unsafe impl RBTreeOps for LinkOps {
+    #[inline]
+    fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        unsafe { ptr.as_ref().left.get() }
     }
 
     #[inline]
-    unsafe fn set_color(self, color: Color) {
-        self.set_parent_color(self.parent(), color);
+    fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        unsafe { ptr.as_ref().right.get() }
     }
 
     #[inline]
-    unsafe fn left(self) -> NodePtr {
-        (*self.0).left.get()
-    }
-
-    #[inline]
-    unsafe fn right(self) -> NodePtr {
-        (*self.0).right.get()
-    }
-
-    #[inline]
-    unsafe fn set_left(self, left: NodePtr) {
-        (*self.0).left.set(left);
-    }
-
-    #[inline]
-    unsafe fn set_right(self, right: NodePtr) {
-        (*self.0).right.set(right);
-    }
-
-    #[inline]
-    unsafe fn is_left_child(self) -> bool {
-        self.parent().left() == self
-    }
-
-    #[inline]
-    unsafe fn first_child(self) -> NodePtr {
-        if self.is_null() {
-            NodePtr::null()
-        } else {
-            let mut x = self;
-            while !x.left().is_null() {
-                x = x.left();
-            }
-            x
-        }
-    }
-
-    #[inline]
-    unsafe fn last_child(self) -> NodePtr {
-        if self.is_null() {
-            NodePtr::null()
-        } else {
-            let mut x = self;
-            while !x.right().is_null() {
-                x = x.right();
-            }
-            x
-        }
-    }
-
-    unsafe fn next(self) -> NodePtr {
-        if !self.right().is_null() {
-            self.right().first_child()
-        } else {
-            let mut x = self;
-            loop {
-                if x.parent().is_null() {
-                    return NodePtr::null();
-                }
-                if x.is_left_child() {
-                    return x.parent();
-                }
-                x = x.parent();
-            }
-        }
-    }
-
-    unsafe fn prev(self) -> NodePtr {
-        if !self.left().is_null() {
-            self.left().last_child()
-        } else {
-            let mut x = self;
-            loop {
-                if x.parent().is_null() {
-                    return NodePtr::null();
-                }
-                if !x.is_left_child() {
-                    return x.parent();
-                }
-                x = x.parent();
-            }
-        }
-    }
-
-    unsafe fn replace_with(self, new: NodePtr, root: &mut NodePtr) {
-        if self.parent().is_null() {
-            *root = new;
-        } else if self.is_left_child() {
-            self.parent().set_left(new);
-        } else {
-            self.parent().set_right(new);
-        }
-        if !self.left().is_null() {
-            self.left().set_parent(new);
-        }
-        if !self.right().is_null() {
-            self.right().set_parent(new);
-        }
-        new.set_left(self.left());
-        new.set_right(self.right());
-        new.set_parent_color(self.parent(), self.color());
-        self.unlink();
-    }
-
-    #[inline]
-    unsafe fn insert_left(self, new: NodePtr, root: &mut NodePtr) {
-        new.set_parent_color(self, Color::Red);
-        new.set_left(NodePtr::null());
-        new.set_right(NodePtr::null());
-        self.set_left(new);
-        new.post_insert(root);
-    }
-
-    #[inline]
-    unsafe fn insert_right(self, new: NodePtr, root: &mut NodePtr) {
-        new.set_parent_color(self, Color::Red);
-        new.set_left(NodePtr::null());
-        new.set_right(NodePtr::null());
-        self.set_right(new);
-        new.post_insert(root);
-    }
-
-    unsafe fn rotate_left(self, root: &mut NodePtr) {
-        let y = self.right();
-        self.set_right(y.left());
-        if !self.right().is_null() {
-            self.right().set_parent(self);
-        }
-        y.set_parent(self.parent());
-        if self.parent().is_null() {
-            *root = y;
-        } else if self.is_left_child() {
-            self.parent().set_left(y);
-        } else {
-            self.parent().set_right(y);
-        }
-        y.set_left(self);
-        self.set_parent(y);
-    }
-
-    unsafe fn rotate_right(self, root: &mut NodePtr) {
-        let y = self.left();
-        self.set_left(y.right());
-        if !self.left().is_null() {
-            self.left().set_parent(self);
-        }
-        y.set_parent(self.parent());
-        if self.parent().is_null() {
-            *root = y;
-        } else if self.is_left_child() {
-            self.parent().set_left(y);
-        } else {
-            self.parent().set_right(y);
-        }
-        y.set_right(self);
-        self.set_parent(y);
-    }
-
-    // This code is based on the red-black tree implementation in libc++
-    unsafe fn post_insert(self, root: &mut NodePtr) {
-        let mut x = self;
-        while !x.parent().is_null() && x.parent().color() == Color::Red {
-            if x.parent().is_left_child() {
-                let y = x.parent().parent().right();
-                if !y.is_null() && y.color() == Color::Red {
-                    x = x.parent();
-                    x.set_color(Color::Black);
-                    x = x.parent();
-                    if x.parent().is_null() {
-                        x.set_color(Color::Black);
-                    } else {
-                        x.set_color(Color::Red);
-                    }
-                    y.set_color(Color::Black);
-                } else {
-                    if !x.is_left_child() {
-                        x = x.parent();
-                        x.rotate_left(root);
-                    }
-                    x = x.parent();
-                    x.set_color(Color::Black);
-                    x = x.parent();
-                    x.set_color(Color::Red);
-                    x.rotate_right(root);
-                    break;
-                }
+    fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        unsafe {
+            let parent_usize = ptr.as_ref().parent_color.get() & !1;
+            if parent_usize > 0 {
+                Some(NonNull::new_unchecked(parent_usize as *mut Link))
             } else {
-                let y = x.parent().parent().left();
-                if !y.is_null() && y.color() == Color::Red {
-                    x = x.parent();
-                    x.set_color(Color::Black);
-                    x = x.parent();
-                    if x.parent().is_null() {
-                        x.set_color(Color::Black);
-                    } else {
-                        x.set_color(Color::Red);
-                    }
-                    y.set_color(Color::Black);
-                } else {
-                    if x.is_left_child() {
-                        x = x.parent();
-                        x.rotate_right(root);
-                    }
-                    x = x.parent();
-                    x.set_color(Color::Black);
-                    x = x.parent();
-                    x.set_color(Color::Red);
-                    x.rotate_left(root);
-                    break;
-                }
+                None
             }
         }
     }
 
-    // This code is based on the red-black tree implementation in libc++
-    unsafe fn remove(self, root: &mut NodePtr) {
-        let y = if self.left().is_null() || self.right().is_null() {
-            self
+    #[inline]
+    fn color(&self, ptr: Self::LinkPtr) -> Color {
+        unsafe {
+            if ptr.as_ref().parent_color.get() & 1 == 1 {
+                Color::Black
+            } else {
+                Color::Red
+            }
+        }
+    }
+
+    #[inline]
+    unsafe fn set_left(&mut self, ptr: Self::LinkPtr, left: Option<Self::LinkPtr>) {
+        ptr.as_ref().left.set(left);
+    }
+
+    #[inline]
+    unsafe fn set_right(&mut self, ptr: Self::LinkPtr, right: Option<Self::LinkPtr>) {
+        ptr.as_ref().right.set(right);
+    }
+
+    #[inline]
+    unsafe fn set_parent(&self, ptr: Self::LinkPtr, parent: Option<Self::LinkPtr>) {
+        self.set_parent_color(ptr, parent, self.color(ptr));
+    }
+
+    #[inline]
+    unsafe fn set_color(&self, ptr: Self::LinkPtr, color: Color) {
+        self.set_parent_color(ptr, self.parent(ptr), color);
+    }
+}
+
+unsafe impl SinglyLinkedListOps for LinkOps {
+    #[inline]
+    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        self.right(ptr)
+    }
+
+    #[inline]
+    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
+        self.set_right(ptr, next);
+    }
+}
+
+unsafe impl LinkedListOps for LinkOps {
+    #[inline]
+    fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        self.right(ptr)
+    }
+
+    #[inline]
+    fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        self.left(ptr)
+    }
+
+    #[inline]
+    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
+        self.set_right(ptr, next);
+    }
+
+    #[inline]
+    unsafe fn set_prev(&mut self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>) {
+        self.set_left(ptr, prev);
+    }
+}
+
+unsafe impl XorLinkedListOps for LinkOps {
+    #[inline]
+    unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>
+    {
+        let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        if raw > 0 {
+            Some(NonNull::new_unchecked(raw as *mut _))
         } else {
-            self.next()
+            None
+        }
+    }
+
+    #[inline]
+    unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>
+    {
+        let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        if raw > 0 {
+            Some(NonNull::new_unchecked(raw as *mut _))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    unsafe fn set(
+        &mut self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+        next: Option<Self::LinkPtr>,
+    )
+    {
+        let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        
+        let new_next = if new_packed > 0 {
+            Some(NonNull::new_unchecked(new_packed as *mut _))
+        } else {
+            None
         };
-        let mut x = if !y.left().is_null() {
-            y.left()
+        self.set_right(ptr, new_next);
+    }
+
+    #[inline]
+    unsafe fn replace_next_or_prev(
+        &mut self,
+        ptr: Self::LinkPtr,
+        old: Option<Self::LinkPtr>,
+        new: Option<Self::LinkPtr>,
+    )
+    {
+        let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let new_packed = packed
+            ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
+
+        let new_next = if new_packed > 0 {
+            Some(NonNull::new_unchecked(new_packed as *mut _))
         } else {
-            y.right()
+            None
         };
-        let mut w = NodePtr::null();
-        if !x.is_null() {
-            x.set_parent(y.parent());
+        self.set_right(ptr, new_next);
+    }
+}
+
+#[inline]
+unsafe fn set_parent_color<T: RBTreeOps>(
+    link_ops: &T,
+    ptr: T::LinkPtr,
+    parent: Option<T::LinkPtr>,
+    color: Color,
+) {
+    link_ops.set_parent(ptr, parent);
+    link_ops.set_color(ptr, color);
+}
+
+#[inline]
+fn is_left_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr, parent: T::LinkPtr) -> bool {
+    link_ops.left(parent) == Some(ptr)
+}
+
+#[inline]
+fn first_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> T::LinkPtr {
+    let mut x = ptr;
+    while let Some(y) = link_ops.left(x) {
+        x = y;
+    }
+    x
+}
+
+#[inline]
+fn last_child<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> T::LinkPtr {
+    let mut x = ptr;
+    while let Some(y) = link_ops.right(x) {
+        x = y;
+    }
+    x
+}
+
+#[inline]
+fn next<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> Option<T::LinkPtr> {
+    if let Some(right) = link_ops.right(ptr) {
+        Some(first_child(link_ops, right))
+    } else {
+        let mut x = ptr;
+        loop {
+            if let Some(parent) = link_ops.parent(x) {
+                if is_left_child(link_ops, x, parent) {
+                    return Some(parent);
+                }
+
+                x = parent;
+            } else {
+                return None;
+            }
         }
-        if y.parent().is_null() {
-            *root = x;
-        } else if y.is_left_child() {
-            y.parent().set_left(x);
-            w = y.parent().right();
+    }
+}
+
+#[inline]
+fn prev<T: RBTreeOps>(link_ops: &T, ptr: T::LinkPtr) -> Option<T::LinkPtr> {
+    if let Some(left) = link_ops.left(ptr) {
+        Some(last_child(link_ops, left))
+    } else {
+        let mut x = ptr;
+        loop {
+            if let Some(parent) = link_ops.parent(x) {
+                if !is_left_child(link_ops, x, parent) {
+                    return Some(parent);
+                }
+
+                x = parent;
+            } else {
+                return None;
+            }
+        }
+    }
+}
+
+#[inline]
+unsafe fn replace_with<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    new: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>,
+) {
+    if let Some(parent) = link_ops.parent(ptr) {
+        if is_left_child(link_ops, ptr, parent) {
+            link_ops.set_left(parent, Some(new));
         } else {
-            y.parent().set_right(x);
-            w = y.parent().left();
+            link_ops.set_right(parent, Some(new));
         }
-        let removed_black = y.color() == Color::Black;
-        if y != self {
-            y.set_parent(self.parent());
-            if self.parent().is_null() {
-                *root = y;
-            } else if self.is_left_child() {
-                y.parent().set_left(y);
-            } else {
-                y.parent().set_right(y);
-            }
-            y.set_left(self.left());
-            y.left().set_parent(y);
-            y.set_right(self.right());
-            if !y.right().is_null() {
-                y.right().set_parent(y);
-            }
-            y.set_color(self.color());
+    } else {
+        *root = Some(new);
+    }
+    if let Some(left) = link_ops.left(ptr) {
+        link_ops.set_parent(left, Some(new));
+    }
+    if let Some(right) = link_ops.right(ptr) {
+        link_ops.set_parent(right, Some(new));
+    }
+    link_ops.set_left(new, link_ops.left(ptr));
+    link_ops.set_right(new, link_ops.right(ptr));
+    set_parent_color(link_ops, new, link_ops.parent(ptr), link_ops.color(ptr));
+    link_ops.mark_unlinked(ptr);
+}
+
+#[inline]
+unsafe fn insert_left<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    new: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>,
+) {
+    set_parent_color(link_ops, new, Some(ptr), Color::Red);
+    link_ops.set_left(new, None);
+    link_ops.set_right(new, None);
+    link_ops.set_left(ptr, Some(new));
+    post_insert(link_ops, new, root);
+}
+
+#[inline]
+unsafe fn insert_right<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    new: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>,
+) {
+    set_parent_color(link_ops, new, Some(ptr), Color::Red);
+    link_ops.set_left(new, None);
+    link_ops.set_right(new, None);
+    link_ops.set_right(ptr, Some(new));
+    post_insert(link_ops, new, root);
+}
+
+unsafe fn rotate_left<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>,
+) {
+    let y = link_ops
+        .right(ptr)
+        .unwrap_or_else(|| hint::unreachable_unchecked());
+    link_ops.set_right(ptr, link_ops.left(y));
+    if let Some(right) = link_ops.right(ptr) {
+        link_ops.set_parent(right, Some(ptr));
+    }
+    link_ops.set_parent(y, link_ops.parent(ptr));
+    if let Some(parent) = link_ops.parent(ptr) {
+        if is_left_child(link_ops, ptr, parent) {
+            link_ops.set_left(parent, Some(y));
+        } else {
+            link_ops.set_right(parent, Some(y));
         }
-        if removed_black && !root.is_null() {
-            if !x.is_null() {
-                x.set_color(Color::Black);
+    } else {
+        *root = Some(y);
+    }
+    link_ops.set_left(y, Some(ptr));
+    link_ops.set_parent(ptr, Some(y));
+}
+
+unsafe fn rotate_right<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>,
+) {
+    let y = link_ops
+        .left(ptr)
+        .unwrap_or_else(|| hint::unreachable_unchecked());
+    link_ops.set_left(ptr, link_ops.right(y));
+    if let Some(left) = link_ops.left(ptr) {
+        link_ops.set_parent(left, Some(ptr));
+    }
+    link_ops.set_parent(y, link_ops.parent(ptr));
+    if let Some(parent) = link_ops.parent(ptr) {
+        if is_left_child(link_ops, ptr, parent) {
+            link_ops.set_left(parent, Some(y));
+        } else {
+            link_ops.set_right(parent, Some(y));
+        }
+    } else {
+        *root = Some(y);
+    }
+    link_ops.set_right(y, Some(ptr));
+    link_ops.set_parent(ptr, Some(y));
+}
+
+// This code is based on the red-black tree implementation in libc++
+unsafe fn post_insert<T: RBTreeOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    root: &mut Option<T::LinkPtr>,
+) {
+    let mut x = ptr;
+    while !link_ops.parent(x).is_none()
+        && link_ops.color(
+            link_ops
+                .parent(x)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+        ) == Color::Red
+    {
+        if is_left_child(
+            link_ops,
+            link_ops
+                .parent(x)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+            link_ops
+                .parent(
+                    link_ops
+                        .parent(x)
+                        .unwrap_or_else(|| hint::unreachable_unchecked()),
+                )
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+        ) {
+            let y = link_ops.right(
+                link_ops
+                    .parent(
+                        link_ops
+                            .parent(x)
+                            .unwrap_or_else(|| hint::unreachable_unchecked()),
+                    )
+                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+            );
+            if !y.is_none()
+                && link_ops.color(y.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red
+            {
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Black);
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
+
+                if link_ops.parent(x).is_none() {
+                    link_ops.set_color(x, Color::Black);
+                } else {
+                    link_ops.set_color(x, Color::Red);
+                }
+                link_ops.set_color(
+                    y.unwrap_or_else(|| hint::unreachable_unchecked()),
+                    Color::Black,
+                );
             } else {
-                loop {
-                    if !w.is_left_child() {
-                        if w.color() == Color::Red {
-                            w.set_color(Color::Black);
-                            w.parent().set_color(Color::Red);
-                            w.parent().rotate_left(root);
-                            w = w.left().right();
-                        }
-                        if (w.left().is_null() || w.left().color() == Color::Black)
-                            && (w.right().is_null() || w.right().color() == Color::Black)
+                if !is_left_child(
+                    link_ops,
+                    x,
+                    link_ops
+                        .parent(x)
+                        .unwrap_or_else(|| hint::unreachable_unchecked()),
+                ) {
+                    x = link_ops
+                        .parent(x)
+                        .unwrap_or_else(|| hint::unreachable_unchecked());
+                    rotate_left(link_ops, x, root);
+                }
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Black);
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Red);
+                rotate_right(link_ops, x, root);
+                break;
+            }
+        } else {
+            let y = link_ops.left(
+                link_ops
+                    .parent(
+                        link_ops
+                            .parent(x)
+                            .unwrap_or_else(|| hint::unreachable_unchecked()),
+                    )
+                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+            );
+            if !y.is_none()
+                && link_ops.color(y.unwrap_or_else(|| hint::unreachable_unchecked())) == Color::Red
+            {
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Black);
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
+                if link_ops.parent(x).is_none() {
+                    link_ops.set_color(x, Color::Black);
+                } else {
+                    link_ops.set_color(x, Color::Red);
+                }
+                link_ops.set_color(
+                    y.unwrap_or_else(|| hint::unreachable_unchecked()),
+                    Color::Black,
+                );
+            } else {
+                if is_left_child(
+                    link_ops,
+                    x,
+                    link_ops
+                        .parent(x)
+                        .unwrap_or_else(|| hint::unreachable_unchecked()),
+                ) {
+                    x = link_ops
+                        .parent(x)
+                        .unwrap_or_else(|| hint::unreachable_unchecked());
+                    rotate_right(link_ops, x, root);
+                }
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Black);
+                x = link_ops
+                    .parent(x)
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
+                link_ops.set_color(x, Color::Red);
+                rotate_left(link_ops, x, root);
+                break;
+            }
+        }
+    }
+}
+
+// This code is based on the red-black tree implementation in libc++
+unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Option<T::LinkPtr>) {
+    let y = if link_ops.left(ptr).is_none() || link_ops.right(ptr).is_none() {
+        ptr
+    } else {
+        next(link_ops, ptr).unwrap_or_else(|| hint::unreachable_unchecked())
+    };
+    let mut x = if !link_ops.left(y).is_none() {
+        link_ops.left(y)
+    } else {
+        link_ops.right(y)
+    };
+    let mut w = None;
+    if !x.is_none() {
+        link_ops.set_parent(
+            x.unwrap_or_else(|| hint::unreachable_unchecked()),
+            link_ops.parent(y),
+        );
+    }
+    if link_ops.parent(y).is_none() {
+        *root = x;
+    } else if is_left_child(
+        link_ops,
+        y,
+        link_ops
+            .parent(y)
+            .unwrap_or_else(|| hint::unreachable_unchecked()),
+    ) {
+        link_ops.set_left(
+            link_ops
+                .parent(y)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+            x,
+        );
+        w = link_ops.right(
+            link_ops
+                .parent(y)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+        );
+    } else {
+        link_ops.set_right(
+            link_ops
+                .parent(y)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+            x,
+        );
+        w = link_ops.left(
+            link_ops
+                .parent(y)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+        );
+    }
+    let removed_black = link_ops.color(y) == Color::Black;
+    if y != ptr {
+        link_ops.set_parent(y, link_ops.parent(ptr));
+        if link_ops.parent(ptr).is_none() {
+            *root = Some(y);
+        } else if is_left_child(
+            link_ops,
+            ptr,
+            link_ops
+                .parent(ptr)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+        ) {
+            link_ops.set_left(
+                link_ops
+                    .parent(y)
+                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                Some(y),
+            );
+        } else {
+            link_ops.set_right(
+                link_ops
+                    .parent(y)
+                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                Some(y),
+            );
+        }
+        link_ops.set_left(y, link_ops.left(ptr));
+        link_ops.set_parent(
+            link_ops
+                .left(y)
+                .unwrap_or_else(|| hint::unreachable_unchecked()),
+            Some(y),
+        );
+        link_ops.set_right(y, link_ops.right(ptr));
+        if !link_ops.right(y).is_none() {
+            link_ops.set_parent(
+                link_ops
+                    .right(y)
+                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                Some(y),
+            );
+        }
+        link_ops.set_color(y, link_ops.color(ptr));
+    }
+    if removed_black && !root.is_none() {
+        if !x.is_none() {
+            link_ops.set_color(
+                x.unwrap_or_else(|| hint::unreachable_unchecked()),
+                Color::Black,
+            );
+        } else {
+            loop {
+                if !is_left_child(
+                    link_ops,
+                    w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                    link_ops
+                        .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                        .unwrap_or_else(|| hint::unreachable_unchecked()),
+                ) {
+                    if link_ops.color(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                        == Color::Red
+                    {
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Red,
+                        );
+                        rotate_left(
+                            link_ops,
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            root,
+                        );
+                        w = link_ops.right(
+                            link_ops
+                                .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        );
+                    }
+                    if (link_ops
+                        .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                        .is_none()
+                        || link_ops.color(
+                            link_ops
+                                .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        ) == Color::Black)
+                        && (link_ops
+                            .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(
+                                link_ops
+                                    .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ) == Color::Black)
+                    {
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Red,
+                        );
+                        x = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
+                        if link_ops
+                            .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                == Color::Red
                         {
-                            w.set_color(Color::Red);
-                            x = w.parent();
-                            if x.parent().is_null() || x.color() == Color::Red {
-                                x.set_color(Color::Black);
-                                break;
-                            }
-                            w = if x.is_left_child() {
-                                x.parent().right()
-                            } else {
-                                x.parent().left()
-                            };
-                        } else {
-                            if w.right().is_null() || w.right().color() == Color::Black {
-                                w.left().set_color(Color::Black);
-                                w.set_color(Color::Red);
-                                w.rotate_right(root);
-                                w = w.parent();
-                            }
-                            w.set_color(w.parent().color());
-                            w.parent().set_color(Color::Black);
-                            w.right().set_color(Color::Black);
-                            w.parent().rotate_left(root);
+                            link_ops.set_color(
+                                x.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Black,
+                            );
                             break;
                         }
-                    } else {
-                        if w.color() == Color::Red {
-                            w.set_color(Color::Black);
-                            w.parent().set_color(Color::Red);
-                            w.parent().rotate_right(root);
-                            w = w.right().left();
-                        }
-                        if (w.left().is_null() || w.left().color() == Color::Black)
-                            && (w.right().is_null() || w.right().color() == Color::Black)
-                        {
-                            w.set_color(Color::Red);
-                            x = w.parent();
-                            if x.parent().is_null() || x.color() == Color::Red {
-                                x.set_color(Color::Black);
-                                break;
-                            }
-                            w = if x.is_left_child() {
-                                x.parent().right()
-                            } else {
-                                x.parent().left()
-                            };
+                        w = if is_left_child(
+                            link_ops,
+                            x.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            link_ops
+                                .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        ) {
+                            link_ops.right(
+                                link_ops
+                                    .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            )
                         } else {
-                            if w.left().is_null() || w.left().color() == Color::Black {
-                                w.right().set_color(Color::Black);
-                                w.set_color(Color::Red);
-                                w.rotate_left(root);
-                                w = w.parent();
-                            }
-                            w.set_color(w.parent().color());
-                            w.parent().set_color(Color::Black);
-                            w.left().set_color(Color::Black);
-                            w.parent().rotate_right(root);
+                            link_ops.left(
+                                link_ops
+                                    .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            )
+                        };
+                    } else {
+                        if link_ops
+                            .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(
+                                link_ops
+                                    .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ) == Color::Black
+                        {
+                            link_ops.set_color(
+                                link_ops
+                                    .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Black,
+                            );
+                            link_ops.set_color(
+                                w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Red,
+                            );
+                            rotate_right(
+                                link_ops,
+                                w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                root,
+                            );
+                            w = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
+                        }
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            link_ops.color(
+                                link_ops
+                                    .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ),
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        rotate_left(
+                            link_ops,
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            root,
+                        );
+                        break;
+                    }
+                } else {
+                    if link_ops.color(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                        == Color::Red
+                    {
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Red,
+                        );
+                        rotate_right(
+                            link_ops,
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            root,
+                        );
+                        w = link_ops.left(
+                            link_ops
+                                .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        );
+                    }
+                    if (link_ops
+                        .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                        .is_none()
+                        || link_ops.color(
+                            link_ops
+                                .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        ) == Color::Black)
+                        && (link_ops
+                            .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(
+                                link_ops
+                                    .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ) == Color::Black)
+                    {
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Red,
+                        );
+                        x = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
+                        if link_ops
+                            .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                == Color::Red
+                        {
+                            link_ops.set_color(
+                                x.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Black,
+                            );
                             break;
                         }
+                        w = if is_left_child(
+                            link_ops,
+                            x.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            link_ops
+                                .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                        ) {
+                            link_ops.right(
+                                link_ops
+                                    .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            )
+                        } else {
+                            link_ops.left(
+                                link_ops
+                                    .parent(x.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            )
+                        };
+                    } else {
+                        if link_ops
+                            .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                            .is_none()
+                            || link_ops.color(
+                                link_ops
+                                    .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ) == Color::Black
+                        {
+                            link_ops.set_color(
+                                link_ops
+                                    .right(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Black,
+                            );
+                            link_ops.set_color(
+                                w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                Color::Red,
+                            );
+                            rotate_left(
+                                link_ops,
+                                w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                                root,
+                            );
+                            w = link_ops.parent(w.unwrap_or_else(|| hint::unreachable_unchecked()));
+                        }
+                        link_ops.set_color(
+                            w.unwrap_or_else(|| hint::unreachable_unchecked()),
+                            link_ops.color(
+                                link_ops
+                                    .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                    .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            ),
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        link_ops.set_color(
+                            link_ops
+                                .left(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            Color::Black,
+                        );
+                        rotate_right(
+                            link_ops,
+                            link_ops
+                                .parent(w.unwrap_or_else(|| hint::unreachable_unchecked()))
+                                .unwrap_or_else(|| hint::unreachable_unchecked()),
+                            root,
+                        );
+                        break;
                     }
                 }
             }
         }
-        self.unlink();
     }
+    link_ops.mark_unlinked(ptr);
 }
 
 // =============================================================================
@@ -505,12 +1060,18 @@ impl NodePtr {
 // =============================================================================
 
 /// A cursor which provides read-only access to a `RBTree`.
-pub struct Cursor<'a, A: Adapter<Link = Link>> {
-    current: NodePtr,
+pub struct Cursor<'a, A: Adapter>
+where
+    A::LinkOps: RBTreeOps,
+{
+    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     tree: &'a RBTree<A>,
 }
 
-impl<'a, A: Adapter<Link = Link> + 'a> Clone for Cursor<'a, A> {
+impl<'a, A: Adapter> Clone for Cursor<'a, A>
+where
+    A::LinkOps: RBTreeOps,
+{
     #[inline]
     fn clone(&self) -> Cursor<'a, A> {
         Cursor {
@@ -520,11 +1081,14 @@ impl<'a, A: Adapter<Link = Link> + 'a> Clone for Cursor<'a, A> {
     }
 }
 
-impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
+impl<'a, A: Adapter> Cursor<'a, A>
+where
+    A::LinkOps: RBTreeOps,
+{
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
-        self.current.is_null()
+        self.current.is_none()
     }
 
     /// Returns a reference to the object that the cursor is currently
@@ -533,12 +1097,8 @@ impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
     /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a A::Value> {
-        if self.is_null() {
-            None
-        } else {
-            Some(unsafe { &*self.tree.adapter.get_value(self.current.0) })
-        }
+    pub fn get(&self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { &*self.tree.adapter.get_value(self.current?) })
     }
 
     /// Clones and returns the pointer that points to the element that the
@@ -547,12 +1107,14 @@ impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
     /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn clone_pointer(&self) -> Option<A::Pointer>
+    pub fn clone_pointer(&self) -> Option<<A::PointerOps as PointerOps>::Pointer>
     where
-        A::Pointer: Clone,
+        <A::PointerOps as PointerOps>::Pointer: Clone,
     {
-        let raw_pointer = self.get()? as *const A::Value;
-        Some(unsafe { crate::intrusive_pointer::clone_pointer_from_raw(raw_pointer) })
+        let raw_pointer = self.get()? as *const <A::PointerOps as PointerOps>::Value;
+        Some(unsafe {
+            crate::pointer_ops::clone_pointer_from_raw(self.tree.adapter.pointer_ops(), raw_pointer)
+        })
     }
 
     /// Moves the cursor to the next element of the `RBTree`.
@@ -562,10 +1124,12 @@ impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
     /// element of the `RBTree` then this will move it to the null object.
     #[inline]
     pub fn move_next(&mut self) {
-        if self.is_null() {
-            self.current = unsafe { self.tree.root.first_child() };
+        if let Some(current) = self.current {
+            self.current = next(self.tree.adapter.link_ops(), current);
+        } else if let Some(root) = self.tree.root {
+            self.current = Some(first_child(self.tree.adapter.link_ops(), root));
         } else {
-            self.current = unsafe { self.current.next() };
+            self.current = None;
         }
     }
 
@@ -576,10 +1140,12 @@ impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
     /// element of the `RBTree` then this will move it to the null object.
     #[inline]
     pub fn move_prev(&mut self) {
-        if self.is_null() {
-            self.current = unsafe { self.tree.root.last_child() };
+        if let Some(current) = self.current {
+            self.current = prev(self.tree.adapter.link_ops(), current);
+        } else if let Some(root) = self.tree.root {
+            self.current = Some(last_child(self.tree.adapter.link_ops(), root));
         } else {
-            self.current = unsafe { self.current.prev() };
+            self.current = None;
         }
     }
 
@@ -609,16 +1175,22 @@ impl<'a, A: Adapter<Link = Link> + 'a> Cursor<'a, A> {
 }
 
 /// A cursor which provides mutable access to a `RBTree`.
-pub struct CursorMut<'a, A: Adapter<Link = Link>> {
-    current: NodePtr,
+pub struct CursorMut<'a, A: Adapter>
+where
+    A::LinkOps: RBTreeOps,
+{
+    current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     tree: &'a mut RBTree<A>,
 }
 
-impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
+impl<'a, A: Adapter> CursorMut<'a, A>
+where
+    A::LinkOps: RBTreeOps,
+{
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
-        self.current.is_null()
+        self.current.is_none()
     }
 
     /// Returns a reference to the object that the cursor is currently
@@ -627,12 +1199,8 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&A::Value> {
-        if self.is_null() {
-            None
-        } else {
-            Some(unsafe { &*self.tree.adapter.get_value(self.current.0) })
-        }
+    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { &*self.tree.adapter.get_value(self.current?) })
     }
 
     /// Returns a read-only cursor pointing to the current element.
@@ -655,10 +1223,12 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// element of the `RBTree` then this will move it to the null object.
     #[inline]
     pub fn move_next(&mut self) {
-        if self.is_null() {
-            self.current = unsafe { self.tree.root.first_child() };
+        if let Some(current) = self.current {
+            self.current = next(self.tree.adapter.link_ops(), current);
+        } else if let Some(root) = self.tree.root {
+            self.current = Some(first_child(self.tree.adapter.link_ops(), root));
         } else {
-            self.current = unsafe { self.current.next() };
+            self.current = None;
         }
     }
 
@@ -669,10 +1239,12 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// element of the `RBTree` then this will move it to the null object.
     #[inline]
     pub fn move_prev(&mut self) {
-        if self.is_null() {
-            self.current = unsafe { self.tree.root.last_child() };
+        if let Some(current) = self.current {
+            self.current = prev(self.tree.adapter.link_ops(), current);
+        } else if let Some(root) = self.tree.root {
+            self.current = Some(last_child(self.tree.adapter.link_ops(), root));
         } else {
-            self.current = unsafe { self.current.prev() };
+            self.current = None;
         }
     }
 
@@ -708,16 +1280,26 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// If the cursor is currently pointing to the null object then no element
     /// is removed and `None` is returned.
     #[inline]
-    pub fn remove(&mut self) -> Option<A::Pointer> {
+    pub fn remove(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         unsafe {
-            if self.is_null() {
-                return None;
+            if let Some(current) = self.current {
+                let next = next(self.tree.adapter.link_ops(), current);
+                let result = current;
+                remove(
+                    self.tree.adapter.link_ops_mut(),
+                    current,
+                    &mut self.tree.root,
+                );
+                self.current = next;
+                Some(
+                    self.tree
+                        .adapter
+                        .pointer_ops()
+                        .from_raw(self.tree.adapter.get_value(result)),
+                )
+            } else {
+                None
             }
-            let next = self.current.next();
-            let result = self.current.0;
-            self.current.remove(&mut self.tree.root);
-            self.current = next;
-            Some(A::Pointer::from_raw(self.tree.adapter.get_value(result)))
         }
     }
 
@@ -740,16 +1322,30 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn replace_with(&mut self, val: A::Pointer) -> Result<A::Pointer, A::Pointer> {
-        if self.is_null() {
-            return Err(val);
-        }
+    pub fn replace_with(
+        &mut self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> Result<<A::PointerOps as PointerOps>::Pointer, <A::PointerOps as PointerOps>::Pointer>
+    {
         unsafe {
-            let new = self.tree.node_from_value(val);
-            let result = self.current.0;
-            self.current.replace_with(new, &mut self.tree.root);
-            self.current = new;
-            Ok(A::Pointer::from_raw(self.tree.adapter.get_value(result)))
+            if let Some(current) = self.current {
+                let new = self.tree.node_from_value(val);
+                let result = current;
+                replace_with(
+                    self.tree.adapter.link_ops_mut(),
+                    current,
+                    new,
+                    &mut self.tree.root,
+                );
+                self.current = Some(new);
+                Ok(self
+                    .tree
+                    .adapter
+                    .pointer_ops()
+                    .from_raw(self.tree.adapter.get_value(result)))
+            } else {
+                Err(val)
+            }
         }
     }
 
@@ -768,20 +1364,29 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert_after(&mut self, val: A::Pointer) {
+    pub fn insert_after(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
         unsafe {
             let new = self.tree.node_from_value(val);
-            if self.tree.is_empty() {
-                self.tree.insert_root(new);
-            } else if self.is_null() {
-                self.tree
-                    .root
-                    .first_child()
-                    .insert_left(new, &mut self.tree.root);
-            } else if self.current.right().is_null() {
-                self.current.insert_right(new, &mut self.tree.root);
+            let link_ops = self.tree.adapter.link_ops_mut();
+
+            if let Some(root) = self.tree.root {
+                if let Some(current) = self.current {
+                    if let Some(_) = link_ops.right(current) {
+                        let next = next(link_ops, current).unwrap();
+                        insert_left(link_ops, next, new, &mut self.tree.root);
+                    } else {
+                        insert_right(link_ops, current, new, &mut self.tree.root);
+                    }
+                } else {
+                    insert_left(
+                        link_ops,
+                        first_child(link_ops, root),
+                        new,
+                        &mut self.tree.root,
+                    );
+                }
             } else {
-                self.current.next().insert_left(new, &mut self.tree.root);
+                self.tree.insert_root(new);
             }
         }
     }
@@ -801,26 +1406,37 @@ impl<'a, A: Adapter<Link = Link> + 'a> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert_before(&mut self, val: A::Pointer) {
+    pub fn insert_before(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
         unsafe {
             let new = self.tree.node_from_value(val);
-            if self.tree.is_empty() {
-                self.tree.insert_root(new);
-            } else if self.is_null() {
-                self.tree
-                    .root
-                    .last_child()
-                    .insert_right(new, &mut self.tree.root);
-            } else if self.current.left().is_null() {
-                self.current.insert_left(new, &mut self.tree.root);
+            let link_ops = self.tree.adapter.link_ops_mut();
+            if let Some(root) = self.tree.root {
+                if let Some(current) = self.current {
+                    if let Some(_) = link_ops.left(current) {
+                        let prev = prev(link_ops, current).unwrap();
+                        insert_right(link_ops, prev, new, &mut self.tree.root);
+                    } else {
+                        insert_left(link_ops, current, new, &mut self.tree.root);
+                    }
+                } else {
+                    insert_right(
+                        link_ops,
+                        last_child(link_ops, root),
+                        new,
+                        &mut self.tree.root,
+                    );
+                }
             } else {
-                self.current.prev().insert_right(new, &mut self.tree.root);
+                self.tree.insert_root(new);
             }
         }
     }
 }
 
-impl<'a, A: for<'b> KeyAdapter<'b, Link = Link>> CursorMut<'a, A> {
+impl<'a, A: for<'b> KeyAdapter<'b>> CursorMut<'a, A>
+where
+    <A as Adapter>::LinkOps: RBTreeOps,
+{
     /// Inserts a new element into the `RBTree`.
     ///
     /// The new element will be inserted at the correct position in the tree
@@ -831,7 +1447,7 @@ impl<'a, A: for<'b> KeyAdapter<'b, Link = Link>> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert<'c>(&'c mut self, val: A::Pointer)
+    pub fn insert<'c>(&'c mut self, val: <A::PointerOps as PointerOps>::Pointer)
     where
         <A as KeyAdapter<'c>>::Key: Ord,
     {
@@ -856,39 +1472,48 @@ impl<'a, A: for<'b> KeyAdapter<'b, Link = Link>> CursorMut<'a, A> {
 /// `insert_before`/`insert_after` methods of `CursorMut` were incorrectly used.
 /// If this situation occurs, memory safety will not be violated but the `find`,
 /// `upper_bound`, `lower_bound` and `range` may return incorrect results.
-pub struct RBTree<A: Adapter<Link = Link>> {
-    root: NodePtr,
+pub struct RBTree<A: Adapter>
+where
+    A::LinkOps: RBTreeOps,
+{
+    root: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     adapter: A,
 }
 
-impl<A: Adapter<Link = Link>> RBTree<A> {
+impl<A: Adapter> RBTree<A>
+where
+    A::LinkOps: RBTreeOps,
+{
     #[inline]
-    fn node_from_value(&self, val: A::Pointer) -> NodePtr {
+    fn node_from_value(
+        &self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> <A::LinkOps as super::LinkOps>::LinkPtr {
+        use link_ops::LinkOps;
+
         unsafe {
-            assert!(
-                !(*self.adapter.get_link(&*val)).is_linked(),
-                "attempted to insert an object that is already linked"
-            );
-            NodePtr(self.adapter.get_link(val.into_raw()))
+            let raw = self.adapter.pointer_ops().into_raw(val);
+
+            if self
+                .adapter
+                .link_ops()
+                .is_linked(self.adapter.get_link(raw))
+            {
+                // convert the node back into a pointer
+                self.adapter.pointer_ops().from_raw(raw);
+
+                panic!("attempted to insert an object that is already linked");
+            }
+
+            self.adapter.get_link(raw)
         }
     }
 
     /// Creates an empty `RBTree`.
-    #[cfg(feature = "nightly")]
-    #[inline]
-    pub const fn new(adapter: A) -> RBTree<A> {
-        RBTree {
-            root: NodePtr(ptr::null()),
-            adapter,
-        }
-    }
-
-    /// Creates an empty `RBTree`.
-    #[cfg(not(feature = "nightly"))]
     #[inline]
     pub fn new(adapter: A) -> RBTree<A> {
         RBTree {
-            root: NodePtr::null(),
+            root: None,
             adapter,
         }
     }
@@ -896,14 +1521,14 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     /// Returns `true` if the `RBTree` is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.root.is_null()
+        self.root.is_none()
     }
 
     /// Returns a null `Cursor` for this tree.
     #[inline]
     pub fn cursor(&self) -> Cursor<'_, A> {
         Cursor {
-            current: NodePtr::null(),
+            current: None,
             tree: self,
         }
     }
@@ -912,7 +1537,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     #[inline]
     pub fn cursor_mut(&mut self) -> CursorMut<'_, A> {
         CursorMut {
-            current: NodePtr::null(),
+            current: None,
             tree: self,
         }
     }
@@ -923,9 +1548,12 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     ///
     /// `ptr` must be a pointer to an object that is part of this tree.
     #[inline]
-    pub unsafe fn cursor_from_ptr(&self, ptr: *const A::Value) -> Cursor<'_, A> {
+    pub unsafe fn cursor_from_ptr(
+        &self,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+    ) -> Cursor<'_, A> {
         Cursor {
-            current: NodePtr(self.adapter.get_link(ptr)),
+            current: Some(self.adapter.get_link(ptr)),
             tree: self,
         }
     }
@@ -936,9 +1564,12 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     ///
     /// `ptr` must be a pointer to an object that is part of this tree.
     #[inline]
-    pub unsafe fn cursor_mut_from_ptr(&mut self, ptr: *const A::Value) -> CursorMut<'_, A> {
+    pub unsafe fn cursor_mut_from_ptr(
+        &mut self,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+    ) -> CursorMut<'_, A> {
         CursorMut {
-            current: NodePtr(self.adapter.get_link(ptr)),
+            current: Some(self.adapter.get_link(ptr)),
             tree: self,
         }
     }
@@ -980,43 +1611,49 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     }
 
     #[inline]
-    unsafe fn insert_root(&mut self, node: NodePtr) {
-        node.set_parent_color(NodePtr::null(), Color::Black);
-        node.set_left(NodePtr::null());
-        node.set_right(NodePtr::null());
-        self.root = node;
+    unsafe fn insert_root(&mut self, node: <A::LinkOps as super::LinkOps>::LinkPtr) {
+        set_parent_color(self.adapter.link_ops_mut(), node, None, Color::Black);
+        self.adapter.link_ops_mut().set_left(node, None);
+        self.adapter.link_ops_mut().set_right(node, None);
+        self.root = Some(node);
     }
 
-    /// Gets an iterator over the objects in the `RBTree`, in ascending key
-    /// order.
+    /// Gets an iterator over the objects in the `RBTree`.
     #[inline]
     pub fn iter(&self) -> Iter<'_, A> {
-        if self.root.is_null() {
+        let link_ops = self.adapter.link_ops();
+
+        if let Some(root) = self.root {
             Iter {
-                head: NodePtr::null(),
-                tail: NodePtr::null(),
+                head: Some(first_child(link_ops, root)),
+                tail: Some(last_child(link_ops, root)),
                 tree: self,
             }
         } else {
             Iter {
-                head: unsafe { self.root.first_child() },
-                tail: unsafe { self.root.last_child() },
+                head: None,
+                tail: None,
                 tree: self,
             }
         }
     }
 
     #[inline]
-    fn clear_recurse(&mut self, current: NodePtr) {
+    fn clear_recurse(&mut self, current: Option<<A::LinkOps as super::LinkOps>::LinkPtr>) {
+        use super::LinkOps;
         // If adapter.get_value or Pointer::from_raw panic here, it will leak
         // the nodes and keep them linked. However this is harmless since there
         // is nothing you can do with just a Link.
-        if !current.is_null() {
+        if let Some(current) = current {
             unsafe {
-                self.clear_recurse(current.left());
-                self.clear_recurse(current.right());
-                current.unlink();
-                A::Pointer::from_raw(self.adapter.get_value(current.0));
+                let left = self.adapter.link_ops_mut().left(current);
+                let right = self.adapter.link_ops_mut().right(current);
+                self.clear_recurse(left);
+                self.clear_recurse(right);
+                self.adapter.link_ops_mut().mark_unlinked(current);
+                self.adapter
+                    .pointer_ops()
+                    .from_raw(self.adapter.get_value(current));
             }
         }
     }
@@ -1028,8 +1665,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     /// converted back to an owned pointer and then dropped.
     #[inline]
     pub fn clear(&mut self) {
-        let root = self.root;
-        self.root = NodePtr::null();
+        let root = self.root.take();
         self.clear_recurse(root);
     }
 
@@ -1041,7 +1677,7 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
     /// `force_unlink` function on them.
     #[inline]
     pub fn fast_clear(&mut self) {
-        self.root = NodePtr::null();
+        self.root = None;
     }
 
     /// Takes all the elements out of the `RBTree`, leaving it empty. The
@@ -1055,28 +1691,36 @@ impl<A: Adapter<Link = Link>> RBTree<A> {
             root: self.root,
             adapter: self.adapter.clone(),
         };
-        self.root = NodePtr::null();
+        self.root = None;
         tree
     }
 }
 
-impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
+impl<A: for<'a> KeyAdapter<'a>> RBTree<A>
+where
+    <A as Adapter>::LinkOps: RBTreeOps,
+{
     #[inline]
-    fn find_internal<'a, Q: ?Sized + Ord>(&self, key: &Q) -> NodePtr
+    fn find_internal<'a, Q: ?Sized + Ord>(
+        &self,
+        key: &Q,
+    ) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
-        A::Value: 'a,
+        <A::PointerOps as PointerOps>::Value: 'a,
     {
+        let link_ops = self.adapter.link_ops();
+
         let mut tree = self.root;
-        while !tree.is_null() {
-            let current = unsafe { &*self.adapter.get_value(tree.0) };
+        while let Some(x) = tree {
+            let current = unsafe { &*self.adapter.get_value(x) };
             match key.cmp(self.adapter.get_key(current).borrow()) {
-                Ordering::Less => tree = unsafe { tree.left() },
+                Ordering::Less => tree = link_ops.left(x),
                 Ordering::Equal => return tree,
-                Ordering::Greater => tree = unsafe { tree.right() },
+                Ordering::Greater => tree = link_ops.right(x),
             }
         }
-        NodePtr::null()
+        None
     }
 
     /// Returns a `Cursor` pointing to an element with the given key. If no such
@@ -1112,15 +1756,20 @@ impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
     }
 
     #[inline]
-    fn lower_bound_internal<'a, Q: ?Sized + Ord>(&self, bound: Bound<&Q>) -> NodePtr
+    fn lower_bound_internal<'a, Q: ?Sized + Ord>(
+        &self,
+        bound: Bound<&Q>,
+    ) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
-        A::Value: 'a,
+        <A::PointerOps as PointerOps>::Value: 'a,
     {
+        let link_ops = self.adapter.link_ops();
+
         let mut tree = self.root;
-        let mut result = NodePtr::null();
-        while !tree.is_null() {
-            let current = unsafe { &*self.adapter.get_value(tree.0) };
+        let mut result = None;
+        while let Some(x) = tree {
+            let current = unsafe { &*self.adapter.get_value(x) };
             let cond = match bound {
                 Unbounded => true,
                 Included(key) => key <= self.adapter.get_key(current).borrow(),
@@ -1128,9 +1777,9 @@ impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
             };
             if cond {
                 result = tree;
-                tree = unsafe { tree.left() };
+                tree = link_ops.left(x);
             } else {
-                tree = unsafe { tree.right() };
+                tree = link_ops.right(x);
             }
         }
         result
@@ -1165,25 +1814,30 @@ impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
     }
 
     #[inline]
-    fn upper_bound_internal<'a, Q: ?Sized + Ord>(&self, bound: Bound<&Q>) -> NodePtr
+    fn upper_bound_internal<'a, Q: ?Sized + Ord>(
+        &self,
+        bound: Bound<&Q>,
+    ) -> Option<<A::LinkOps as super::LinkOps>::LinkPtr>
     where
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
-        A::Value: 'a,
+        <A::PointerOps as PointerOps>::Value: 'a,
     {
+        let link_ops = self.adapter.link_ops();
+
         let mut tree = self.root;
-        let mut result = NodePtr::null();
-        while !tree.is_null() {
-            let current = unsafe { &*self.adapter.get_value(tree.0) };
+        let mut result = None;
+        while let Some(x) = tree {
+            let current = unsafe { &*self.adapter.get_value(x) };
             let cond = match bound {
                 Unbounded => false,
                 Included(key) => key < self.adapter.get_key(current).borrow(),
                 Excluded(key) => key <= self.adapter.get_key(current).borrow(),
             };
             if cond {
-                tree = unsafe { tree.left() };
+                tree = link_ops.left(x);
             } else {
                 result = tree;
-                tree = unsafe { tree.right() };
+                tree = link_ops.right(x);
             }
         }
         result
@@ -1229,39 +1883,39 @@ impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn insert<'a>(&'a mut self, val: A::Pointer) -> CursorMut<'_, A>
+    pub fn insert<'a>(&'a mut self, val: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'_, A>
     where
         <A as KeyAdapter<'a>>::Key: Ord,
     {
         unsafe {
-            let raw = &*val as *const _;
             let new = self.node_from_value(val);
-            if self.is_empty() {
-                self.insert_root(new);
-            } else {
+            let raw = self.adapter.get_value(new);
+            if let Some(root) = self.root {
                 let key = self.adapter.get_key(&*raw);
-                let mut tree = self.root;
+                let mut tree = root;
                 loop {
-                    let current = &*self.adapter.get_value(tree.0);
+                    let current = &*self.adapter.get_value(tree);
                     if key < self.adapter.get_key(current) {
-                        if tree.left().is_null() {
-                            tree.insert_left(new, &mut self.root);
-                            break;
+                        if let Some(left) = self.adapter.link_ops().left(tree) {
+                            tree = left;
                         } else {
-                            tree = tree.left();
+                            insert_left(self.adapter.link_ops_mut(), tree, new, &mut self.root);
+                            break;
                         }
                     } else {
-                        if tree.right().is_null() {
-                            tree.insert_right(new, &mut self.root);
-                            break;
+                        if let Some(right) = self.adapter.link_ops().right(tree) {
+                            tree = right;
                         } else {
-                            tree = tree.right();
+                            insert_right(self.adapter.link_ops_mut(), tree, new, &mut self.root);
+                            break;
                         }
                     }
                 }
+            } else {
+                self.insert_root(new);
             }
             CursorMut {
-                current: new,
+                current: Some(new),
                 tree: self,
             }
         }
@@ -1283,47 +1937,47 @@ impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
         <A as KeyAdapter<'a>>::Key: Borrow<Q>,
     {
         unsafe {
-            if self.is_empty() {
-                Entry::Vacant(InsertCursor {
-                    parent: NodePtr::null(),
-                    insert_left: false,
-                    tree: self,
-                })
-            } else {
-                let mut tree = self.root;
+            if let Some(root) = self.root {
+                let mut tree = root;
                 loop {
-                    let current = &*self.adapter.get_value(tree.0);
+                    let current = &*self.adapter.get_value(tree);
                     match key.cmp(self.adapter.get_key(current).borrow()) {
                         Ordering::Less => {
-                            if tree.left().is_null() {
+                            if let Some(left) = self.adapter.link_ops().left(tree) {
+                                tree = left;
+                            } else {
                                 return Entry::Vacant(InsertCursor {
-                                    parent: tree,
+                                    parent: Some(tree),
                                     insert_left: true,
                                     tree: self,
                                 });
-                            } else {
-                                tree = tree.left();
                             }
                         }
                         Ordering::Equal => {
                             return Entry::Occupied(CursorMut {
-                                current: tree,
+                                current: Some(tree),
                                 tree: self,
                             });
                         }
                         Ordering::Greater => {
-                            if tree.right().is_null() {
+                            if let Some(right) = self.adapter.link_ops().right(tree) {
+                                tree = right;
+                            } else {
                                 return Entry::Vacant(InsertCursor {
-                                    parent: tree,
+                                    parent: Some(tree),
                                     insert_left: false,
                                     tree: self,
                                 });
-                            } else {
-                                tree = tree.right();
                             }
                         }
                     }
                 }
+            } else {
+                Entry::Vacant(InsertCursor {
+                    parent: None,
+                    insert_left: false,
+                    tree: self,
+                })
             }
         }
     }
@@ -1345,64 +1999,86 @@ impl<A: for<'a> KeyAdapter<'a, Link = Link>> RBTree<A> {
     {
         let lower = self.lower_bound_internal(min);
         let upper = self.upper_bound_internal(max);
-        if !lower.is_null() && !upper.is_null() {
-            let lower_key = unsafe { self.adapter.get_key(&*self.adapter.get_value(lower.0)) };
-            let upper_key = unsafe { self.adapter.get_key(&*self.adapter.get_value(upper.0)) };
+
+        if let (Some(lower), Some(upper)) = (lower, upper) {
+            let lower_key = unsafe { self.adapter.get_key(&*self.adapter.get_value(lower)) };
+            let upper_key = unsafe { self.adapter.get_key(&*self.adapter.get_value(upper)) };
             if upper_key >= lower_key {
                 return Iter {
-                    head: lower,
-                    tail: upper,
+                    head: Some(lower),
+                    tail: Some(upper),
                     tree: self,
                 };
             }
         }
         Iter {
-            head: NodePtr::null(),
-            tail: NodePtr::null(),
+            head: None,
+            tail: None,
             tree: self,
         }
     }
 }
 
-// Allow read-only access from multiple threads
-unsafe impl<A: Adapter<Link = Link> + Sync> Sync for RBTree<A> where A::Value: Sync {}
+// Allow read-only access to values from multiple threads
+unsafe impl<A: Adapter + Sync> Sync for RBTree<A>
+where
+    <A::PointerOps as PointerOps>::Value: Sync,
+    A::LinkOps: RBTreeOps,
+{
+}
 
-// Allow sending to another thread if the ownership (represented by the A::Pointer owned
+// Allow sending to another thread if the ownership (represented by the <A::PointerOps as PointerOps>::Pointer owned
 // pointer type) can be transferred to another thread.
-unsafe impl<A: Adapter<Link = Link> + Send> Send for RBTree<A> where A::Pointer: Send {}
+unsafe impl<A: Adapter + Send> Send for RBTree<A>
+where
+    <A::PointerOps as PointerOps>::Pointer: Send,
+    A::LinkOps: RBTreeOps,
+{
+}
 
 // Drop all owned pointers if the collection is dropped
-impl<A: Adapter<Link = Link>> Drop for RBTree<A> {
+impl<A: Adapter> Drop for RBTree<A>
+where
+    A::LinkOps: RBTreeOps,
+{
     #[inline]
     fn drop(&mut self) {
         self.clear();
     }
 }
 
-impl<A: Adapter<Link = Link>> IntoIterator for RBTree<A> {
-    type Item = A::Pointer;
+impl<A: Adapter> IntoIterator for RBTree<A>
+where
+    A::LinkOps: RBTreeOps,
+{
+    type Item = <A::PointerOps as PointerOps>::Pointer;
     type IntoIter = IntoIter<A>;
 
     #[inline]
     fn into_iter(self) -> IntoIter<A> {
-        if self.root.is_null() {
+        let link_ops = self.adapter.link_ops();
+
+        if let Some(root) = self.root {
             IntoIter {
-                head: NodePtr::null(),
-                tail: NodePtr::null(),
+                head: Some(first_child(link_ops, root)),
+                tail: Some(last_child(link_ops, root)),
                 tree: self,
             }
         } else {
             IntoIter {
-                head: unsafe { self.root.first_child() },
-                tail: unsafe { self.root.last_child() },
+                head: None,
+                tail: None,
                 tree: self,
             }
         }
     }
 }
 
-impl<'a, A: Adapter<Link = Link> + 'a> IntoIterator for &'a RBTree<A> {
-    type Item = &'a A::Value;
+impl<'a, A: Adapter + 'a> IntoIterator for &'a RBTree<A>
+where
+    A::LinkOps: RBTreeOps,
+{
+    type Item = &'a <A::PointerOps as PointerOps>::Value;
     type IntoIter = Iter<'a, A>;
 
     #[inline]
@@ -1411,15 +2087,19 @@ impl<'a, A: Adapter<Link = Link> + 'a> IntoIterator for &'a RBTree<A> {
     }
 }
 
-impl<A: Adapter<Link = Link> + Default> Default for RBTree<A> {
+impl<A: Adapter + Default> Default for RBTree<A>
+where
+    A::LinkOps: RBTreeOps,
+{
     fn default() -> RBTree<A> {
         RBTree::new(A::default())
     }
 }
 
-impl<A: Adapter<Link = Link>> fmt::Debug for RBTree<A>
+impl<A: Adapter> fmt::Debug for RBTree<A>
 where
-    A::Value: fmt::Debug,
+    A::LinkOps: RBTreeOps,
+    <A::PointerOps as PointerOps>::Value: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set().entries(self.iter()).finish()
@@ -1432,13 +2112,19 @@ where
 
 /// A cursor pointing to a slot in which an element can be inserted into a
 /// `RBTree`.
-pub struct InsertCursor<'a, A: Adapter<Link = Link>> {
-    parent: NodePtr,
+pub struct InsertCursor<'a, A: Adapter>
+where
+    A::LinkOps: RBTreeOps,
+{
+    parent: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     insert_left: bool,
     tree: &'a mut RBTree<A>,
 }
 
-impl<'a, A: Adapter<Link = Link> + 'a> InsertCursor<'a, A> {
+impl<'a, A: Adapter + 'a> InsertCursor<'a, A>
+where
+    A::LinkOps: RBTreeOps,
+{
     /// Inserts a new element into the `RBTree` at the location indicated by
     /// this `InsertCursor`.
     ///
@@ -1446,18 +2132,21 @@ impl<'a, A: Adapter<Link = Link> + 'a> InsertCursor<'a, A> {
     ///
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
-    pub fn insert(self, val: A::Pointer) -> CursorMut<'a, A> {
+    pub fn insert(self, val: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'a, A> {
         unsafe {
             let new = self.tree.node_from_value(val);
-            if self.parent.is_null() {
-                self.tree.insert_root(new);
-            } else if self.insert_left {
-                self.parent.insert_left(new, &mut self.tree.root);
+            let link_ops = self.tree.adapter.link_ops_mut();
+            if let Some(parent) = self.parent {
+                if self.insert_left {
+                    insert_left(link_ops, parent, new, &mut self.tree.root);
+                } else {
+                    insert_right(link_ops, parent, new, &mut self.tree.root);
+                }
             } else {
-                self.parent.insert_right(new, &mut self.tree.root);
+                self.tree.insert_root(new);
             }
             CursorMut {
-                current: new,
+                current: Some(new),
                 tree: self.tree,
             }
         }
@@ -1467,7 +2156,10 @@ impl<'a, A: Adapter<Link = Link> + 'a> InsertCursor<'a, A> {
 /// An entry in a `RBTree`.
 ///
 /// See the documentation for `RBTree::entry`.
-pub enum Entry<'a, A: Adapter<Link = Link>> {
+pub enum Entry<'a, A: Adapter>
+where
+    A::LinkOps: RBTreeOps,
+{
     /// An occupied entry.
     Occupied(CursorMut<'a, A>),
 
@@ -1475,7 +2167,10 @@ pub enum Entry<'a, A: Adapter<Link = Link>> {
     Vacant(InsertCursor<'a, A>),
 }
 
-impl<'a, A: Adapter<Link = Link> + 'a> Entry<'a, A> {
+impl<'a, A: Adapter + 'a> Entry<'a, A>
+where
+    A::LinkOps: RBTreeOps,
+{
     /// Inserts an element into the `RBTree` if the entry is vacant, returning
     /// a `CursorMut` to the resulting value. If the entry is occupied then a
     /// `CursorMut` pointing to the element is returned.
@@ -1484,7 +2179,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> Entry<'a, A> {
     ///
     /// Panics if the `Entry` is vacant and the new element is already linked to
     /// a different intrusive collection.
-    pub fn or_insert(self, val: A::Pointer) -> CursorMut<'a, A> {
+    pub fn or_insert(self, val: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'a, A> {
         match self {
             Entry::Occupied(entry) => entry,
             Entry::Vacant(entry) => entry.insert(val),
@@ -1502,7 +2197,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> Entry<'a, A> {
     /// a different intrusive collection.
     pub fn or_insert_with<F>(self, default: F) -> CursorMut<'a, A>
     where
-        F: FnOnce() -> A::Pointer,
+        F: FnOnce() -> <A::PointerOps as PointerOps>::Pointer,
     {
         match self {
             Entry::Occupied(entry) => entry,
@@ -1516,48 +2211,54 @@ impl<'a, A: Adapter<Link = Link> + 'a> Entry<'a, A> {
 // =============================================================================
 
 /// An iterator over references to the items of a `RBTree`.
-pub struct Iter<'a, A: Adapter<Link = Link>> {
-    head: NodePtr,
-    tail: NodePtr,
+pub struct Iter<'a, A: Adapter>
+where
+    A::LinkOps: RBTreeOps,
+{
+    head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     tree: &'a RBTree<A>,
 }
-impl<'a, A: Adapter<Link = Link> + 'a> Iterator for Iter<'a, A> {
-    type Item = &'a A::Value;
+impl<'a, A: Adapter + 'a> Iterator for Iter<'a, A>
+where
+    A::LinkOps: RBTreeOps,
+{
+    type Item = &'a <A::PointerOps as PointerOps>::Value;
 
     #[inline]
-    fn next(&mut self) -> Option<&'a A::Value> {
-        if self.head.is_null() {
-            None
+    fn next(&mut self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        let head = self.head?;
+
+        if Some(head) == self.tail {
+            self.head = None;
+            self.tail = None;
         } else {
-            let head = self.head;
-            if head == self.tail {
-                self.head = NodePtr::null();
-                self.tail = NodePtr::null();
-            } else {
-                self.head = unsafe { head.next() };
-            }
-            Some(unsafe { &*self.tree.adapter.get_value(head.0) })
+            self.head = next(self.tree.adapter.link_ops(), head);
         }
+        Some(unsafe { &*self.tree.adapter.get_value(head) })
     }
 }
-impl<'a, A: Adapter<Link = Link> + 'a> DoubleEndedIterator for Iter<'a, A> {
+impl<'a, A: Adapter + 'a> DoubleEndedIterator for Iter<'a, A>
+where
+    A::LinkOps: RBTreeOps,
+{
     #[inline]
-    fn next_back(&mut self) -> Option<&'a A::Value> {
-        if self.tail.is_null() {
-            None
+    fn next_back(&mut self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        let tail = self.tail?;
+
+        if Some(tail) == self.head {
+            self.head = None;
+            self.tail = None;
         } else {
-            let tail = self.tail;
-            if self.head == tail {
-                self.tail = NodePtr::null();
-                self.head = NodePtr::null();
-            } else {
-                self.tail = unsafe { tail.prev() };
-            }
-            Some(unsafe { &*self.tree.adapter.get_value(tail.0) })
+            self.tail = prev(self.tree.adapter.link_ops(), tail);
         }
+        Some(unsafe { &*self.tree.adapter.get_value(tail) })
     }
 }
-impl<'a, A: Adapter<Link = Link> + 'a> Clone for Iter<'a, A> {
+impl<'a, A: Adapter + 'a> Clone for Iter<'a, A>
+where
+    A::LinkOps: RBTreeOps,
+{
     #[inline]
     fn clone(&self) -> Iter<'a, A> {
         Iter {
@@ -1573,78 +2274,91 @@ impl<'a, A: Adapter<Link = Link> + 'a> Clone for Iter<'a, A> {
 // =============================================================================
 
 /// An iterator which consumes a `RBTree`.
-pub struct IntoIter<A: Adapter<Link = Link>> {
-    head: NodePtr,
-    tail: NodePtr,
+pub struct IntoIter<A: Adapter>
+where
+    A::LinkOps: RBTreeOps,
+{
+    head: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as super::LinkOps>::LinkPtr>,
     tree: RBTree<A>,
 }
-impl<A: Adapter<Link = Link>> Iterator for IntoIter<A> {
-    type Item = A::Pointer;
+impl<A: Adapter> Iterator for IntoIter<A>
+where
+    A::LinkOps: RBTreeOps,
+{
+    type Item = <A::PointerOps as PointerOps>::Pointer;
 
     #[inline]
-    fn next(&mut self) -> Option<A::Pointer> {
-        if self.head.is_null() {
-            None
-        } else {
-            unsafe {
-                // Remove the node from the tree. Since head is always the
-                // left-most node, we can infer the following:
-                // - head.left is null.
-                // - head is a left child of its parent (or the root node).
-                let head = self.head;
-                let parent = head.parent();
-                let right = head.right();
-                if parent.is_null() {
-                    self.tree.root = right;
-                    if right.is_null() {
-                        self.tail = NodePtr::null();
-                    }
-                } else {
-                    parent.set_left(right);
+    fn next(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+        use super::LinkOps;
+
+        let head = self.head?;
+        let link_ops = self.tree.adapter.link_ops_mut();
+        unsafe {
+            // Remove the node from the tree. Since head is always the
+            // left-most node, we can infer the following:
+            // - head.left is null.
+            // - head is a left child of its parent (or the root node).
+            if let Some(parent) = link_ops.parent(head) {
+                link_ops.set_left(parent, link_ops.right(head));
+            } else {
+                self.tree.root = link_ops.right(head);
+                if link_ops.right(head).is_none() {
+                    self.tail = None;
                 }
-                if right.is_null() {
-                    self.head = parent;
-                } else {
-                    right.set_parent(parent);
-                    self.head = right.first_child();
-                }
-                head.unlink();
-                Some(A::Pointer::from_raw(self.tree.adapter.get_value(head.0)))
             }
+            if let Some(right) = link_ops.right(head) {
+                link_ops.set_parent(right, link_ops.parent(head));
+                self.head = Some(first_child(link_ops, right));
+            } else {
+                self.head = link_ops.parent(head);
+            }
+            link_ops.mark_unlinked(head);
+            Some(
+                self.tree
+                    .adapter
+                    .pointer_ops()
+                    .from_raw(self.tree.adapter.get_value(head)),
+            )
         }
     }
 }
-impl<A: Adapter<Link = Link>> DoubleEndedIterator for IntoIter<A> {
+impl<A: Adapter> DoubleEndedIterator for IntoIter<A>
+where
+    A::LinkOps: RBTreeOps,
+{
     #[inline]
-    fn next_back(&mut self) -> Option<A::Pointer> {
-        if self.tail.is_null() {
-            None
-        } else {
-            unsafe {
-                // Remove the node from the tree. Since tail is always the
-                // right-most node, we can infer the following:
-                // - tail.right is null.
-                // - tail is a right child of its parent (or the root node).
-                let tail = self.tail;
-                let parent = tail.parent();
-                let left = tail.left();
-                if parent.is_null() {
-                    self.tree.root = left;
-                    if left.is_null() {
-                        self.head = NodePtr::null();
-                    }
-                } else {
-                    parent.set_right(left);
+    fn next_back(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+        use super::LinkOps;
+
+        let tail = self.tail?;
+        let link_ops = self.tree.adapter.link_ops_mut();
+        unsafe {
+            // Remove the node from the tree. Since tail is always the
+            // right-most node, we can infer the following:
+            // - tail.right is null.
+            // - tail is a right child of its parent (or the root node).
+            if let Some(parent) = link_ops.parent(tail) {
+                link_ops.set_right(parent, link_ops.left(tail));
+            } else {
+                self.tree.root = link_ops.left(tail);
+                if link_ops.left(tail).is_none() {
+                    self.tail = None;
                 }
-                if left.is_null() {
-                    self.tail = parent;
-                } else {
-                    left.set_parent(parent);
-                    self.tail = left.last_child();
-                }
-                tail.unlink();
-                Some(A::Pointer::from_raw(self.tree.adapter.get_value(tail.0)))
             }
+            if let Some(left) = link_ops.left(tail) {
+                link_ops.set_parent(left, link_ops.parent(tail));
+                self.tail = Some(last_child(link_ops, left));
+            } else {
+                self.tail = link_ops.parent(tail);
+            }
+            link_ops.mark_unlinked(tail);
+            Some(
+                self.tree
+                    .adapter
+                    .pointer_ops()
+                    .from_raw(self.tree.adapter.get_value(tail)),
+            )
         }
     }
 }
@@ -1656,9 +2370,11 @@ impl<A: Adapter<Link = Link>> DoubleEndedIterator for IntoIter<A> {
 #[cfg(test)]
 mod tests {
     use self::rand::{Rng, XorShiftRng};
-    use super::{Entry, Link, RBTree};
+    use super::{
+        Entry, KeyAdapter, Link, PointerOps, RBTree,
+    };
     use crate::Bound::*;
-    use crate::{KeyAdapter, UnsafeRef};
+    use crate::UnsafeRef;
     use rand;
     use std::boxed::Box;
     use std::fmt;
@@ -1677,7 +2393,7 @@ mod tests {
     intrusive_adapter!(ObjAdapter = UnsafeRef<Obj>: Obj { link: Link });
     impl<'a> KeyAdapter<'a> for ObjAdapter {
         type Key = i32;
-        fn get_key(&self, value: &'a Self::Value) -> i32 {
+        fn get_key(&self, value: &'a <Self::PointerOps as PointerOps>::Value) -> i32 {
             value.value
         }
     }
@@ -2412,7 +3128,7 @@ mod tests {
 
             l.front_mut().remove();
             assert!(l.front().clone_pointer().is_none());
-        }
+        };
     }
 
     #[test]
