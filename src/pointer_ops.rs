@@ -171,9 +171,10 @@ where
         fn drop(&mut self) {
             // Prevent shared pointers from being released by converting them
             // back into the raw pointers
+            // SAFETY: `pointer` is never dropped. `ManuallyDrop::take` is not stable until 1.42.0.
             let _ = self
                 .pointer_ops
-                .into_raw(unsafe { ManuallyDrop::take(&mut self.pointer) });
+                .into_raw(unsafe { core::ptr::read(&*self.pointer) });
         }
     }
 
