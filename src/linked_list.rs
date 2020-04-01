@@ -852,8 +852,20 @@ where
     }
 
     /// Creates an empty `LinkedList`.
+    #[cfg(not(feature = "nightly"))]
     #[inline]
     pub fn new(adapter: A) -> LinkedList<A> {
+        LinkedList {
+            head: None,
+            tail: None,
+            adapter,
+        }
+    }
+
+    /// Creates an empty `LinkedList`.
+    #[cfg(feature = "nightly")]
+    #[inline]
+    pub const fn new(adapter: A) -> LinkedList<A> {
         LinkedList {
             head: None,
             tail: None,
