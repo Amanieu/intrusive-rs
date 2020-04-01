@@ -505,22 +505,15 @@ unsafe fn post_insert<T: RBTreeOps>(
     root: &mut Option<T::LinkPtr>,
 ) {
     let mut x = ptr;
-    while let Some(parent) = link_ops.parent(x)
-    {
+    while let Some(parent) = link_ops.parent(x) {
         if link_ops.color(parent) != Color::Red {
             break;
         }
         // SAFETY: The root of the tree must be black, and `parent` cannot be the root if it is red.
         let grandparent = link_ops.parent(parent).unwrap_unchecked();
 
-        if is_left_child(
-            link_ops,
-            parent,
-            grandparent,
-        ) {
-            let y = link_ops.right(
-                grandparent,
-            );
+        if is_left_child(link_ops, parent, grandparent) {
+            let y = link_ops.right(grandparent);
             if let Some(y) = y {
                 if link_ops.color(y) == Color::Red {
                     x = parent;
@@ -547,9 +540,7 @@ unsafe fn post_insert<T: RBTreeOps>(
             rotate_right(link_ops, x, root);
             break;
         } else {
-            let y = link_ops.left(
-                grandparent,
-            );
+            let y = link_ops.left(grandparent);
             if let Some(y) = y {
                 if link_ops.color(y) == Color::Red {
                     x = parent;
@@ -585,7 +576,7 @@ unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Opt
     } else {
         next(link_ops, ptr).unwrap_unchecked()
     };
-    let mut x = if !link_ops.left(y).is_none() {
+    let x = if !link_ops.left(y).is_none() {
         link_ops.left(y)
     } else {
         link_ops.right(y)
@@ -621,8 +612,8 @@ unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Opt
         link_ops.set_left(y, link_ops.left(ptr));
         link_ops.set_parent(link_ops.left(y).unwrap_unchecked(), Some(y));
         link_ops.set_right(y, link_ops.right(ptr));
-        if !link_ops.right(y).is_none() {
-            link_ops.set_parent(link_ops.right(y).unwrap_unchecked(), Some(y));
+        if let Some(y_right) = link_ops.right(y) {
+            link_ops.set_parent(y_right, Some(y));
         }
         link_ops.set_color(y, link_ops.color(ptr));
     }
@@ -630,144 +621,113 @@ unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Opt
         if let Some(x) = x {
             link_ops.set_color(x, Color::Black);
         } else {
+            let mut w = w.unwrap_unchecked();
             loop {
+                let mut w_parent = link_ops.parent(w).unwrap_unchecked();
                 if !is_left_child(
                     link_ops,
-                    w.unwrap_unchecked(),
-                    link_ops.parent(w.unwrap_unchecked()).unwrap_unchecked(),
+                    w,
+                    w_parent,
                 ) {
-                    if link_ops.color(w.unwrap_unchecked()) == Color::Red {
-                        link_ops.set_color(w.unwrap_unchecked(), Color::Black);
-                        link_ops.set_color(
-                            link_ops.parent(w.unwrap_unchecked()).unwrap_unchecked(),
-                            Color::Red,
-                        );
-                        rotate_left(
-                            link_ops,
-                            link_ops.parent(w.unwrap_unchecked()).unwrap_unchecked(),
-                            root,
-                        );
-                        w = link_ops.right(link_ops.left(w.unwrap_unchecked()).unwrap_unchecked());
+                    if link_ops.color(w) == Color::Red {
+                        link_ops.set_color(w, Color::Black);
+                        link_ops
+                            .set_color(w_parent, Color::Red);
+                        rotate_left(link_ops, w_parent, root);
+                        w = link_ops.right(link_ops.left(w).unwrap_unchecked()).unwrap_unchecked();
+                        w_parent = link_ops.parent(w).unwrap_unchecked();
                     }
 
-                    let left_color = link_ops.left(w.unwrap_unchecked()).map(|x| link_ops.color(x));
-                    let right_color = link_ops.right(w.unwrap_unchecked()).map(|x| link_ops.color(x));
-                    if (left_color != Some(Color::Red))
-                        && (right_color != Some(Color::Red))
-                    {
-                        link_ops.set_color(w.unwrap_unchecked(), Color::Red);
-                        x = link_ops.parent(w.unwrap_unchecked());
-                        if link_ops.parent(x.unwrap_unchecked()).is_none()
-                            || link_ops.color(x.unwrap_unchecked()) == Color::Red
+                    let left_color = link_ops.left(w).map(|x| link_ops.color(x));
+                    let right_color = link_ops.right(w).map(|x| link_ops.color(x));
+                    if (left_color != Some(Color::Red)) && (right_color != Some(Color::Red)) {
+                        link_ops.set_color(w, Color::Red);
+                        if link_ops.parent(w_parent).is_none()
+                            || link_ops.color(w_parent) == Color::Red
                         {
-                            link_ops.set_color(x.unwrap_unchecked(), Color::Black);
+                            link_ops.set_color(w_parent, Color::Black);
                             break;
                         }
+                        let w_grandparent = link_ops.parent(w_parent).unwrap_unchecked();
                         w = if is_left_child(
                             link_ops,
-                            x.unwrap_unchecked(),
-                            link_ops.parent(x.unwrap_unchecked()).unwrap_unchecked(),
+                            w_parent,
+                            w_grandparent,
                         ) {
-                            link_ops.right(link_ops.parent(x.unwrap_unchecked()).unwrap_unchecked())
+                            link_ops.right(w_grandparent).unwrap_unchecked()
                         } else {
-                            link_ops.left(link_ops.parent(x.unwrap_unchecked()).unwrap_unchecked())
+                            link_ops.left(w_grandparent).unwrap_unchecked()
                         };
                     } else {
-                        if link_ops.right(w.unwrap_unchecked()).map(|x| link_ops.color(x)) != Some(Color::Red)
-                        {
+                        if link_ops.right(w).map(|x| link_ops.color(x)) != Some(Color::Red) {
                             link_ops.set_color(
-                                link_ops.left(w.unwrap_unchecked()).unwrap_unchecked(),
+                                link_ops.left(w).unwrap_unchecked(),
                                 Color::Black,
                             );
-                            link_ops.set_color(w.unwrap_unchecked(), Color::Red);
-                            rotate_right(link_ops, w.unwrap_unchecked(), root);
-                            w = link_ops.parent(w.unwrap_unchecked());
+                            link_ops.set_color(w, Color::Red);
+                            rotate_right(link_ops, w, root);
+                            w = link_ops.parent(w).unwrap_unchecked();
+                            w_parent = link_ops.parent(w).unwrap_unchecked();
                         }
                         link_ops.set_color(
-                            w.unwrap_unchecked(),
-                            link_ops
-                                .color(link_ops.parent(w.unwrap_unchecked()).unwrap_unchecked()),
+                            w,
+                            link_ops.color(w_parent),
                         );
-                        link_ops.set_color(
-                            link_ops.parent(w.unwrap_unchecked()).unwrap_unchecked(),
-                            Color::Black,
-                        );
-                        link_ops.set_color(
-                            link_ops.right(w.unwrap_unchecked()).unwrap_unchecked(),
-                            Color::Black,
-                        );
-                        rotate_left(
-                            link_ops,
-                            link_ops.parent(w.unwrap_unchecked()).unwrap_unchecked(),
-                            root,
-                        );
+                        link_ops
+                            .set_color(w_parent, Color::Black);
+                        link_ops
+                            .set_color(link_ops.right(w).unwrap_unchecked(), Color::Black);
+                        rotate_left(link_ops, w_parent, root);
                         break;
                     }
                 } else {
-                    if link_ops.color(w.unwrap_unchecked()) == Color::Red {
-                        link_ops.set_color(w.unwrap_unchecked(), Color::Black);
-                        link_ops.set_color(
-                            link_ops.parent(w.unwrap_unchecked()).unwrap_unchecked(),
-                            Color::Red,
-                        );
-                        rotate_right(
-                            link_ops,
-                            link_ops.parent(w.unwrap_unchecked()).unwrap_unchecked(),
-                            root,
-                        );
-                        w = link_ops.left(link_ops.right(w.unwrap_unchecked()).unwrap_unchecked());
+                    if link_ops.color(w) == Color::Red {
+                        link_ops.set_color(w, Color::Black);
+                        link_ops
+                            .set_color(w_parent, Color::Red);
+                        rotate_right(link_ops, w_parent, root);
+                        w = link_ops.left(link_ops.right(w).unwrap_unchecked()).unwrap_unchecked();
+                        w_parent = link_ops.parent(w).unwrap_unchecked();
                     }
-                    let left_color = link_ops.left(w.unwrap_unchecked()).map(|x| link_ops.color(x));
-                    let right_color = link_ops.right(w.unwrap_unchecked()).map(|x| link_ops.color(x));
-                    if (left_color != Some(Color::Red))
-                        && (right_color != Some(Color::Red))
-                    {
-                        link_ops.set_color(w.unwrap_unchecked(), Color::Red);
-                        x = link_ops.parent(w.unwrap_unchecked());
-                        if link_ops.parent(x.unwrap_unchecked()).is_none()
-                            || link_ops.color(x.unwrap_unchecked()) == Color::Red
+                    let left_color = link_ops.left(w).map(|x| link_ops.color(x));
+                    let right_color = link_ops.right(w).map(|x| link_ops.color(x));
+                    if (left_color != Some(Color::Red)) && (right_color != Some(Color::Red)) {
+                        link_ops.set_color(w, Color::Red);
+                        if link_ops.parent(w_parent).is_none()
+                            || link_ops.color(w_parent) == Color::Red
                         {
-                            link_ops.set_color(x.unwrap_unchecked(), Color::Black);
+                            link_ops.set_color(w_parent, Color::Black);
                             break;
                         }
                         w = if is_left_child(
                             link_ops,
-                            x.unwrap_unchecked(),
-                            link_ops.parent(x.unwrap_unchecked()).unwrap_unchecked(),
+                            w_parent,
+                            link_ops.parent(w_parent).unwrap_unchecked(),
                         ) {
-                            link_ops.right(link_ops.parent(x.unwrap_unchecked()).unwrap_unchecked())
+                            link_ops.right(link_ops.parent(w_parent).unwrap_unchecked()).unwrap_unchecked()
                         } else {
-                            link_ops.left(link_ops.parent(x.unwrap_unchecked()).unwrap_unchecked())
+                            link_ops.left(link_ops.parent(w_parent).unwrap_unchecked()).unwrap_unchecked()
                         };
                     } else {
-                        if link_ops.left(w.unwrap_unchecked()).map(|x| link_ops.color(x)) != Some(Color::Red)
-                        {
+                        if link_ops.left(w).map(|x| link_ops.color(x)) != Some(Color::Red) {
                             link_ops.set_color(
-                                link_ops.right(w.unwrap_unchecked()).unwrap_unchecked(),
+                                link_ops.right(w).unwrap_unchecked(),
                                 Color::Black,
                             );
-                            link_ops.set_color(w.unwrap_unchecked(), Color::Red);
-                            rotate_left(link_ops, w.unwrap_unchecked(), root);
-                            w = link_ops.parent(w.unwrap_unchecked());
+                            link_ops.set_color(w, Color::Red);
+                            rotate_left(link_ops, w, root);
+                            w = link_ops.parent(w).unwrap_unchecked();
+                            w_parent = link_ops.parent(w).unwrap_unchecked();
                         }
                         link_ops.set_color(
-                            w.unwrap_unchecked(),
-                            link_ops
-                                .color(link_ops.parent(w.unwrap_unchecked()).unwrap_unchecked()),
+                            w,
+                            link_ops.color(w_parent),
                         );
-                        link_ops.set_color(
-                            link_ops.parent(w.unwrap_unchecked()).unwrap_unchecked(),
-                            Color::Black,
-                        );
-                        link_ops.set_color(
-                            link_ops.left(w.unwrap_unchecked()).unwrap_unchecked(),
-                            Color::Black,
-                        );
-                        rotate_right(
-                            link_ops,
-                            link_ops.parent(w.unwrap_unchecked()).unwrap_unchecked(),
-                            root,
-                        );
+                        link_ops
+                            .set_color(w_parent, Color::Black);
+                        link_ops
+                            .set_color(link_ops.left(w).unwrap_unchecked(), Color::Black);
+                        rotate_right(link_ops, w_parent, root);
                         break;
                     }
                 }
@@ -1132,6 +1092,7 @@ where
         unsafe {
             let new = self.tree.node_from_value(val);
             let link_ops = self.tree.adapter.link_ops_mut();
+            
             if let Some(root) = self.tree.root {
                 if let Some(current) = self.current {
                     if link_ops.left(current).is_some() {
