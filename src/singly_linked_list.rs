@@ -656,8 +656,19 @@ where
     }
 
     /// Creates an empty `SinglyLinkedList`.
+    #[cfg(not(feature = "nightly"))]
     #[inline]
     pub fn new(adapter: A) -> SinglyLinkedList<A> {
+        SinglyLinkedList {
+            head: None,
+            adapter,
+        }
+    }
+
+    /// Creates an empty `SinglyLinkedList`.
+    #[cfg(feature = "nightly")]
+    #[inline]
+    pub const fn new(adapter: A) -> SinglyLinkedList<A> {
         SinglyLinkedList {
             head: None,
             adapter,
