@@ -5,6 +5,11 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+//! Intrusive xor doubly-linked list which uses less memory than a regular doubly linked list.
+//!
+//! In exchange for less memory use, it is impossible to create a cursor from a pointer to
+//! an element.
+
 use core::cell::Cell;
 use core::fmt;
 use core::hint;
@@ -21,12 +26,25 @@ use super::Adapter;
 
 /// Link operations for `XorLinkedList`.
 pub unsafe trait XorLinkedListOps: super::LinkOps {
+    /// Returns the "next" link pointer of `ptr`.
+    /// 
+    /// # Safety
+    /// `prev` must be have been previously passed to the [`set`] method.
+    /// 
+    /// [`set`]: #tymethod.set
     unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>)
         -> Option<Self::LinkPtr>;
 
+    /// Returns the "prev" link pointer of `ptr`.
+    /// 
+    /// # Safety
+    /// `next` must be have been previously passed to the [`set`] method.
+    /// 
+    /// [`set`]: #tymethod.set
     unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>)
         -> Option<Self::LinkPtr>;
 
+    /// Assigns the "prev" and "next" link pointers of `ptr`.
     unsafe fn set(
         &mut self,
         ptr: Self::LinkPtr,
@@ -34,6 +52,13 @@ pub unsafe trait XorLinkedListOps: super::LinkOps {
         next: Option<Self::LinkPtr>,
     );
 
+    /// Replaces the "next" or "prev" link pointer of `ptr`.
+    /// 
+    /// # Safety
+    /// `old` must be equal to either the `next` or `prev` argument previously passed to the [`set`] method, or
+    /// `old` must be equal to `new` argument previously passed to `replace_next_or_prev`.
+    /// 
+    /// [`set`]: #tymethod.set
     unsafe fn replace_next_or_prev(
         &mut self,
         ptr: Self::LinkPtr,
@@ -686,10 +711,10 @@ where
             unsafe {
                 let head = list
                     .head
-                    .unwrap_or_else(|| core::hint::unreachable_unchecked());
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
                 let tail = list
                     .tail
-                    .unwrap_or_else(|| core::hint::unreachable_unchecked());
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
@@ -728,10 +753,10 @@ where
             unsafe {
                 let head = list
                     .head
-                    .unwrap_or_else(|| core::hint::unreachable_unchecked());
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
                 let tail = list
                     .tail
-                    .unwrap_or_else(|| core::hint::unreachable_unchecked());
+                    .unwrap_or_else(|| hint::unreachable_unchecked());
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
@@ -996,7 +1021,7 @@ where
     /// # Safety
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
-    /// `prev` must be a pointer to an object that is the next object in this list (null for the head)
+    /// `next` must be a pointer to an object that is the next object in this list (null for the head)
     pub unsafe fn cursor_from_ptr_and_next(
         &self,
         ptr: *const <A::PointerOps as PointerOps>::Value,
@@ -1023,7 +1048,7 @@ where
     /// # Safety
     ///
     /// `ptr` must be a pointer to an object that is part of this list.
-    /// `prev` must be a pointer to an object that is the next object in this list (null for the head)
+    /// `next` must be a pointer to an object that is the next object in this list (null for the head)
     pub unsafe fn cursor_mut_from_ptr_and_next(
         &mut self,
         ptr: *const <A::PointerOps as PointerOps>::Value,

@@ -5,6 +5,8 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+//! Intrusive doubly-linked list.
+
 use core::cell::Cell;
 use core::fmt;
 use core::ptr::NonNull;
@@ -12,6 +14,7 @@ use core::ptr::NonNull;
 use super::link_ops::{self, DefaultLinkOps};
 use super::pointer_ops::PointerOps;
 use super::singly_linked_list::SinglyLinkedListOps;
+use super::xor_linked_list::XorLinkedListOps;
 use super::Adapter;
 
 // =============================================================================
@@ -20,12 +23,16 @@ use super::Adapter;
 
 /// Link operations for `LinkedList`.
 pub unsafe trait LinkedListOps: super::LinkOps {
+    /// Returns the "next" link pointer of `ptr`.
     fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
+    /// Returns the "prev" link pointer of `ptr`.
     fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
+    /// Sets the "next" link pointer of `ptr`.
     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>);
 
+    /// Sets the "prev" link pointer of `ptr`.
     unsafe fn set_prev(&mut self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>);
 }
 
@@ -166,6 +173,74 @@ unsafe impl SinglyLinkedListOps for LinkOps {
     #[inline]
     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
         ptr.as_ref().next.set(next);
+    }
+}
+
+unsafe impl XorLinkedListOps for LinkOps {
+    #[inline]
+    unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>
+    {
+        let packed = ptr.as_ref().next.get().map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        if raw > 0 {
+            Some(NonNull::new_unchecked(raw as *mut _))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>
+    {
+        let packed = ptr.as_ref().next.get().map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        if raw > 0 {
+            Some(NonNull::new_unchecked(raw as *mut _))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    unsafe fn set(
+        &mut self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+        next: Option<Self::LinkPtr>,
+    )
+    {
+        let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        
+        let new_next = if new_packed > 0 {
+            Some(NonNull::new_unchecked(new_packed as *mut _))
+        } else {
+            None
+        };
+        ptr.as_ref().next.set(new_next);
+    }
+
+    #[inline]
+    unsafe fn replace_next_or_prev(
+        &mut self,
+        ptr: Self::LinkPtr,
+        old: Option<Self::LinkPtr>,
+        new: Option<Self::LinkPtr>,
+    )
+    {
+        let packed = ptr.as_ref().next.get().map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let new_packed = packed
+            ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
+
+        let new_next = if new_packed > 0 {
+            Some(NonNull::new_unchecked(new_packed as *mut _))
+        } else {
+            None
+        };
+        ptr.as_ref().next.set(new_next);
     }
 }
 

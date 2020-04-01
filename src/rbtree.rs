@@ -1467,7 +1467,7 @@ impl<'a, A: Adapter<Link = Link> + 'a> InsertCursor<'a, A> {
 /// An entry in a `RBTree`.
 ///
 /// See the documentation for `RBTree::entry`.
-pub enum Entry<'a, A: Adapter<Link = Link> + 'a> {
+pub enum Entry<'a, A: Adapter<Link = Link>> {
     /// An occupied entry.
     Occupied(CursorMut<'a, A>),
 

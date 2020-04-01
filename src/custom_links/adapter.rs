@@ -9,21 +9,18 @@ use super::link_ops::LinkOps;
 use super::pointer_ops::PointerOps;
 
 /// Trait for a adapter which allows a type to be inserted into an intrusive
-/// collection. The `Link` type contains the collection-specific metadata which
+/// collection.
+/// 
+/// `LinkOps` implements the collection-specific operations which
 /// allows an object to be inserted into an intrusive collection. This type
-/// needs to match the collection type (eg. `LinkedListLink` for inserting
-/// in a `LinkedList`).
+/// needs to implement the appropriate trait for the collection type
+/// (eg. `LinkedListOps` for inserting into a `LinkedList`).
+/// `LinkOps` type may be stateful, allowing custom link types.
 ///
-/// `Value` is the actual object type managed by the collection. This type will
-/// typically have an instance of `Link` as a struct field.
-///
-/// `Pointer` is a pointer type which "owns" an object of type `Value`.
-/// Operations which insert an element into an intrusive collection will accept
-/// such a pointer and operations which remove an element will return this type.
-///
-/// `NodeRef` is a value type which represents the "address" of an object within
-/// an intrusive collection.
-///
+/// `PointerOps` implements the collection-specific pointer conversions which
+/// allow an object to be inserted into an intrusive collection.
+/// `PointerOps` type may be stateful, allowing custom pointer types.
+/// 
 /// A single object type may have multiple adapters, which allows it to be part
 /// of multiple intrusive collections simultaneously.
 ///
@@ -32,8 +29,8 @@ use super::pointer_ops::PointerOps;
 /// given type and its link field. However it is possible to implement it
 /// manually if the intrusive link is not a direct field of the object type.
 ///
-/// It is also possible to create stateful adapters. This allows links and
-/// containers to be separated and avoids the need for objects to be modified to
+/// It is also possible to create stateful adapters.
+/// This allows links and containers to be separated and avoids the need for objects to be modified to
 /// contain a link.
 ///
 /// # Safety
@@ -41,7 +38,8 @@ use super::pointer_ops::PointerOps;
 /// It must be possible to get back a reference to the container by passing a
 /// pointer returned by `get_link` to `get_container`.
 pub unsafe trait Adapter {
-    /// Link type which allows an object to be inserted into an intrusive collection.
+    /// Collection-specific link operations which allow an object to be inserted in
+    /// an intrusive collection.
     type LinkOps: LinkOps;
 
     /// Collection-specific pointer conversions which allow an object to
@@ -60,9 +58,12 @@ pub unsafe trait Adapter {
         value: *const <Self::PointerOps as PointerOps>::Value,
     ) -> <Self::LinkOps as LinkOps>::LinkPtr;
 
+    /// Returns a reference to the link operations.
     fn link_ops(&self) -> &Self::LinkOps;
 
+    /// Returns a reference to the mutable link operations.
     fn link_ops_mut(&mut self) -> &mut Self::LinkOps;
 
+    /// Returns a reference to the pointer converter.
     fn pointer_ops(&self) -> &Self::PointerOps;
 }

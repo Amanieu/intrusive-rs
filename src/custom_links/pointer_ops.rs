@@ -14,8 +14,18 @@ use crate::alloc::sync::Arc;
 use crate::UnsafeRef;
 use core::marker::PhantomData;
 
+/// Base trait for pointer conversion operations.
+/// 
+/// `Value` is the actual object type managed by the collection. This type will
+/// typically have a link as a struct field.
+///
+/// `Pointer` is a pointer type which "owns" an object of type `Value`.
+/// Operations which insert an element into an intrusive collection will accept
+/// such a pointer and operations which remove an element will return this type.
 pub unsafe trait PointerOps {
+    /// Object type which is inserted into an intrusive collection.
     type Value: ?Sized;
+    /// Pointer type which owns an instance of a value.
     type Pointer;
 
     /// Constructs an owned pointer from a raw pointer.
@@ -33,6 +43,7 @@ pub unsafe trait PointerOps {
 pub struct DefaultPointerOps<Pointer>(PhantomData<Pointer>);
 
 impl<Pointer> DefaultPointerOps<Pointer> {
+    /// Constructs an instance of `DefaultPointerOps`.
     #[inline]
     pub const fn new() -> DefaultPointerOps<Pointer> {
         DefaultPointerOps(PhantomData)
@@ -133,6 +144,10 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Arc<T>> {
     }
 }
 
+/// Creates an `IntrusivePointer` from a raw pointer
+///
+/// This method is only safe to call if the raw pointer is known to be
+/// managed by the provided `PointerOps` type.
 #[inline]
 pub(crate) unsafe fn clone_pointer_from_raw<T: PointerOps>(
     pointer_ops: &T,
@@ -169,3 +184,131 @@ where
     };
     holder.pointer.deref().clone()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{PointerOps, DefaultPointerOps};
+    use std::boxed::Box;
+    use std::fmt::Debug;
+    use std::mem;
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_box() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Box<_>>::new();
+            let p = Box::new(1);
+            let a: *const i32 = &*p;
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            let p2: Box<i32> = pointer_ops.from_raw(r);
+            let a2: *const i32 = &*p2;
+            assert_eq!(a, a2);
+        }
+    }
+
+    #[test]
+    fn test_rc() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Rc<_>>::new();
+            let p = Rc::new(1);
+            let a: *const i32 = &*p;
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            let p2: Rc<i32> = pointer_ops.from_raw(r);
+            let a2: *const i32 = &*p2;
+            assert_eq!(a, a2);
+        }
+    }
+
+    #[test]
+    fn test_arc() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Arc<_>>::new();
+            let p = Arc::new(1);
+            let a: *const i32 = &*p;
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            let p2: Arc<i32> = pointer_ops.from_raw(r);
+            let a2: *const i32 = &*p2;
+            assert_eq!(a, a2);
+        }
+    }
+
+    #[test]
+    fn test_box_unsized() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Box<_>>::new();
+            let p = Box::new(1) as Box<dyn Debug>;
+            let a: *const dyn Debug = &*p;
+            let b: (usize, usize) = mem::transmute(a);
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            assert_eq!(b, mem::transmute(r));
+            let p2: Box<dyn Debug> = pointer_ops.from_raw(r);
+            let a2: *const dyn Debug = &*p2;
+            assert_eq!(a, a2);
+            assert_eq!(b, mem::transmute(a2));
+        }
+    }
+
+    #[test]
+    fn test_rc_unsized() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Rc<_>>::new();
+            let p = Rc::new(1) as Rc<dyn Debug>;
+            let a: *const dyn Debug = &*p;
+            let b: (usize, usize) = mem::transmute(a);
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            assert_eq!(b, mem::transmute(r));
+            let p2: Rc<dyn Debug> = pointer_ops.from_raw(r);
+            let a2: *const dyn Debug = &*p2;
+            assert_eq!(a, a2);
+            assert_eq!(b, mem::transmute(a2));
+        }
+    }
+
+    #[test]
+    fn test_arc_unsized() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Arc<_>>::new();
+            let p = Arc::new(1) as Arc<dyn Debug>;
+            let a: *const dyn Debug = &*p;
+            let b: (usize, usize) = mem::transmute(a);
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            assert_eq!(b, mem::transmute(r));
+            let p2: Arc<dyn Debug> = pointer_ops.from_raw(r);
+            let a2: *const dyn Debug = &*p2;
+            assert_eq!(a, a2);
+            assert_eq!(b, mem::transmute(a2));
+        }
+    }
+
+    #[test]
+    fn clone_arc_from_raw() {
+        use super::clone_pointer_from_raw;
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Arc<_>>::new();
+            let p = Arc::new(1);
+            let raw = &*p as *const i32;
+            let p2: Arc<i32> = clone_pointer_from_raw(&pointer_ops, raw);
+            assert_eq!(2, Arc::strong_count(&p2));
+        }
+    }
+
+    #[test]
+    fn clone_rc_from_raw() {
+        use super::clone_pointer_from_raw;
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Rc<_>>::new();
+            let p = Rc::new(1);
+            let raw = &*p as *const i32;
+            let p2: Rc<i32> = clone_pointer_from_raw(&pointer_ops, raw);
+            assert_eq!(2, Rc::strong_count(&p2));
+        }
+    }
+}
+

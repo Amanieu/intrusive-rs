@@ -5,6 +5,8 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
+//! Intrusive red-black tree.
+
 use core::borrow::Borrow;
 use core::cell::Cell;
 use core::cmp::Ordering;
@@ -19,6 +21,7 @@ use super::link_ops::{self, DefaultLinkOps};
 use super::linked_list::LinkedListOps;
 use super::pointer_ops::PointerOps;
 use super::singly_linked_list::SinglyLinkedListOps;
+use super::xor_linked_list::XorLinkedListOps;
 use super::Adapter;
 use super::KeyAdapter;
 
@@ -26,7 +29,9 @@ use super::KeyAdapter;
 // RBTreeOps
 // =============================================================================
 
+/// The color of a red-black tree node.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[allow(missing_docs)]
 pub enum Color {
     Red,
     Black,
@@ -34,20 +39,28 @@ pub enum Color {
 
 /// Link operations for `RBTree`.
 pub unsafe trait RBTreeOps: super::LinkOps {
+    /// Returns the left child of `ptr`.
     fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
+    /// Returns the right child of `ptr`.
     fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
+    /// Returns the parent of `ptr`.
     fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
+    /// Returns the color of `ptr`.
     fn color(&self, ptr: Self::LinkPtr) -> Color;
 
+    /// Sets the left child of `ptr`.
     unsafe fn set_left(&mut self, ptr: Self::LinkPtr, left: Option<Self::LinkPtr>);
 
+    /// Sets the right child of `ptr`.
     unsafe fn set_right(&mut self, ptr: Self::LinkPtr, right: Option<Self::LinkPtr>);
 
+    /// Sets the parent of `ptr`.
     unsafe fn set_parent(&self, ptr: Self::LinkPtr, parent: Option<Self::LinkPtr>);
 
+    /// Sets the color of `ptr`.
     unsafe fn set_color(&self, ptr: Self::LinkPtr, color: Color);
 }
 
@@ -263,6 +276,74 @@ unsafe impl LinkedListOps for LinkOps {
     #[inline]
     unsafe fn set_prev(&mut self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>) {
         self.set_left(ptr, prev);
+    }
+}
+
+unsafe impl XorLinkedListOps for LinkOps {
+    #[inline]
+    unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>
+    {
+        let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        if raw > 0 {
+            Some(NonNull::new_unchecked(raw as *mut _))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>
+    {
+        let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        if raw > 0 {
+            Some(NonNull::new_unchecked(raw as *mut _))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    unsafe fn set(
+        &mut self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+        next: Option<Self::LinkPtr>,
+    )
+    {
+        let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        
+        let new_next = if new_packed > 0 {
+            Some(NonNull::new_unchecked(new_packed as *mut _))
+        } else {
+            None
+        };
+        self.set_right(ptr, new_next);
+    }
+
+    #[inline]
+    unsafe fn replace_next_or_prev(
+        &mut self,
+        ptr: Self::LinkPtr,
+        old: Option<Self::LinkPtr>,
+        new: Option<Self::LinkPtr>,
+    )
+    {
+        let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let new_packed = packed
+            ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
+
+        let new_next = if new_packed > 0 {
+            Some(NonNull::new_unchecked(new_packed as *mut _))
+        } else {
+            None
+        };
+        self.set_right(ptr, new_next);
     }
 }
 
@@ -1290,7 +1371,7 @@ where
 
             if let Some(root) = self.tree.root {
                 if let Some(current) = self.current {
-                    if let Some(right) = link_ops.right(current) {
+                    if let Some(_) = link_ops.right(current) {
                         let next = next(link_ops, current).unwrap();
                         insert_left(link_ops, next, new, &mut self.tree.root);
                     } else {
