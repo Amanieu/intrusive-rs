@@ -1,44 +1,112 @@
 // Copyright 2016 Amanieu d'Antras
+// Copyright 2020 Amari Robinson
 //
 // Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-//! Intrusive xor doubly-linked list which uses less memory than a regular doubly linked list
+//! Intrusive xor doubly-linked list which uses less memory than a regular doubly linked list.
 //!
 //! In exchange for less memory use, it is impossible to create a cursor from a pointer to
 //! an element.
 
-use crate::Adapter;
-use crate::IntrusivePointer;
 use core::cell::Cell;
 use core::fmt;
-use core::mem;
-use core::ptr;
+use core::ptr::NonNull;
+
+use crate::link_ops::{self, DefaultLinkOps};
+use crate::pointer_ops::PointerOps;
+use crate::singly_linked_list::SinglyLinkedListOps;
+use crate::unchecked_option::UncheckedOptionExt;
+use crate::Adapter;
+
+// =============================================================================
+// XorLinkedListOps
+// =============================================================================
+
+/// Link operations for `XorLinkedList`.
+pub unsafe trait XorLinkedListOps: link_ops::LinkOps {
+    /// Returns the "next" link pointer of `ptr`.
+    ///
+    /// # Safety
+    /// `prev` must have been previously passed to the [`set`] method, or
+    /// `prev` must be equal to the `new` argument previously passed to [`replace_next_or_prev`].
+    ///
+    /// An implementation of `next` must not panic.
+    ///
+    /// [`replace_next_or_prev`]: #tymethod.replace_next_or_prev
+    /// [`set`]: #tymethod.set
+    unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>;
+
+    /// Returns the "prev" link pointer of `ptr`.
+    ///
+    /// # Safety
+    /// `next` must have been previously passed to the [`set`] method, or
+    /// `next` must be equal to the `new` argument previously passed to [`replace_next_or_prev`].
+    ///
+    /// An implementation of `prev` must not panic.
+    ///
+    /// [`replace_next_or_prev`]: #tymethod.replace_next_or_prev
+    /// [`set`]: #tymethod.set
+    unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>)
+        -> Option<Self::LinkPtr>;
+
+    /// Assigns the "prev" and "next" link pointers of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `set` must not panic.
+    unsafe fn set(
+        &mut self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+        next: Option<Self::LinkPtr>,
+    );
+
+    /// Replaces the "next" or "prev" link pointer of `ptr`.
+    ///
+    /// # Safety
+    /// `old` must be equal to either the `next` or `prev` argument previously passed to the [`set`] method, or
+    /// `old` must be equal to the `new` argument previously passed to `replace_next_or_prev`.
+    ///
+    /// An implementation of `replace_next_or_prev` must not panic.
+    ///
+    /// [`set`]: #tymethod.set
+    unsafe fn replace_next_or_prev(
+        &mut self,
+        ptr: Self::LinkPtr,
+        old: Option<Self::LinkPtr>,
+        new: Option<Self::LinkPtr>,
+    );
+}
 
 // =============================================================================
 // Link
 // =============================================================================
 
-/// Intrusive link that allows an object to be inserted into a `XorLinkedList`.
+/// Intrusive link that allows an object to be inserted into a
+/// `XorLinkedList`.
 pub struct Link {
-    inner: Cell<XorPtr>,
+    packed: Cell<usize>,
 }
+
+// Use a special value to indicate an unlinked node
+const UNLINKED_MARKER: usize = 1_usize;
 
 impl Link {
     /// Creates a new `Link`.
     #[inline]
-    pub fn new() -> Self {
-        Self {
-            inner: Cell::new(XorPtr::unlinked()),
+    pub const fn new() -> Link {
+        Link {
+            packed: Cell::new(UNLINKED_MARKER),
         }
     }
 
     /// Checks whether the `Link` is linked into a `XorLinkedList`.
     #[inline]
     pub fn is_linked(&self) -> bool {
-        self.inner.get().is_linked()
+        self.packed.get() != UNLINKED_MARKER
     }
 
     /// Forcibly unlinks an object from a `XorLinkedList`.
@@ -51,50 +119,14 @@ impl Link {
     /// the collection without marking the nodes as unlinked.
     #[inline]
     pub unsafe fn force_unlink(&self) {
-        self.inner.set(XorPtr::unlinked());
+        self.packed.set(UNLINKED_MARKER);
     }
+}
 
-    fn with_prev(&self, prev: *const Link) -> BidirPtr {
-        self.inner.get().with_prev(prev)
-    }
+impl DefaultLinkOps for Link {
+    type Ops = LinkOps;
 
-    fn with_next(&self, next: *const Link) -> BidirPtr {
-        self.inner.get().with_next(next)
-    }
-
-    fn replace_ptr(&self, old: *const Link, new: *const Link) {
-        let mut ptrs = self.with_prev(old);
-        ptrs.prev = new;
-        self.inner.set(ptrs.to_xor())
-    }
-
-    #[inline]
-    unsafe fn link_between(&self, prev: *const Link, next: *const Link) {
-        if let Some(prev) = prev.as_ref() {
-            let mut prev_ptrs = prev.with_next(next);
-            prev_ptrs.next = self;
-            prev.inner.set(prev_ptrs.to_xor());
-        }
-        if let Some(next) = next.as_ref() {
-            let mut next_ptrs = next.with_prev(prev);
-            next_ptrs.prev = self;
-            next.inner.set(next_ptrs.to_xor());
-        }
-
-        self.inner.set(XorPtr::new(prev, next));
-    }
-
-    fn set(&self, bidir: BidirPtr) {
-        self.inner.set(bidir.to_xor())
-    }
-
-    fn next(&self, prev: *const Link) -> *const Link {
-        self.with_prev(prev).next
-    }
-
-    fn prev(&self, next: *const Link) -> *const Link {
-        self.with_next(next).prev
-    }
+    const NEW: Self::Ops = LinkOps;
 }
 
 // An object containing a link can be sent to another thread if it is unlinked.
@@ -120,66 +152,119 @@ impl Default for Link {
 // Provide an implementation of Debug so that structs containing a link can
 // still derive Debug.
 impl fmt::Debug for Link {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(if self.is_linked() {
-            "linked"
+        // There isn't anything sensible to print here except whether the link
+        // is currently in a list.
+        if self.is_linked() {
+            write!(f, "linked")
         } else {
-            "unlinked"
-        })
-    }
-}
-
-// =============================================================================
-// XorPtr
-// =============================================================================
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-struct XorPtr(usize);
-
-impl XorPtr {
-    #[inline]
-    fn unlinked() -> XorPtr {
-        XorPtr(1)
-    }
-
-    #[inline]
-    fn is_linked(self) -> bool {
-        self.0 != 1
-    }
-
-    #[inline]
-    fn new(prev: *const Link, next: *const Link) -> XorPtr {
-        XorPtr(prev as usize ^ next as usize)
-    }
-
-    #[inline]
-    fn with_prev(self, prev: *const Link) -> BidirPtr {
-        BidirPtr {
-            prev,
-            next: (self.0 ^ prev as usize) as *const Link,
-        }
-    }
-
-    #[inline]
-    fn with_next(self, next: *const Link) -> BidirPtr {
-        BidirPtr {
-            prev: (self.0 ^ next as usize) as *const Link,
-            next,
+            write!(f, "unlinked")
         }
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-struct BidirPtr {
-    prev: *const Link,
-    next: *const Link,
+// =============================================================================
+// LinkOps
+// =============================================================================
+
+/// Default `LinkOps` implementation for `XorLinkedList`.
+#[derive(Clone, Copy, Default)]
+pub struct LinkOps;
+
+unsafe impl link_ops::LinkOps for LinkOps {
+    type LinkPtr = NonNull<Link>;
+
+    #[inline]
+    unsafe fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
+        ptr.as_ref().is_linked()
+    }
+
+    #[inline]
+    unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr) {
+        ptr.as_ref().packed.set(UNLINKED_MARKER);
+    }
 }
 
-impl BidirPtr {
+unsafe impl XorLinkedListOps for LinkOps {
     #[inline]
-    fn to_xor(self) -> XorPtr {
-        XorPtr::new(self.prev, self.next)
+    unsafe fn next(
+        &self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
+        let raw = ptr.as_ref().packed.get() ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        NonNull::new(raw as *mut _)
     }
+
+    #[inline]
+    unsafe fn prev(
+        &self,
+        ptr: Self::LinkPtr,
+        next: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
+        let raw = ptr.as_ref().packed.get() ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        NonNull::new(raw as *mut _)
+    }
+
+    #[inline]
+    unsafe fn set(
+        &mut self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+        next: Option<Self::LinkPtr>,
+    ) {
+        let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        ptr.as_ref().packed.set(new_packed);
+    }
+
+    #[inline]
+    unsafe fn replace_next_or_prev(
+        &mut self,
+        ptr: Self::LinkPtr,
+        old: Option<Self::LinkPtr>,
+        new: Option<Self::LinkPtr>,
+    ) {
+        let new_packed = ptr.as_ref().packed.get()
+            ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
+
+        ptr.as_ref().packed.set(new_packed);
+    }
+}
+
+unsafe impl SinglyLinkedListOps for LinkOps {
+    #[inline]
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        let raw = ptr.as_ref().packed.get();
+        NonNull::new(raw as *mut _)
+    }
+
+    #[inline]
+    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
+        ptr.as_ref()
+            .packed
+            .set(next.map(|x| x.as_ptr() as usize).unwrap_or(0));
+    }
+}
+
+#[inline]
+unsafe fn link_between<T: XorLinkedListOps>(
+    link_ops: &mut T,
+    ptr: T::LinkPtr,
+    prev: Option<T::LinkPtr>,
+    next: Option<T::LinkPtr>,
+) {
+    if let Some(prev) = prev {
+        let prev_of_prev = link_ops.prev(prev, next);
+        link_ops.set(prev, prev_of_prev, Some(ptr));
+    }
+    if let Some(next) = next {
+        let next_of_next = link_ops.next(next, prev);
+        link_ops.set(next, Some(ptr), next_of_next);
+    }
+    link_ops.set(ptr, prev, next);
 }
 
 // =============================================================================
@@ -187,63 +272,86 @@ impl BidirPtr {
 // =============================================================================
 
 /// A cursor which provides read-only access to a `XorLinkedList`.
-pub struct Cursor<'a, A: Adapter<Link = Link>> {
-    current: *const Link,
-    link: BidirPtr,
+pub struct Cursor<'a, A: Adapter>
+where
+    A::LinkOps: XorLinkedListOps,
+{
+    current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    prev: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    next: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     list: &'a XorLinkedList<A>,
 }
 
-impl<'a, A: Adapter<Link = Link> + 'a> Clone for Cursor<'a, A> {
+impl<'a, A: Adapter> Clone for Cursor<'a, A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
     #[inline]
     fn clone(&self) -> Cursor<'a, A> {
         Cursor {
             current: self.current,
-            link: self.link,
+            prev: self.prev,
+            next: self.next,
             list: self.list,
         }
     }
 }
 
-impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
+impl<'a, A: Adapter> Cursor<'a, A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
-        self.current.is_null()
+        self.current.is_none()
     }
 
     /// Returns a reference to the object that the cursor is currently
     /// pointing to.
     ///
-    /// This returns None if the cursor is currently pointing to the null
+    /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a A::Value> {
-        if self.is_null() {
-            None
-        } else {
-            Some(unsafe { &*self.list.adapter.get_value(self.current) })
-        }
+    pub fn get(&self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { &*self.list.adapter.get_value(self.current?) })
+    }
+
+    /// Clones and returns the pointer that points to the element that the
+    /// cursor is referencing.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null
+    /// object.
+    #[inline]
+    pub fn clone_pointer(&self) -> Option<<A::PointerOps as PointerOps>::Pointer>
+    where
+        <A::PointerOps as PointerOps>::Pointer: Clone,
+    {
+        let raw_pointer = self.get()? as *const <A::PointerOps as PointerOps>::Value;
+        Some(unsafe {
+            crate::pointer_ops::clone_pointer_from_raw(self.list.adapter.pointer_ops(), raw_pointer)
+        })
     }
 
     /// Moves the cursor to the next element of the `XorLinkedList`.
     ///
     /// If the cursor is pointer to the null object then this will move it to
-    /// the first element of the `XorLinkedList`. If it is pointing to the last
-    /// element of the `XorLinkedList` then this will move it to the null object.
+    /// the first element of the `XorLinkedList`. If it is pointing to the
+    /// last element of the `XorLinkedList` then this will move it to the
+    /// null object.
     #[inline]
     pub fn move_next(&mut self) {
         let prev = self.current;
-        self.current = self.link.next;
-        self.link = unsafe {
-            if let Some(current) = self.current.as_ref() {
-                current.with_prev(prev)
+        self.current = self.next;
+        unsafe {
+            if let Some(current) = self.current {
+                self.prev = prev;
+                self.next = self.list.adapter.link_ops().next(current, prev);
             } else {
-                BidirPtr {
-                    prev: self.list.tail,
-                    next: self.list.head,
-                }
+                self.prev = self.list.tail;
+                self.next = self.list.head;
             }
-        };
+        }
     }
 
     /// Moves the cursor to the previous element of the `XorLinkedList`.
@@ -254,17 +362,16 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
     #[inline]
     pub fn move_prev(&mut self) {
         let next = self.current;
-        self.current = self.link.prev;
-        self.link = unsafe {
-            if let Some(current) = self.current.as_ref() {
-                current.with_next(next)
+        self.current = self.prev;
+        unsafe {
+            if let Some(current) = self.current {
+                self.prev = self.list.adapter.link_ops().prev(current, next);
+                self.next = next;
             } else {
-                BidirPtr {
-                    prev: self.list.tail,
-                    next: self.list.head,
-                }
+                self.prev = self.list.tail;
+                self.next = self.list.head;
             }
-        };
+        }
     }
 
     /// Returns a cursor pointing to the next element of the `XorLinkedList`.
@@ -293,17 +400,24 @@ impl<'a, A: Adapter<Link = Link>> Cursor<'a, A> {
 }
 
 /// A cursor which provides mutable access to a `XorLinkedList`.
-pub struct CursorMut<'a, A: Adapter<Link = Link>> {
-    current: *const Link,
-    link: BidirPtr,
+pub struct CursorMut<'a, A: Adapter>
+where
+    A::LinkOps: XorLinkedListOps,
+{
+    current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    prev: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    next: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     list: &'a mut XorLinkedList<A>,
 }
 
-impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
+impl<'a, A: Adapter> CursorMut<'a, A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
     /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
-        self.current.is_null()
+        self.current.is_none()
     }
 
     /// Returns a reference to the object that the cursor is currently
@@ -312,12 +426,8 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&A::Value> {
-        if self.is_null() {
-            None
-        } else {
-            Some(unsafe { &*self.list.adapter.get_value(self.current) })
-        }
+    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { &*self.list.adapter.get_value(self.current?) })
     }
 
     /// Returns a read-only cursor pointing to the current element.
@@ -329,7 +439,8 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     pub fn as_cursor(&self) -> Cursor<'_, A> {
         Cursor {
             current: self.current,
-            link: self.link,
+            prev: self.prev,
+            next: self.next,
             list: self.list,
         }
     }
@@ -337,22 +448,22 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// Moves the cursor to the next element of the `XorLinkedList`.
     ///
     /// If the cursor is pointer to the null object then this will move it to
-    /// the first element of the `XorLinkedList`. If it is pointing to the last
-    /// element of the `XorLinkedList` then this will move it to the null object.
+    /// the first element of the `XorLinkedList`. If it is pointing to the
+    /// last element of the `XorLinkedList` then this will move it to the
+    /// null object.
     #[inline]
     pub fn move_next(&mut self) {
         let prev = self.current;
-        self.current = self.link.next;
-        self.link = unsafe {
-            if let Some(current) = self.current.as_ref() {
-                current.with_prev(prev)
+        self.current = self.next;
+        unsafe {
+            if let Some(current) = self.current {
+                self.prev = prev;
+                self.next = self.list.adapter.link_ops().next(current, prev);
             } else {
-                BidirPtr {
-                    prev: self.list.tail,
-                    next: self.list.head,
-                }
+                self.prev = self.list.tail;
+                self.next = self.list.head;
             }
-        };
+        }
     }
 
     /// Moves the cursor to the previous element of the `XorLinkedList`.
@@ -363,17 +474,16 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     #[inline]
     pub fn move_prev(&mut self) {
         let next = self.current;
-        self.current = self.link.prev;
-        self.link = unsafe {
-            if let Some(current) = self.current.as_ref() {
-                current.with_next(next)
+        self.current = self.prev;
+        unsafe {
+            if let Some(current) = self.current {
+                self.prev = self.list.adapter.link_ops().prev(current, next);
+                self.next = next;
             } else {
-                BidirPtr {
-                    prev: self.list.tail,
-                    next: self.list.head,
-                }
+                self.prev = self.list.tail;
+                self.next = self.list.head;
             }
-        };
+        }
     }
 
     /// Returns a cursor pointing to the next element of the `XorLinkedList`.
@@ -400,74 +510,6 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
         prev
     }
 
-    /// Inserts a new element into the `XorLinkedList` after the current one.
-    ///
-    /// If the cursor is pointing at the null object then the new element is
-    /// inserted at the front of the `XorLinkedList`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the new element is already linked to a different intrusive
-    /// collection.
-    #[inline]
-    pub fn insert_after(&mut self, val: A::Pointer) {
-        unsafe {
-            let node = &*self.list.node_from_value(val);
-            if self.is_null() {
-                node.link_between(ptr::null(), self.list.head);
-                self.list.head = node;
-                if self.list.tail.is_null() {
-                    self.list.tail = node;
-                }
-                self.link = BidirPtr {
-                    prev: self.list.tail,
-                    next: self.list.head,
-                };
-            } else {
-                node.link_between(self.current, self.link.next);
-                if self.link.next.is_null() {
-                    // Current pointer was tail
-                    self.list.tail = node;
-                }
-                self.link.next = node;
-            }
-        }
-    }
-
-    /// Inserts a new element into the `XorLinkedList` before the current one.
-    ///
-    /// If the cursor is pointing at the null object then the new element is
-    /// inserted at the end of the `XorLinkedList`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the new element is already linked to a different intrusive
-    /// collection.
-    #[inline]
-    pub fn insert_before(&mut self, val: A::Pointer) {
-        unsafe {
-            let node = &*self.list.node_from_value(val);
-            if self.is_null() {
-                node.link_between(self.list.tail, ptr::null());
-                self.list.tail = node;
-                if self.list.head.is_null() {
-                    self.list.head = node;
-                }
-                self.link = BidirPtr {
-                    prev: self.list.tail,
-                    next: self.list.head,
-                };
-            } else {
-                node.link_between(self.link.prev, self.current);
-                if self.link.prev.is_null() {
-                    // Current pointer was head
-                    self.list.head = node;
-                }
-                self.link.prev = node;
-            }
-        }
-    }
-
     /// Removes the current element from the `XorLinkedList`.
     ///
     /// A pointer to the element that was removed is returned, and the cursor is
@@ -476,41 +518,49 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// If the cursor is currently pointing to the null object then no element
     /// is removed and `None` is returned.
     #[inline]
-    pub fn remove(&mut self) -> Option<A::Pointer> {
-        if self.is_null() {
-            return None;
-        }
+    pub fn remove(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+        use link_ops::LinkOps;
 
-        let BidirPtr { prev, next } = self.link;
-        let current = self.current;
         unsafe {
-            (*current).force_unlink();
-            if let Some(prev) = prev.as_ref() {
-                prev.replace_ptr(current, next);
+            let current = self.current?;
+            let result = current;
+
+            self.list.adapter.link_ops_mut().mark_unlinked(current);
+            if let Some(prev) = self.prev {
+                self.list.adapter.link_ops_mut().replace_next_or_prev(
+                    prev,
+                    Some(current),
+                    self.next,
+                );
+            }
+            if let Some(next) = self.next {
+                self.list.adapter.link_ops_mut().replace_next_or_prev(
+                    next,
+                    Some(current),
+                    self.prev,
+                );
+            }
+            if self.list.head == Some(current) {
+                self.list.head = self.next;
+            }
+            if self.list.tail == Some(current) {
+                self.list.tail = self.prev;
+            }
+            self.current = self.next;
+            if let Some(current) = self.current {
+                self.next = self.list.adapter.link_ops().next(current, self.prev);
+            } else {
+                self.prev = self.list.tail;
+                self.next = self.list.head;
             }
 
-            if let Some(next) = next.as_ref() {
-                next.replace_ptr(current, prev);
-            }
+            Some(
+                self.list
+                    .adapter
+                    .pointer_ops()
+                    .from_raw(self.list.adapter.get_value(result)),
+            )
         }
-        if self.list.head == current {
-            self.list.head = next;
-        }
-        if self.list.tail == current {
-            self.list.tail = prev;
-        }
-        self.current = next;
-        self.link = unsafe {
-            if let Some(current) = self.current.as_ref() {
-                current.with_prev(prev)
-            } else {
-                BidirPtr {
-                    prev: self.list.tail,
-                    next: self.list.head,
-                }
-            }
-        };
-        Some(unsafe { A::Pointer::from_raw(self.list.adapter.get_value(current)) })
     }
 
     /// Removes the current element from the `XorLinkedList` and inserts another
@@ -527,32 +577,129 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     /// Panics if the new element is already linked to a different intrusive
     /// collection.
     #[inline]
-    pub fn replace_with(&mut self, val: A::Pointer) -> Result<A::Pointer, A::Pointer> {
+    pub fn replace_with(
+        &mut self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> Result<<A::PointerOps as PointerOps>::Pointer, <A::PointerOps as PointerOps>::Pointer>
+    {
+        use link_ops::LinkOps;
+
         unsafe {
-            let current = match self.current.as_ref() {
-                Some(current) => current,
-                None => return Err(val),
-            };
+            if let Some(current) = self.current {
+                let new = self.list.node_from_value(val);
+                let result = current;
 
-            let new = &*self.list.node_from_value(val);
-            if self.list.head == current {
-                self.list.head = new;
-            }
-            if self.list.tail == current {
-                self.list.tail = new;
-            }
+                if self.list.head == Some(current) {
+                    self.list.head = Some(new);
+                }
+                if self.list.tail == Some(current) {
+                    self.list.tail = Some(new);
+                }
 
-            if let Some(prev) = self.link.prev.as_ref() {
-                prev.replace_ptr(current, new);
-            }
-            if let Some(next) = self.link.next.as_ref() {
-                next.replace_ptr(current, new);
-            }
-            current.force_unlink();
-            new.set(self.link);
+                if let Some(prev) = self.prev {
+                    self.list.adapter.link_ops_mut().replace_next_or_prev(
+                        prev,
+                        Some(current),
+                        Some(new),
+                    );
+                }
+                if let Some(next) = self.next {
+                    self.list.adapter.link_ops_mut().replace_next_or_prev(
+                        next,
+                        Some(current),
+                        Some(new),
+                    );
+                }
 
-            let result = mem::replace(&mut self.current, new);
-            Ok(A::Pointer::from_raw(self.list.adapter.get_value(result)))
+                self.list
+                    .adapter
+                    .link_ops_mut()
+                    .set(new, self.prev, self.next);
+                self.list.adapter.link_ops_mut().mark_unlinked(result);
+                self.current = Some(new);
+
+                Ok(self
+                    .list
+                    .adapter
+                    .pointer_ops()
+                    .from_raw(self.list.adapter.get_value(result)))
+            } else {
+                Err(val)
+            }
+        }
+    }
+
+    /// Inserts a new element into the `XorLinkedList` after the current one.
+    ///
+    /// If the cursor is pointing at the null object then the new element is
+    /// inserted at the front of the `XorLinkedList`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn insert_after(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
+        unsafe {
+            let new = self.list.node_from_value(val);
+            if let Some(current) = self.current {
+                link_between(
+                    self.list.adapter.link_ops_mut(),
+                    new,
+                    Some(current),
+                    self.next,
+                );
+                if self.next.is_none() {
+                    // Current pointer was tail
+                    self.list.tail = Some(new);
+                }
+                self.next = Some(new);
+            } else {
+                link_between(self.list.adapter.link_ops_mut(), new, None, self.list.head);
+                self.list.head = Some(new);
+                if self.list.tail.is_none() {
+                    self.list.tail = Some(new);
+                }
+                self.prev = self.list.tail;
+                self.next = self.list.head;
+            }
+        }
+    }
+
+    /// Inserts a new element into the `XorLinkedList` before the current one.
+    ///
+    /// If the cursor is pointing at the null object then the new element is
+    /// inserted at the end of the `XorLinkedList`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn insert_before(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
+        unsafe {
+            let new = self.list.node_from_value(val);
+            if let Some(current) = self.current {
+                link_between(
+                    self.list.adapter.link_ops_mut(),
+                    new,
+                    self.prev,
+                    Some(current),
+                );
+                if self.prev.is_none() {
+                    // Current pointer was tail
+                    self.list.head = Some(new);
+                }
+                self.prev = Some(new);
+            } else {
+                link_between(self.list.adapter.link_ops_mut(), new, self.list.tail, None);
+                self.list.tail = Some(new);
+                if self.list.head.is_none() {
+                    self.list.head = Some(new);
+                }
+                self.prev = self.list.tail;
+                self.next = self.list.head;
+            }
         }
     }
 
@@ -564,30 +711,32 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     pub fn splice_after(&mut self, mut list: XorLinkedList<A>) {
         if !list.is_empty() {
             unsafe {
-                // Safe because list is non-empty
-                let head = &*list.head;
-                let tail = &*list.tail;
-                list.fast_clear();
+                let head = list.head.unwrap_unchecked();
+                let tail = list.tail.unwrap_unchecked();
 
-                if let Some(current) = self.current.as_ref() {
-                    if let Some(next) = self.link.next.as_ref() {
-                        next.replace_ptr(current, tail);
-                        tail.replace_ptr(ptr::null(), next);
+                let link_ops = self.list.adapter.link_ops_mut();
+
+                if let Some(current) = self.current {
+                    if let Some(next) = self.next {
+                        link_ops.replace_next_or_prev(next, Some(current), Some(tail));
+                        link_ops.replace_next_or_prev(tail, None, Some(next));
                     }
-                    head.replace_ptr(ptr::null(), current);
-                    self.link.next = head;
-                    current.set(self.link)
+                    link_ops.replace_next_or_prev(head, None, Some(current));
+                    self.next = list.head;
+                    link_ops.set(current, self.prev, self.next);
                 } else {
-                    if let Some(our_head) = self.list.head.as_ref() {
-                        tail.replace_ptr(ptr::null(), our_head);
-                        our_head.replace_ptr(ptr::null(), tail);
+                    if let Some(x) = self.list.head {
+                        link_ops.replace_next_or_prev(tail, None, Some(x));
+                        link_ops.replace_next_or_prev(x, None, Some(tail));
                     }
-                    self.list.head = head;
-                    self.link.next = head;
+                    self.list.head = list.head;
+                    self.next = list.head;
                 }
                 if self.list.tail == self.current {
-                    self.list.tail = tail;
+                    self.list.tail = list.tail;
                 }
+                list.head = None;
+                list.tail = None;
             }
         }
     }
@@ -600,30 +749,32 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     pub fn splice_before(&mut self, mut list: XorLinkedList<A>) {
         if !list.is_empty() {
             unsafe {
-                // Safe because list is non-empty
-                let head = &*list.head;
-                let tail = &*list.tail;
-                list.fast_clear();
+                let head = list.head.unwrap_unchecked();
+                let tail = list.tail.unwrap_unchecked();
 
-                if let Some(current) = self.current.as_ref() {
-                    if let Some(prev) = self.link.prev.as_ref() {
-                        prev.replace_ptr(current, head);
-                        head.replace_ptr(ptr::null(), prev);
+                let link_ops = self.list.adapter.link_ops_mut();
+
+                if let Some(current) = self.current {
+                    if let Some(prev) = self.prev {
+                        link_ops.replace_next_or_prev(prev, Some(current), Some(head));
+                        link_ops.replace_next_or_prev(head, None, Some(prev));
                     }
-                    tail.replace_ptr(ptr::null(), current);
-                    self.link.prev = tail;
-                    current.set(self.link)
+                    link_ops.replace_next_or_prev(tail, None, Some(current));
+                    self.prev = list.tail;
+                    link_ops.set(current, self.prev, self.next);
                 } else {
-                    if let Some(our_tail) = self.list.tail.as_ref() {
-                        head.replace_ptr(ptr::null(), our_tail);
-                        our_tail.replace_ptr(ptr::null(), head);
+                    if let Some(x) = self.list.tail {
+                        link_ops.replace_next_or_prev(head, None, Some(x));
+                        link_ops.replace_next_or_prev(x, None, Some(head));
                     }
-                    self.list.head = head;
-                    self.link.next = head;
+                    self.list.head = list.head;
+                    self.next = list.head;
                 }
                 if self.list.tail == self.current {
-                    self.list.tail = tail;
+                    self.list.tail = list.tail;
                 }
+                list.head = None;
+                list.tail = None;
             }
         }
     }
@@ -639,30 +790,38 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     where
         A: Clone,
     {
-        unsafe {
-            let current = match self.current.as_ref() {
-                Some(current) => current,
-                None => {
-                    let adapter = self.list.adapter.clone();
-                    return mem::replace(&mut self.list, XorLinkedList::new(adapter));
+        if let Some(current) = self.current {
+            unsafe {
+                let mut list = XorLinkedList {
+                    head: self.next,
+                    tail: self.list.tail,
+                    adapter: self.list.adapter.clone(),
+                };
+                if let Some(head) = list.head {
+                    self.list.adapter.link_ops_mut().replace_next_or_prev(
+                        head,
+                        Some(current),
+                        None,
+                    );
+                    self.next = None;
+                } else {
+                    list.tail = None;
                 }
-            };
-            let head = self.link.next;
-            let tail = if let Some(head) = head.as_ref() {
-                head.replace_ptr(self.current, ptr::null());
-                self.link.next = ptr::null();
-                current.set(self.link);
-                self.list.tail
-            } else {
-                // Empty list after current
-                ptr::null()
-            };
+                self.list
+                    .adapter
+                    .link_ops_mut()
+                    .set(current, self.prev, None);
+                self.list.tail = self.current;
+                list
+            }
+        } else {
             let list = XorLinkedList {
-                head,
-                tail,
+                head: self.list.head,
+                tail: self.list.tail,
                 adapter: self.list.adapter.clone(),
             };
-            self.list.tail = current;
+            self.list.head = None;
+            self.list.tail = None;
             list
         }
     }
@@ -678,30 +837,38 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
     where
         A: Clone,
     {
-        unsafe {
-            let current = match self.current.as_ref() {
-                Some(current) => current,
-                None => {
-                    let adapter = self.list.adapter.clone();
-                    return mem::replace(&mut self.list, XorLinkedList::new(adapter));
+        if let Some(current) = self.current {
+            unsafe {
+                let mut list = XorLinkedList {
+                    head: self.list.head,
+                    tail: self.prev,
+                    adapter: self.list.adapter.clone(),
+                };
+                if let Some(tail) = list.tail {
+                    self.list.adapter.link_ops_mut().replace_next_or_prev(
+                        tail,
+                        Some(current),
+                        None,
+                    );
+                    self.prev = None;
+                } else {
+                    list.head = None;
                 }
-            };
-            let tail = self.link.prev;
-            let head = if let Some(tail) = tail.as_ref() {
-                tail.replace_ptr(self.current, ptr::null());
-                self.link.prev = ptr::null();
-                current.set(self.link);
-                self.list.head
-            } else {
-                // Empty list before current
-                ptr::null()
-            };
+                self.list
+                    .adapter
+                    .link_ops_mut()
+                    .set(current, None, self.next);
+                self.list.head = self.current;
+                list
+            }
+        } else {
             let list = XorLinkedList {
-                head,
-                tail,
+                head: self.list.head,
+                tail: self.list.tail,
                 adapter: self.list.adapter.clone(),
             };
-            self.list.head = current;
+            self.list.head = None;
+            self.list.tail = None;
             list
         }
     }
@@ -718,21 +885,41 @@ impl<'a, A: Adapter<Link = Link>> CursorMut<'a, A> {
 ///
 /// When this collection is dropped, all elements linked into it will be
 /// converted back to owned pointers and dropped.
-pub struct XorLinkedList<A: Adapter<Link = Link>> {
-    head: *const Link,
-    tail: *const Link,
+pub struct XorLinkedList<A: Adapter>
+where
+    A::LinkOps: XorLinkedListOps,
+{
+    head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
     adapter: A,
 }
 
-impl<A: Adapter<Link = Link>> XorLinkedList<A> {
-    /// Creates an empty `XorLinkedList`.
-    #[cfg(feature = "nightly")]
+impl<A: Adapter> XorLinkedList<A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
     #[inline]
-    pub const fn new(adapter: A) -> XorLinkedList<A> {
-        XorLinkedList {
-            head: ptr::null(),
-            tail: ptr::null(),
-            adapter,
+    fn node_from_value(
+        &self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> <A::LinkOps as link_ops::LinkOps>::LinkPtr {
+        use link_ops::LinkOps;
+
+        unsafe {
+            let raw = self.adapter.pointer_ops().into_raw(val);
+
+            if self
+                .adapter
+                .link_ops()
+                .is_linked(self.adapter.get_link(raw))
+            {
+                // convert the node back into a pointer
+                self.adapter.pointer_ops().from_raw(raw);
+
+                panic!("attempted to insert an object that is already linked");
+            }
+
+            self.adapter.get_link(raw)
         }
     }
 
@@ -741,8 +928,19 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     #[inline]
     pub fn new(adapter: A) -> XorLinkedList<A> {
         XorLinkedList {
-            head: ptr::null(),
-            tail: ptr::null(),
+            head: None,
+            tail: None,
+            adapter,
+        }
+    }
+
+    /// Creates an empty `XorLinkedList`.
+    #[cfg(feature = "nightly")]
+    #[inline]
+    pub const fn new(adapter: A) -> XorLinkedList<A> {
+        XorLinkedList {
+            head: None,
+            tail: None,
             adapter,
         }
     }
@@ -750,18 +948,16 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     /// Returns `true` if the `XorLinkedList` is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.head.is_null()
+        self.head.is_none()
     }
 
     /// Returns a null `Cursor` for this list.
     #[inline]
     pub fn cursor(&self) -> Cursor<'_, A> {
         Cursor {
-            current: ptr::null(),
-            link: BidirPtr {
-                next: self.head,
-                prev: self.tail,
-            },
+            current: None,
+            prev: self.tail,
+            next: self.head,
             list: self,
         }
     }
@@ -770,11 +966,9 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     #[inline]
     pub fn cursor_mut(&mut self) -> CursorMut<'_, A> {
         CursorMut {
-            current: ptr::null(),
-            link: BidirPtr {
-                next: self.head,
-                prev: self.tail,
-            },
+            current: None,
+            prev: self.tail,
+            next: self.head,
             list: self,
         }
     }
@@ -788,27 +982,21 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     #[inline]
     pub unsafe fn cursor_from_ptr_and_prev(
         &self,
-        ptr: *const A::Value,
-        prev: *const A::Value,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+        prev: *const <A::PointerOps as PointerOps>::Value,
     ) -> Cursor<'_, A> {
-        debug_assert!(!ptr.is_null());
-
-        let current = &*self.adapter.get_link(ptr);
-        debug_assert!(current.is_linked());
-
-        let prev = if prev.is_null() {
-            ptr::null()
+        let current = self.adapter.get_link(ptr);
+        let prev = if !prev.is_null() {
+            Some(self.adapter.get_link(prev))
         } else {
-            self.adapter.get_link(prev)
+            None
         };
-        debug_assert!(prev.is_null() || (*prev).is_linked());
-
-        let next = current.next(prev);
-        debug_assert!(next.is_null() || (*next).is_linked());
+        let next = self.adapter.link_ops().next(current, prev);
 
         Cursor {
-            current,
-            link: BidirPtr { prev, next },
+            current: Some(current),
+            prev,
+            next,
             list: self,
         }
     }
@@ -822,27 +1010,21 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     #[inline]
     pub unsafe fn cursor_mut_from_ptr_and_prev(
         &mut self,
-        ptr: *const A::Value,
-        prev: *const A::Value,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+        prev: *const <A::PointerOps as PointerOps>::Value,
     ) -> CursorMut<'_, A> {
-        debug_assert!(!ptr.is_null());
-
-        let current = &*self.adapter.get_link(ptr);
-        debug_assert!(current.is_linked());
-
-        let prev = if prev.is_null() {
-            ptr::null()
+        let current = self.adapter.get_link(ptr);
+        let prev = if !prev.is_null() {
+            Some(self.adapter.get_link(prev))
         } else {
-            self.adapter.get_link(prev)
+            None
         };
-        debug_assert!(prev.is_null() || (*prev).is_linked());
-
-        let next = current.next(prev);
-        debug_assert!(next.is_null() || (*next).is_linked());
+        let next = self.adapter.link_ops().next(current, prev);
 
         CursorMut {
-            current,
-            link: BidirPtr { prev, next },
+            current: Some(current),
+            prev,
+            next,
             list: self,
         }
     }
@@ -856,27 +1038,21 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     #[inline]
     pub unsafe fn cursor_from_ptr_and_next(
         &self,
-        ptr: *const A::Value,
-        next: *const A::Value,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+        next: *const <A::PointerOps as PointerOps>::Value,
     ) -> Cursor<'_, A> {
-        debug_assert!(!ptr.is_null());
-
-        let current = &*self.adapter.get_link(ptr);
-        debug_assert!(current.is_linked());
-
-        let next = if next.is_null() {
-            ptr::null()
+        let current = self.adapter.get_link(ptr);
+        let next = if !next.is_null() {
+            Some(self.adapter.get_link(next))
         } else {
-            self.adapter.get_link(next)
+            None
         };
-        debug_assert!(next.is_null() || (*next).is_linked());
-
-        let prev = current.prev(next);
-        debug_assert!(prev.is_null() || (*prev).is_linked());
+        let prev = self.adapter.link_ops().prev(current, next);
 
         Cursor {
-            current,
-            link: BidirPtr { prev, next },
+            current: Some(current),
+            prev,
+            next,
             list: self,
         }
     }
@@ -890,27 +1066,21 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     #[inline]
     pub unsafe fn cursor_mut_from_ptr_and_next(
         &mut self,
-        ptr: *const A::Value,
-        next: *const A::Value,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+        next: *const <A::PointerOps as PointerOps>::Value,
     ) -> CursorMut<'_, A> {
-        debug_assert!(!ptr.is_null());
-
-        let current = &*self.adapter.get_link(ptr);
-        debug_assert!(current.is_linked());
-
-        let next = if next.is_null() {
-            ptr::null()
+        let current = self.adapter.get_link(ptr);
+        let next = if !next.is_null() {
+            Some(self.adapter.get_link(next))
         } else {
-            self.adapter.get_link(next)
+            None
         };
-        debug_assert!(next.is_null() || (*next).is_linked());
-
-        let prev = current.next(next);
-        debug_assert!(prev.is_null() || (*prev).is_linked());
+        let prev = self.adapter.link_ops().prev(current, next);
 
         CursorMut {
-            current,
-            link: BidirPtr { prev, next },
+            current: Some(current),
+            prev,
+            next,
             list: self,
         }
     }
@@ -933,16 +1103,17 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
         cursor
     }
 
-    /// Returns a `Cursor` pointing to the last element of the list. If the
-    /// list is empty then a null cursor is returned.
+    /// Returns a `Cursor` pointing to the last element of the list. If the list
+    /// is empty then a null cursor is returned.
     #[inline]
     pub fn back(&self) -> Cursor<'_, A> {
         let mut cursor = self.cursor();
         cursor.move_prev();
         cursor
     }
+
     /// Returns a `CursorMut` pointing to the last element of the list. If the
-    /// the list is empty then a null cursor is returned.
+    /// list is empty then a null cursor is returned.
     #[inline]
     pub fn back_mut(&mut self) -> CursorMut<'_, A> {
         let mut cursor = self.cursor_mut();
@@ -954,11 +1125,11 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     #[inline]
     pub fn iter(&self) -> Iter<'_, A> {
         Iter {
-            prev_head: ptr::null(),
+            prev_head: None,
             head: self.head,
-            prev_tail: ptr::null(),
             tail: self.tail,
-            adapter: &self.adapter,
+            next_tail: None,
+            list: self,
         }
     }
 
@@ -969,14 +1140,19 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     /// converted back to an owned pointer and then dropped.
     #[inline]
     pub fn clear(&mut self) {
-        let mut prev = ptr::null();
+        use link_ops::LinkOps;
+
         let mut current = self.head;
-        self.fast_clear();
-        while !current.is_null() {
+        let mut prev = None;
+        self.head = None;
+        self.tail = None;
+        while let Some(x) = current {
             unsafe {
-                let next = (*current).next(prev);
-                (*current).force_unlink();
-                let _ = A::Pointer::from_raw(self.adapter.get_value(current));
+                let next = self.adapter.link_ops().next(x, prev);
+                self.adapter.link_ops_mut().mark_unlinked(x);
+                self.adapter
+                    .pointer_ops()
+                    .from_raw(self.adapter.get_value(x));
                 prev = current;
                 current = next;
             }
@@ -991,40 +1167,36 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     /// `force_unlink` function on them.
     #[inline]
     pub fn fast_clear(&mut self) {
-        self.head = ptr::null();
-        self.tail = ptr::null();
+        self.head = None;
+        self.tail = None;
     }
 
-    /// Takes all the elements out of the `XorLinkedList`, leaving it empty. The
-    /// taken elements are returned as a new `XorLinkedList`.
+    /// Takes all the elements out of the `XorLinkedList`, leaving it empty.
+    /// The taken elements are returned as a new `XorLinkedList`.
     #[inline]
     pub fn take(&mut self) -> XorLinkedList<A>
     where
         A: Clone,
     {
-        mem::replace(self, XorLinkedList::new(self.adapter.clone()))
-    }
-
-    #[inline]
-    fn node_from_value(&self, val: A::Pointer) -> *const Link {
-        unsafe {
-            assert!(
-                !(*self.adapter.get_link(&*val)).is_linked(),
-                "attempted to insert an object that is already linked"
-            );
-            self.adapter.get_link(val.into_raw())
-        }
+        let list = XorLinkedList {
+            head: self.head,
+            tail: self.tail,
+            adapter: self.adapter.clone(),
+        };
+        self.head = None;
+        self.tail = None;
+        list
     }
 
     /// Inserts a new element at the start of the `XorLinkedList`.
     #[inline]
-    pub fn push_front(&mut self, val: A::Pointer) {
+    pub fn push_front(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
         self.cursor_mut().insert_after(val);
     }
 
     /// Inserts a new element at the end of the `XorLinkedList`.
     #[inline]
-    pub fn push_back(&mut self, val: A::Pointer) {
+    pub fn push_back(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
         self.cursor_mut().insert_before(val);
     }
 
@@ -1032,7 +1204,7 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     ///
     /// This returns `None` if the `XorLinkedList` is empty.
     #[inline]
-    pub fn pop_front(&mut self) -> Option<A::Pointer> {
+    pub fn pop_front(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         self.front_mut().remove()
     }
 
@@ -1040,28 +1212,44 @@ impl<A: Adapter<Link = Link>> XorLinkedList<A> {
     ///
     /// This returns `None` if the `XorLinkedList` is empty.
     #[inline]
-    pub fn pop_back(&mut self) -> Option<A::Pointer> {
+    pub fn pop_back(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         self.back_mut().remove()
     }
 }
 
-// Allow read-only access from multiple threads
-unsafe impl<A: Adapter<Link = Link> + Sync> Sync for XorLinkedList<A> where A::Value: Sync {}
+// Allow read-only access to values from multiple threads
+unsafe impl<A: Adapter + Sync> Sync for XorLinkedList<A>
+where
+    <A::PointerOps as PointerOps>::Value: Sync,
+    A::LinkOps: XorLinkedListOps,
+{
+}
 
-// Allow sending to another thread if the ownership (represented by the A::Pointer owned
+// Allow sending to another thread if the ownership (represented by the <A::PointerOps as PointerOps>::Pointer owned
 // pointer type) can be transferred to another thread.
-unsafe impl<A: Adapter<Link = Link> + Send> Send for XorLinkedList<A> where A::Pointer: Send {}
+unsafe impl<A: Adapter + Send> Send for XorLinkedList<A>
+where
+    <A::PointerOps as PointerOps>::Pointer: Send,
+    A::LinkOps: XorLinkedListOps,
+{
+}
 
 // Drop all owned pointers if the collection is dropped
-impl<A: Adapter<Link = Link>> Drop for XorLinkedList<A> {
+impl<A: Adapter> Drop for XorLinkedList<A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
     #[inline]
     fn drop(&mut self) {
         self.clear();
     }
 }
 
-impl<A: Adapter<Link = Link>> IntoIterator for XorLinkedList<A> {
-    type Item = A::Pointer;
+impl<A: Adapter> IntoIterator for XorLinkedList<A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
+    type Item = <A::PointerOps as PointerOps>::Pointer;
     type IntoIter = IntoIter<A>;
 
     #[inline]
@@ -1070,8 +1258,11 @@ impl<A: Adapter<Link = Link>> IntoIterator for XorLinkedList<A> {
     }
 }
 
-impl<'a, A: Adapter<Link = Link> + 'a> IntoIterator for &'a XorLinkedList<A> {
-    type Item = &'a A::Value;
+impl<'a, A: Adapter + 'a> IntoIterator for &'a XorLinkedList<A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
+    type Item = &'a <A::PointerOps as PointerOps>::Value;
     type IntoIter = Iter<'a, A>;
 
     #[inline]
@@ -1080,15 +1271,19 @@ impl<'a, A: Adapter<Link = Link> + 'a> IntoIterator for &'a XorLinkedList<A> {
     }
 }
 
-impl<A: Adapter<Link = Link> + Default> Default for XorLinkedList<A> {
+impl<A: Adapter + Default> Default for XorLinkedList<A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
     fn default() -> XorLinkedList<A> {
         XorLinkedList::new(A::default())
     }
 }
 
-impl<A: Adapter<Link = Link>> fmt::Debug for XorLinkedList<A>
+impl<A: Adapter> fmt::Debug for XorLinkedList<A>
 where
-    A::Value: fmt::Debug,
+    A::LinkOps: XorLinkedListOps,
+    <A::PointerOps as PointerOps>::Value: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
@@ -1100,58 +1295,72 @@ where
 // =============================================================================
 
 /// An iterator over references to the items of a `XorLinkedList`.
-pub struct Iter<'a, A: Adapter<Link = Link>> {
-    prev_head: *const Link,
-    head: *const Link,
-    prev_tail: *const Link,
-    tail: *const Link,
-    adapter: &'a A,
+pub struct Iter<'a, A: Adapter>
+where
+    A::LinkOps: XorLinkedListOps,
+{
+    prev_head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    next_tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    list: &'a XorLinkedList<A>,
 }
-impl<'a, A: Adapter<Link = Link> + 'a> Iterator for Iter<'a, A> {
-    type Item = &'a A::Value;
+impl<'a, A: Adapter + 'a> Iterator for Iter<'a, A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
+    type Item = &'a <A::PointerOps as PointerOps>::Value;
 
     #[inline]
-    fn next(&mut self) -> Option<&'a A::Value> {
-        unsafe {
-            let current_head = self.head.as_ref()?;
-            if self.tail == current_head {
-                self.head = ptr::null();
-                self.tail = ptr::null();
-            } else {
-                self.head = current_head.next(self.prev_head);
-                self.prev_head = current_head;
-            }
+    fn next(&mut self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        let head = self.head?;
 
-            Some(&*self.adapter.get_value(current_head))
+        if Some(head) == self.tail {
+            self.prev_head = None;
+            self.head = None;
+            self.next_tail = None;
+            self.tail = None;
+        } else {
+            let next = unsafe { self.list.adapter.link_ops().next(head, self.prev_head) };
+            self.prev_head = self.head;
+            self.head = next;
         }
+        Some(unsafe { &*self.list.adapter.get_value(head) })
     }
 }
-impl<'a, A: Adapter<Link = Link> + 'a> DoubleEndedIterator for Iter<'a, A> {
+impl<'a, A: Adapter + 'a> DoubleEndedIterator for Iter<'a, A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
     #[inline]
-    fn next_back(&mut self) -> Option<&'a A::Value> {
-        unsafe {
-            let current_tail = self.tail.as_ref()?;
-            if self.head == current_tail {
-                self.head = ptr::null();
-                self.tail = ptr::null();
-            } else {
-                self.tail = current_tail.next(self.prev_tail);
-                self.prev_tail = current_tail;
-            }
+    fn next_back(&mut self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        let tail = self.tail?;
 
-            Some(&*self.adapter.get_value(current_tail))
+        if Some(tail) == self.head {
+            self.prev_head = None;
+            self.head = None;
+            self.next_tail = None;
+            self.tail = None;
+        } else {
+            let new_tail = unsafe { self.list.adapter.link_ops().prev(tail, self.next_tail) };
+            self.next_tail = self.tail;
+            self.tail = new_tail;
         }
+        Some(unsafe { &*self.list.adapter.get_value(tail) })
     }
 }
-impl<'a, A: Adapter<Link = Link> + 'a> Clone for Iter<'a, A> {
+impl<'a, A: Adapter + 'a> Clone for Iter<'a, A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
     #[inline]
     fn clone(&self) -> Iter<'a, A> {
         Iter {
             prev_head: self.prev_head,
             head: self.head,
-            prev_tail: self.prev_tail,
             tail: self.tail,
-            adapter: self.adapter,
+            next_tail: self.next_tail,
+            list: self.list,
         }
     }
 }
@@ -1161,35 +1370,47 @@ impl<'a, A: Adapter<Link = Link> + 'a> Clone for Iter<'a, A> {
 // =============================================================================
 
 /// An iterator which consumes a `XorLinkedList`.
-pub struct IntoIter<A: Adapter<Link = Link>> {
+pub struct IntoIter<A: Adapter>
+where
+    A::LinkOps: XorLinkedListOps,
+{
     list: XorLinkedList<A>,
 }
-impl<A: Adapter<Link = Link>> Iterator for IntoIter<A> {
-    type Item = A::Pointer;
+impl<A: Adapter> Iterator for IntoIter<A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
+    type Item = <A::PointerOps as PointerOps>::Pointer;
 
     #[inline]
-    fn next(&mut self) -> Option<A::Pointer> {
+    fn next(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         self.list.pop_front()
     }
 }
-impl<A: Adapter<Link = Link>> DoubleEndedIterator for IntoIter<A> {
+impl<A: Adapter> DoubleEndedIterator for IntoIter<A>
+where
+    A::LinkOps: XorLinkedListOps,
+{
     #[inline]
-    fn next_back(&mut self) -> Option<A::Pointer> {
+    fn next_back(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         self.list.pop_back()
     }
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::{Link, XorLinkedList};
     use crate::UnsafeRef;
+    use core::cell::Cell;
+    use core::ptr;
     use std::boxed::Box;
-    use std::cell::Cell;
     use std::fmt;
-    use std::ptr;
     use std::vec::Vec;
 
-    #[derive(Clone)]
     struct Obj {
         link1: Link,
         link2: Link,
@@ -1645,5 +1866,43 @@ mod tests {
 
         drop(l);
         assert_eq!(v.get(), 3);
+    }
+
+    macro_rules! test_clone_pointer {
+        ($ptr: ident, $ptr_import: path) => {
+            use $ptr_import;
+
+            #[derive(Clone)]
+            struct Obj {
+                link: Link,
+                value: usize,
+            }
+            intrusive_adapter!(ObjAdapter = $ptr<Obj>: Obj { link: Link });
+
+            let a = $ptr::new(Obj {
+                link: Link::new(),
+                value: 5,
+            });
+            let mut l = XorLinkedList::new(ObjAdapter::new());
+            l.cursor_mut().insert_before(a.clone());
+            assert_eq!(2, $ptr::strong_count(&a));
+
+            let pointer = l.front().clone_pointer().unwrap();
+            assert_eq!(pointer.value, 5);
+            assert_eq!(3, $ptr::strong_count(&a));
+
+            l.front_mut().remove();
+            assert!(l.front().clone_pointer().is_none());
+        };
+    }
+
+    #[test]
+    fn test_clone_pointer_rc() {
+        test_clone_pointer!(Rc, std::rc::Rc);
+    }
+
+    #[test]
+    fn test_clone_pointer_arc() {
+        test_clone_pointer!(Arc, std::sync::Arc);
     }
 }

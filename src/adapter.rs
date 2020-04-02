@@ -1,24 +1,26 @@
 // Copyright 2016 Amanieu d'Antras
+// Copyright 2020 Amari Robinson
 //
 // Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use crate::IntrusivePointer;
+use crate::link_ops::LinkOps;
+use crate::pointer_ops::PointerOps;
 
 /// Trait for a adapter which allows a type to be inserted into an intrusive
-/// collection. The `Link` type contains the collection-specific metadata which
+/// collection.
+///
+/// `LinkOps` implements the collection-specific operations which
 /// allows an object to be inserted into an intrusive collection. This type
-/// needs to match the collection type (eg. `LinkedListLink` for inserting
-/// in a `LinkedList`).
+/// needs to implement the appropriate trait for the collection type
+/// (eg. `LinkedListOps` for inserting into a `LinkedList`).
+/// `LinkOps` type may be stateful, allowing custom link types.
 ///
-/// `Value` is the actual object type managed by the collection. This type will
-/// typically have an instance of `Link` as a struct field.
-///
-/// `Pointer` is a pointer type which "owns" an object of type `Value`.
-/// Operations which insert an element into an intrusive collection will accept
-/// such a pointer and operations which remove an element will return this type.
+/// `PointerOps` implements the collection-specific pointer conversions which
+/// allow an object to be inserted into an intrusive collection.
+/// `PointerOps` type may be stateful, allowing custom pointer types.
 ///
 /// A single object type may have multiple adapters, which allows it to be part
 /// of multiple intrusive collections simultaneously.
@@ -28,8 +30,8 @@ use crate::IntrusivePointer;
 /// given type and its link field. However it is possible to implement it
 /// manually if the intrusive link is not a direct field of the object type.
 ///
-/// It is also possible to create stateful adapters. This allows links and
-/// containers to be separated and avoids the need for objects to be modified to
+/// It is also possible to create stateful adapters.
+/// This allows links and containers to be separated and avoids the need for objects to be modified to
 /// contain a link.
 ///
 /// # Safety
@@ -37,21 +39,34 @@ use crate::IntrusivePointer;
 /// It must be possible to get back a reference to the container by passing a
 /// pointer returned by `get_link` to `get_container`.
 pub unsafe trait Adapter {
-    /// Collection-specific link type which allows an object to be inserted in
+    /// Collection-specific link operations which allow an object to be inserted in
     /// an intrusive collection.
-    type Link;
+    type LinkOps: LinkOps;
 
-    /// Object type which is inserted in an intrusive collection.
-    type Value: ?Sized;
-
-    /// Pointer type which owns an instance of a value.
-    type Pointer: IntrusivePointer<Self::Value>;
+    /// Collection-specific pointer conversions which allow an object to
+    /// be inserted in an intrusive collection.
+    type PointerOps: PointerOps;
 
     /// Gets a reference to an object from a reference to a link in that object.
-    unsafe fn get_value(&self, link: *const Self::Link) -> *const Self::Value;
+    unsafe fn get_value(
+        &self,
+        link: <Self::LinkOps as LinkOps>::LinkPtr,
+    ) -> *const <Self::PointerOps as PointerOps>::Value;
 
     /// Gets a reference to the link for the given object.
-    unsafe fn get_link(&self, value: *const Self::Value) -> *const Self::Link;
+    unsafe fn get_link(
+        &self,
+        value: *const <Self::PointerOps as PointerOps>::Value,
+    ) -> <Self::LinkOps as LinkOps>::LinkPtr;
+
+    /// Returns a reference to the link operations.
+    fn link_ops(&self) -> &Self::LinkOps;
+
+    /// Returns a reference to the mutable link operations.
+    fn link_ops_mut(&mut self) -> &mut Self::LinkOps;
+
+    /// Returns a reference to the pointer converter.
+    fn pointer_ops(&self) -> &Self::PointerOps;
 }
 
 /// Macro to get the offset of a struct field in bytes from the address of the
@@ -159,39 +174,60 @@ macro_rules! intrusive_adapter {
     ) => {
         #[allow(explicit_outlives_requirements)]
         $(#[$attr])*
-        $($privacy)* struct $name<$($args),*>($crate::__core::marker::PhantomData<$pointer>) $($where_)*;
+        $($privacy)* struct $name<$($args),*> $($where_)* {
+            link_ops: <$link as $crate::DefaultLinkOps>::Ops,
+            pointer_ops: $crate::DefaultPointerOps<$pointer>,
+        }
         unsafe impl<$($args $(: ?$bound)*),*> Send for $name<$($args),*> $($where_)* {}
         unsafe impl<$($args $(: ?$bound)*),*> Sync for $name<$($args),*> $($where_)* {}
         impl<$($args $(: ?$bound)*),*> Copy for $name<$($args),*> $($where_)* {}
         impl<$($args $(: ?$bound)*),*> Clone for $name<$($args),*> $($where_)* {
+            #[inline]
             fn clone(&self) -> Self {
                 *self
             }
         }
         impl<$($args $(: ?$bound)*),*> Default for $name<$($args),*> $($where_)* {
+            #[inline]
             fn default() -> Self {
                 Self::NEW
             }
         }
         #[allow(dead_code)]
         impl<$($args $(: ?$bound)*),*> $name<$($args),*> $($where_)* {
-            pub const NEW: Self = $name($crate::__core::marker::PhantomData);
+            pub const NEW: Self = $name {
+                link_ops: <$link as $crate::DefaultLinkOps>::NEW,
+                pointer_ops: $crate::DefaultPointerOps::<$pointer>::new(),
+            };
+            #[inline]
             pub fn new() -> Self {
                 Self::NEW
             }
         }
         #[allow(dead_code, unsafe_code)]
         unsafe impl<$($args $(: ?$bound)*),*> $crate::Adapter for $name<$($args),*> $($where_)* {
-            type Link = $link;
-            type Value = $value;
-            type Pointer = $pointer;
+            type LinkOps = <$link as $crate::DefaultLinkOps>::Ops;
+            type PointerOps = $crate::DefaultPointerOps<$pointer>;
+
             #[inline]
-            unsafe fn get_value(&self, link: *const $link) -> *const $value {
-                container_of!(link, $value, $field)
+            unsafe fn get_value(&self, link: <Self::LinkOps as $crate::LinkOps>::LinkPtr) -> *const <Self::PointerOps as $crate::PointerOps>::Value {
+                container_of!(link.as_ptr(), $value, $field)
             }
             #[inline]
-            unsafe fn get_link(&self, value: *const $value) -> *const $link {
-                &(*value).$field
+            unsafe fn get_link(&self, value: *const <Self::PointerOps as $crate::PointerOps>::Value) -> <Self::LinkOps as $crate::LinkOps>::LinkPtr {
+                $crate::__core::ptr::NonNull::new_unchecked(&(*value).$field as *const $link as *mut $link)
+            }
+            #[inline]
+            fn link_ops(&self) -> &Self::LinkOps {
+                &self.link_ops
+            }
+            #[inline]
+            fn link_ops_mut(&mut self) -> &mut Self::LinkOps {
+                &mut self.link_ops
+            }
+            #[inline]
+            fn pointer_ops(&self) -> &Self::PointerOps {
+                &self.pointer_ops
             }
         }
     };

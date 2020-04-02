@@ -1,4 +1,5 @@
 // Copyright 2016 Amanieu d'Antras
+// Copyright 2020 Amari Robinson
 //
 // Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
@@ -296,21 +297,25 @@ pub extern crate core as __core;
 #[doc(hidden)]
 pub extern crate memoffset as __memoffset;
 
-mod intrusive_pointer;
 mod unsafe_ref;
 #[macro_use]
 mod adapter;
 mod key_adapter;
+mod link_ops;
+mod pointer_ops;
+mod unchecked_option;
+
 pub mod linked_list;
 pub mod rbtree;
 pub mod singly_linked_list;
 pub mod xor_linked_list;
 
 pub use crate::adapter::Adapter;
-pub use crate::intrusive_pointer::IntrusivePointer;
 pub use crate::key_adapter::KeyAdapter;
+pub use crate::link_ops::{DefaultLinkOps, LinkOps};
 pub use crate::linked_list::Link as LinkedListLink;
 pub use crate::linked_list::LinkedList;
+pub use crate::pointer_ops::{DefaultPointerOps, PointerOps};
 pub use crate::rbtree::Link as RBTreeLink;
 pub use crate::rbtree::RBTree;
 pub use crate::singly_linked_list::Link as SinglyLinkedListLink;
