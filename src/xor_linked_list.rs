@@ -87,6 +87,7 @@ pub unsafe trait XorLinkedListOps: link_ops::LinkOps {
 
 /// Intrusive link that allows an object to be inserted into a
 /// `XorLinkedList`.
+#[repr(align(2))]
 pub struct Link {
     packed: Cell<usize>,
 }

@@ -56,6 +56,7 @@ pub unsafe trait LinkedListOps: link_ops::LinkOps {
 
 /// Intrusive link that allows an object to be inserted into a
 /// `LinkedList`.
+#[repr(align(2))]
 pub struct Link {
     next: Cell<Option<NonNull<Link>>>,
     prev: Cell<Option<NonNull<Link>>>,

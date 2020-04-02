@@ -42,6 +42,7 @@ pub unsafe trait SinglyLinkedListOps: link_ops::LinkOps {
 
 /// Intrusive link that allows an object to be inserted into a
 /// `SinglyLinkedList`.
+#[repr(align(2))]
 pub struct Link {
     next: Cell<Option<NonNull<Link>>>,
 }

@@ -95,6 +95,7 @@ pub unsafe trait RBTreeOps: link_ops::LinkOps {
 
 /// Intrusive link that allows an object to be inserted into a
 /// `RBTree`.
+#[repr(align(2))]
 pub struct Link {
     left: Cell<Option<NonNull<Link>>>,
     right: Cell<Option<NonNull<Link>>>,
