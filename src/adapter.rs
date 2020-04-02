@@ -128,20 +128,19 @@ macro_rules! container_of {
 ///
 /// ```rust,ignore
 /// intrusive_adapter!(
-///     Adapter<'lifetime, Type, Type2: ?Sized> =
+///     Adapter<'lifetime, Type, Type2> =
 ///         Pointer: Value {
 ///             link_field: LinkType
 ///         }
 ///         where
 ///             Type: Copy,
-///             Type2: 'lifetime
+///             Type2: ?Sized + 'lifetime
 ///     );
 /// ```
 ///
-/// Note that due to macro parsing limitations, only `?Trait` style bounds are
-/// allowed in the generic argument list. In most cases this is only needed for
-/// `?Sized`. Other bounds can be specified in the `where` clause at the end
-/// the macro.
+/// Note that due to macro parsing limitations, `T: Trait` bounds are not
+/// supported in the generic argument list. You must list any trait bounds in
+/// a separate `where` clause at the end of the macro.
 ///
 /// # Examples
 ///
@@ -157,19 +156,19 @@ macro_rules! container_of {
 /// intrusive_adapter!(MyAdapter = Box<Test>: Test { link: LinkedListLink });
 /// intrusive_adapter!(pub MyAdapter2 = Box<Test>: Test { link2: RBTreeLink });
 ///
-/// pub struct Test2<T: ?Sized>
-///     where T: Clone
+/// pub struct Test2<T>
+///     where T: Clone + ?Sized
 /// {
 ///     link: LinkedListLink,
 ///     val: T,
 /// }
-/// intrusive_adapter!(MyAdapter3<'a, T: ?Sized> = &'a Test2<T>: Test2<T> { link: LinkedListLink } where T: Clone + 'a);
+/// intrusive_adapter!(MyAdapter3<'a, T> = &'a Test2<T>: Test2<T> { link: LinkedListLink } where T: ?Sized + Clone + 'a);
 /// # fn main() {}
 /// ```
 #[macro_export(local_inner_macros)]
 macro_rules! intrusive_adapter {
     (@impl
-        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident ($($args:tt $(: ?$bound:tt)*),*)
+        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident ($($args:tt),*)
         = $pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*
     ) => {
         #[allow(explicit_outlives_requirements)]
@@ -178,23 +177,23 @@ macro_rules! intrusive_adapter {
             link_ops: <$link as $crate::DefaultLinkOps>::Ops,
             pointer_ops: $crate::DefaultPointerOps<$pointer>,
         }
-        unsafe impl<$($args $(: ?$bound)*),*> Send for $name<$($args),*> $($where_)* {}
-        unsafe impl<$($args $(: ?$bound)*),*> Sync for $name<$($args),*> $($where_)* {}
-        impl<$($args $(: ?$bound)*),*> Copy for $name<$($args),*> $($where_)* {}
-        impl<$($args $(: ?$bound)*),*> Clone for $name<$($args),*> $($where_)* {
+        unsafe impl<$($args),*> Send for $name<$($args),*> $($where_)* {}
+        unsafe impl<$($args),*> Sync for $name<$($args),*> $($where_)* {}
+        impl<$($args),*> Copy for $name<$($args),*> $($where_)* {}
+        impl<$($args),*> Clone for $name<$($args),*> $($where_)* {
             #[inline]
             fn clone(&self) -> Self {
                 *self
             }
         }
-        impl<$($args $(: ?$bound)*),*> Default for $name<$($args),*> $($where_)* {
+        impl<$($args),*> Default for $name<$($args),*> $($where_)* {
             #[inline]
             fn default() -> Self {
                 Self::NEW
             }
         }
         #[allow(dead_code)]
-        impl<$($args $(: ?$bound)*),*> $name<$($args),*> $($where_)* {
+        impl<$($args),*> $name<$($args),*> $($where_)* {
             pub const NEW: Self = $name {
                 link_ops: <$link as $crate::DefaultLinkOps>::NEW,
                 pointer_ops: $crate::DefaultPointerOps::<$pointer>::new(),
@@ -205,7 +204,7 @@ macro_rules! intrusive_adapter {
             }
         }
         #[allow(dead_code, unsafe_code)]
-        unsafe impl<$($args $(: ?$bound)*),*> $crate::Adapter for $name<$($args),*> $($where_)* {
+        unsafe impl<$($args),*> $crate::Adapter for $name<$($args),*> $($where_)* {
             type LinkOps = <$link as $crate::DefaultLinkOps>::Ops;
             type PointerOps = $crate::DefaultPointerOps<$pointer>;
 
