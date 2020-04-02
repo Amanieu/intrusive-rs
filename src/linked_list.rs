@@ -26,15 +26,27 @@ use crate::Adapter;
 /// Link operations for `LinkedList`.
 pub unsafe trait LinkedListOps: link_ops::LinkOps {
     /// Returns the "next" link pointer of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `next` must not panic.
     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
     /// Returns the "prev" link pointer of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `prev` must not panic.
     unsafe fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
     /// Sets the "next" link pointer of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `set_next` must not panic.
     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>);
 
     /// Sets the "prev" link pointer of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `set_prev` must not panic.
     unsafe fn set_prev(&mut self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>);
 }
 
@@ -132,7 +144,7 @@ impl fmt::Debug for Link {
 #[derive(Clone, Copy, Default)]
 pub struct LinkOps;
 
-impl link_ops::LinkOps for LinkOps {
+unsafe impl link_ops::LinkOps for LinkOps {
     type LinkPtr = NonNull<Link>;
 
     #[inline]

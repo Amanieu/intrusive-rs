@@ -30,8 +30,12 @@ pub unsafe trait XorLinkedListOps: link_ops::LinkOps {
     /// Returns the "next" link pointer of `ptr`.
     ///
     /// # Safety
-    /// `prev` must be have been previously passed to the [`set`] method.
+    /// `prev` must have been previously passed to the [`set`] method, or
+    /// `prev` must be equal to the `new` argument previously passed to [`replace_next_or_prev`].
     ///
+    /// An implementation of `next` must not panic.
+    ///
+    /// [`replace_next_or_prev`]: #tymethod.replace_next_or_prev
     /// [`set`]: #tymethod.set
     unsafe fn next(&self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>)
         -> Option<Self::LinkPtr>;
@@ -39,13 +43,20 @@ pub unsafe trait XorLinkedListOps: link_ops::LinkOps {
     /// Returns the "prev" link pointer of `ptr`.
     ///
     /// # Safety
-    /// `next` must be have been previously passed to the [`set`] method.
+    /// `next` must have been previously passed to the [`set`] method, or
+    /// `next` must be equal to the `new` argument previously passed to [`replace_next_or_prev`].
     ///
+    /// An implementation of `prev` must not panic.
+    ///
+    /// [`replace_next_or_prev`]: #tymethod.replace_next_or_prev
     /// [`set`]: #tymethod.set
     unsafe fn prev(&self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>)
         -> Option<Self::LinkPtr>;
 
     /// Assigns the "prev" and "next" link pointers of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `set` must not panic.
     unsafe fn set(
         &mut self,
         ptr: Self::LinkPtr,
@@ -57,7 +68,9 @@ pub unsafe trait XorLinkedListOps: link_ops::LinkOps {
     ///
     /// # Safety
     /// `old` must be equal to either the `next` or `prev` argument previously passed to the [`set`] method, or
-    /// `old` must be equal to `new` argument previously passed to `replace_next_or_prev`.
+    /// `old` must be equal to the `new` argument previously passed to `replace_next_or_prev`.
+    ///
+    /// An implementation of `replace_next_or_prev` must not panic.
     ///
     /// [`set`]: #tymethod.set
     unsafe fn replace_next_or_prev(
@@ -159,7 +172,7 @@ impl fmt::Debug for Link {
 #[derive(Clone, Copy, Default)]
 pub struct LinkOps;
 
-impl link_ops::LinkOps for LinkOps {
+unsafe impl link_ops::LinkOps for LinkOps {
     type LinkPtr = NonNull<Link>;
 
     #[inline]

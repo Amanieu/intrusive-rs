@@ -10,11 +10,14 @@
 /// `LinkPtr` is the representation of a link pointer.
 /// Typically this is `NonNull`, but compact representations such
 /// as `u8` or `u16` are possible.
-pub trait LinkOps {
+pub unsafe trait LinkOps {
     /// The link pointer type.
     type LinkPtr: Copy + Eq;
 
     /// Returns `true` if `ptr` is currently linked into an intrusive collection.
+    ///
+    /// # Safety
+    /// An implementation of `is_linked` must not panic.
     unsafe fn is_linked(&self, ptr: Self::LinkPtr) -> bool;
 
     /// Forcibly unlinks `ptr` from an intrusive collection.
@@ -24,6 +27,8 @@ pub trait LinkOps {
     /// since `fast_clear` "clears" the collection without unlinking the nodes.
     ///
     /// Otherwise, it is undefined behavior to call this function while `ptr` is still linked into an intrusive collection.
+    ///
+    /// An implementation of `mark_unlinked` must not panic.
     unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr);
 }
 
@@ -33,7 +38,7 @@ pub trait DefaultLinkOps {
     type Ops: LinkOps + Default;
 
     /// The associated constant that represents `Ops::default()`.
-    /// 
+    ///
     /// This exists because `Default::default()` is not a constant function.
     const NEW: Self::Ops;
 }

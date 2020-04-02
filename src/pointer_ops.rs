@@ -16,7 +16,7 @@ use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
 use core::ops::Deref;
 
-/// Base trait for pointer conversion operations.
+/// Trait for pointer conversion operations.
 ///
 /// `Value` is the actual object type managed by the collection. This type will
 /// typically have a link as a struct field.
@@ -34,6 +34,8 @@ pub unsafe trait PointerOps {
     ///
     /// # Safety
     /// The raw pointer must have been previously returned by `into_raw`.
+    ///
+    /// An implementation of `from_raw` must not panic.
     unsafe fn from_raw(&self, value: *const Self::Value) -> Self::Pointer;
 
     /// Consumes the owned pointer and returns a raw pointer to the owned object.
@@ -145,7 +147,7 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Arc<T>> {
     }
 }
 
-/// Creates an `IntrusivePointer` from a raw pointer
+/// Clones a `PointerOps::Pointer` from a `*const PointerOps::Value`
 ///
 /// This method is only safe to call if the raw pointer is known to be
 /// managed by the provided `PointerOps` type.

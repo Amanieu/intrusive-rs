@@ -41,27 +41,51 @@ pub enum Color {
 /// Link operations for `RBTree`.
 pub unsafe trait RBTreeOps: link_ops::LinkOps {
     /// Returns the left child of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `left` must not panic.
     unsafe fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
     /// Returns the right child of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `right` must not panic.
     unsafe fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
     /// Returns the parent of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `parent` must not panic.
     unsafe fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr>;
 
     /// Returns the color of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `color` must not panic.
     unsafe fn color(&self, ptr: Self::LinkPtr) -> Color;
 
     /// Sets the left child of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `set_left` must not panic.
     unsafe fn set_left(&mut self, ptr: Self::LinkPtr, left: Option<Self::LinkPtr>);
 
     /// Sets the right child of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `set_right` must not panic.
     unsafe fn set_right(&mut self, ptr: Self::LinkPtr, right: Option<Self::LinkPtr>);
 
     /// Sets the parent of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `set_parent` must not panic.
     unsafe fn set_parent(&mut self, ptr: Self::LinkPtr, parent: Option<Self::LinkPtr>);
 
     /// Sets the color of `ptr`.
+    ///
+    /// # Safety
+    /// An implementation of `set_color` must not panic.
     unsafe fn set_color(&mut self, ptr: Self::LinkPtr, color: Color);
 }
 
@@ -179,7 +203,7 @@ impl LinkOps {
     }
 }
 
-impl link_ops::LinkOps for LinkOps {
+unsafe impl link_ops::LinkOps for LinkOps {
     type LinkPtr = NonNull<Link>;
 
     #[inline]
@@ -624,17 +648,14 @@ unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Opt
             let mut w = w.unwrap_unchecked();
             loop {
                 let mut w_parent = link_ops.parent(w).unwrap_unchecked();
-                if !is_left_child(
-                    link_ops,
-                    w,
-                    w_parent,
-                ) {
+                if !is_left_child(link_ops, w, w_parent) {
                     if link_ops.color(w) == Color::Red {
                         link_ops.set_color(w, Color::Black);
-                        link_ops
-                            .set_color(w_parent, Color::Red);
+                        link_ops.set_color(w_parent, Color::Red);
                         rotate_left(link_ops, w_parent, root);
-                        w = link_ops.right(link_ops.left(w).unwrap_unchecked()).unwrap_unchecked();
+                        w = link_ops
+                            .right(link_ops.left(w).unwrap_unchecked())
+                            .unwrap_unchecked();
                         w_parent = link_ops.parent(w).unwrap_unchecked();
                     }
 
@@ -649,44 +670,33 @@ unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Opt
                             break;
                         }
                         let w_grandparent = link_ops.parent(w_parent).unwrap_unchecked();
-                        w = if is_left_child(
-                            link_ops,
-                            w_parent,
-                            w_grandparent,
-                        ) {
+                        w = if is_left_child(link_ops, w_parent, w_grandparent) {
                             link_ops.right(w_grandparent).unwrap_unchecked()
                         } else {
                             link_ops.left(w_grandparent).unwrap_unchecked()
                         };
                     } else {
                         if link_ops.right(w).map(|x| link_ops.color(x)) != Some(Color::Red) {
-                            link_ops.set_color(
-                                link_ops.left(w).unwrap_unchecked(),
-                                Color::Black,
-                            );
+                            link_ops.set_color(link_ops.left(w).unwrap_unchecked(), Color::Black);
                             link_ops.set_color(w, Color::Red);
                             rotate_right(link_ops, w, root);
                             w = link_ops.parent(w).unwrap_unchecked();
                             w_parent = link_ops.parent(w).unwrap_unchecked();
                         }
-                        link_ops.set_color(
-                            w,
-                            link_ops.color(w_parent),
-                        );
-                        link_ops
-                            .set_color(w_parent, Color::Black);
-                        link_ops
-                            .set_color(link_ops.right(w).unwrap_unchecked(), Color::Black);
+                        link_ops.set_color(w, link_ops.color(w_parent));
+                        link_ops.set_color(w_parent, Color::Black);
+                        link_ops.set_color(link_ops.right(w).unwrap_unchecked(), Color::Black);
                         rotate_left(link_ops, w_parent, root);
                         break;
                     }
                 } else {
                     if link_ops.color(w) == Color::Red {
                         link_ops.set_color(w, Color::Black);
-                        link_ops
-                            .set_color(w_parent, Color::Red);
+                        link_ops.set_color(w_parent, Color::Red);
                         rotate_right(link_ops, w_parent, root);
-                        w = link_ops.left(link_ops.right(w).unwrap_unchecked()).unwrap_unchecked();
+                        w = link_ops
+                            .left(link_ops.right(w).unwrap_unchecked())
+                            .unwrap_unchecked();
                         w_parent = link_ops.parent(w).unwrap_unchecked();
                     }
                     let left_color = link_ops.left(w).map(|x| link_ops.color(x));
@@ -704,29 +714,25 @@ unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Opt
                             w_parent,
                             link_ops.parent(w_parent).unwrap_unchecked(),
                         ) {
-                            link_ops.right(link_ops.parent(w_parent).unwrap_unchecked()).unwrap_unchecked()
+                            link_ops
+                                .right(link_ops.parent(w_parent).unwrap_unchecked())
+                                .unwrap_unchecked()
                         } else {
-                            link_ops.left(link_ops.parent(w_parent).unwrap_unchecked()).unwrap_unchecked()
+                            link_ops
+                                .left(link_ops.parent(w_parent).unwrap_unchecked())
+                                .unwrap_unchecked()
                         };
                     } else {
                         if link_ops.left(w).map(|x| link_ops.color(x)) != Some(Color::Red) {
-                            link_ops.set_color(
-                                link_ops.right(w).unwrap_unchecked(),
-                                Color::Black,
-                            );
+                            link_ops.set_color(link_ops.right(w).unwrap_unchecked(), Color::Black);
                             link_ops.set_color(w, Color::Red);
                             rotate_left(link_ops, w, root);
                             w = link_ops.parent(w).unwrap_unchecked();
                             w_parent = link_ops.parent(w).unwrap_unchecked();
                         }
-                        link_ops.set_color(
-                            w,
-                            link_ops.color(w_parent),
-                        );
-                        link_ops
-                            .set_color(w_parent, Color::Black);
-                        link_ops
-                            .set_color(link_ops.left(w).unwrap_unchecked(), Color::Black);
+                        link_ops.set_color(w, link_ops.color(w_parent));
+                        link_ops.set_color(w_parent, Color::Black);
+                        link_ops.set_color(link_ops.left(w).unwrap_unchecked(), Color::Black);
                         rotate_right(link_ops, w_parent, root);
                         break;
                     }
@@ -1092,7 +1098,7 @@ where
         unsafe {
             let new = self.tree.node_from_value(val);
             let link_ops = self.tree.adapter.link_ops_mut();
-            
+
             if let Some(root) = self.tree.root {
                 if let Some(current) = self.current {
                     if link_ops.left(current).is_some() {
