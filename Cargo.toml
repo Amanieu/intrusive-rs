@@ -17,8 +17,9 @@ alloc = []
 default = ["alloc"]
 
 [dependencies]
-memoffset = "0.5"
+memoffset = "0.5.4"
 
 [dev-dependencies]
-rand = "0.3"
-typed-arena = "1.2"
+rand = "0.7.3"
+typed-arena = "2.0.1"
+rand_xorshift = "0.2.0"

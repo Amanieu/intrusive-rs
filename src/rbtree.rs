@@ -2071,11 +2071,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use self::rand::{Rng, XorShiftRng};
+    use rand::prelude::*;
+    use rand_xorshift::XorShiftRng;
     use super::{Entry, KeyAdapter, Link, PointerOps, RBTree};
     use crate::Bound::*;
     use crate::UnsafeRef;
-    use rand;
     use std::boxed::Box;
     use std::fmt;
     use std::vec::Vec;
@@ -2210,7 +2210,7 @@ mod tests {
         assert!(v.iter().all(|x| !x.link.is_linked()));
         let mut t = RBTree::new(ObjAdapter::new());
         assert!(t.is_empty());
-        let mut rng = XorShiftRng::new_unseeded();
+        let mut rng = XorShiftRng::seed_from_u64(0);
 
         {
             let mut expected = Vec::new();
@@ -2246,7 +2246,7 @@ mod tests {
 
         {
             let mut indices = (0..v.len()).collect::<Vec<_>>();
-            rng.shuffle(&mut indices);
+            indices.shuffle(&mut rng);
             let mut expected = Vec::new();
             for i in indices {
                 t.insert(v[i].clone());
@@ -2271,7 +2271,7 @@ mod tests {
 
         {
             let mut indices = (0..v.len()).collect::<Vec<_>>();
-            rng.shuffle(&mut indices);
+            indices.shuffle(&mut rng);
             let mut expected = Vec::new();
             for i in indices {
                 {
@@ -2299,7 +2299,7 @@ mod tests {
 
         {
             let mut indices = (0..v.len()).collect::<Vec<_>>();
-            rng.shuffle(&mut indices);
+            indices.shuffle(&mut rng);
             let mut expected = Vec::new();
             for i in indices {
                 {
