@@ -69,15 +69,6 @@ pub unsafe trait Adapter {
     fn pointer_ops(&self) -> &Self::PointerOps;
 }
 
-/// Macro to get the offset of a struct field in bytes from the address of the
-/// struct.
-#[macro_export(local_inner_macros)]
-macro_rules! offset_of {
-    ($($inner:tt)*) => {
-        ($crate::__memoffset::offset_of!($($inner)*) as isize)
-    }
-}
-
 /// Unsafe macro to get a raw pointer to an outer object from a pointer to one
 /// of its fields.
 ///
@@ -98,13 +89,13 @@ macro_rules! offset_of {
 ///
 /// This is unsafe because it assumes that the given expression is a valid
 /// pointer to the specified field of some container type.
-#[macro_export(local_inner_macros)]
+#[macro_export]
 macro_rules! container_of {
     ($ptr:expr, $container:path, $field:ident) => {
         #[allow(clippy::cast_ptr_alignment)]
         {
-            ($ptr as *const _ as *const u8).offset(-offset_of!($container, $field))
-                as *mut $container
+            ($ptr as *const _ as *const u8).sub($crate::offset_of!($container, $field))
+                as *const $container
         }
     };
 }
@@ -165,7 +156,7 @@ macro_rules! container_of {
 /// intrusive_adapter!(MyAdapter3<'a, T> = &'a Test2<T>: Test2<T> { link: LinkedListLink } where T: ?Sized + Clone + 'a);
 /// # fn main() {}
 /// ```
-#[macro_export(local_inner_macros)]
+#[macro_export]
 macro_rules! intrusive_adapter {
     (@impl
         $(#[$attr:meta])* ($($privacy:tt)*) $name:ident ($($args:tt),*)
@@ -210,11 +201,14 @@ macro_rules! intrusive_adapter {
 
             #[inline]
             unsafe fn get_value(&self, link: <Self::LinkOps as $crate::LinkOps>::LinkPtr) -> *const <Self::PointerOps as $crate::PointerOps>::Value {
-                container_of!(link.as_ptr(), $value, $field)
+                $crate::container_of!(link.as_ptr(), $value, $field)
             }
             #[inline]
             unsafe fn get_link(&self, value: *const <Self::PointerOps as $crate::PointerOps>::Value) -> <Self::LinkOps as $crate::LinkOps>::LinkPtr {
-                $crate::__core::ptr::NonNull::new_unchecked(&(*value).$field as *const $link as *mut $link)
+                // We need to do this instead of just accessing the field directly
+                // to strictly follow the stack borrow rules.
+                let ptr = (value as *const u8).add($crate::offset_of!($value, $field));
+                core::ptr::NonNull::new_unchecked(ptr as *mut _)
             }
             #[inline]
             fn link_ops(&self) -> &Self::LinkOps {

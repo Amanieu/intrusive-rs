@@ -290,13 +290,6 @@ extern crate alloc;
 #[macro_use]
 extern crate std;
 
-// Re-export core for use by macros
-#[doc(hidden)]
-pub extern crate core as __core;
-// Re-export memoffset for use by macros
-#[doc(hidden)]
-pub extern crate memoffset as __memoffset;
-
 mod unsafe_ref;
 #[macro_use]
 mod adapter;
@@ -310,6 +303,7 @@ pub mod rbtree;
 pub mod singly_linked_list;
 pub mod xor_linked_list;
 
+pub use memoffset::offset_of;
 pub use crate::adapter::Adapter;
 pub use crate::key_adapter::KeyAdapter;
 pub use crate::link_ops::{DefaultLinkOps, LinkOps};
