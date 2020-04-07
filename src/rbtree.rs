@@ -2071,13 +2071,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use rand::prelude::*;
-    use rand_xorshift::XorShiftRng;
     use super::{Entry, KeyAdapter, Link, PointerOps, RBTree};
     use crate::Bound::*;
-    use crate::UnsafeRef;
-    use std::boxed::Box;
+    use rand::prelude::*;
+    use rand_xorshift::XorShiftRng;
     use std::fmt;
+    use std::rc::Rc;
     use std::vec::Vec;
 
     #[derive(Clone)]
@@ -2090,18 +2089,18 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    intrusive_adapter!(ObjAdapter = UnsafeRef<Obj>: Obj { link: Link });
+    intrusive_adapter!(ObjAdapter = Rc<Obj>: Obj { link: Link });
     impl<'a> KeyAdapter<'a> for ObjAdapter {
         type Key = i32;
         fn get_key(&self, value: &'a <Self::PointerOps as PointerOps>::Value) -> i32 {
             value.value
         }
     }
-    fn make_obj(value: i32) -> UnsafeRef<Obj> {
-        UnsafeRef::from_box(Box::new(Obj {
+    fn make_obj(value: i32) -> Rc<Obj> {
+        Rc::new(Obj {
             link: Link::new(),
             value: value,
-        }))
+        })
     }
 
     #[test]
@@ -2204,6 +2203,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn test_insert_remove() {
         let v = (0..100).map(make_obj).collect::<Vec<_>>();
@@ -2323,6 +2323,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn test_iter() {
         let v = (0..10).map(|x| make_obj(x * 10)).collect::<Vec<_>>();
