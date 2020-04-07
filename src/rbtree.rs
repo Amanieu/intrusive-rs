@@ -2078,6 +2078,7 @@ mod tests {
     use std::fmt;
     use std::rc::Rc;
     use std::vec::Vec;
+    use std::{format, vec};
 
     #[derive(Clone)]
     struct Obj {

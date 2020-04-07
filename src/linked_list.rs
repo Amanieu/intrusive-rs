@@ -1239,6 +1239,7 @@ where
 mod tests {
     use super::{Link, LinkedList};
     use std::fmt;
+    use std::format;
     use std::rc::Rc;
     use std::vec::Vec;
 

@@ -972,6 +972,7 @@ where
 mod tests {
     use super::{Link, SinglyLinkedList};
     use std::fmt;
+    use std::format;
     use std::rc::Rc;
     use std::vec::Vec;
 

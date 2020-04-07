@@ -21,8 +21,7 @@
 //! # Example
 //!
 //! ```
-//! #[macro_use]
-//! extern crate intrusive_collections;
+//! use intrusive_collections::intrusive_adapter;
 //! use intrusive_collections::{LinkedList, LinkedListLink};
 //! use std::cell::Cell;
 //!
@@ -36,43 +35,41 @@
 //! // collection. This is automatically generated using a macro.
 //! intrusive_adapter!(TestAdapter = Box<Test>: Test { link: LinkedListLink });
 //!
-//! fn main() {
-//!     // Create a list and some objects
-//!     let mut list = LinkedList::new(TestAdapter::new());
-//!     let a = Box::new(Test {
-//!         link: LinkedListLink::new(),
-//!         value: Cell::new(1),
-//!     });
-//!     let b = Box::new(Test {
-//!         link: LinkedListLink::new(),
-//!         value: Cell::new(2),
-//!     });
-//!     let c = Box::new(Test {
-//!         link: LinkedListLink::new(),
-//!         value: Cell::new(3),
-//!     });
+//! // Create a list and some objects
+//! let mut list = LinkedList::new(TestAdapter::new());
+//! let a = Box::new(Test {
+//!     link: LinkedListLink::new(),
+//!     value: Cell::new(1),
+//! });
+//! let b = Box::new(Test {
+//!     link: LinkedListLink::new(),
+//!     value: Cell::new(2),
+//! });
+//! let c = Box::new(Test {
+//!     link: LinkedListLink::new(),
+//!     value: Cell::new(3),
+//! });
 //!
-//!     // Insert the objects at the front of the list
-//!     list.push_front(a);
-//!     list.push_front(b);
-//!     list.push_front(c);
-//!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [3, 2, 1]);
+//! // Insert the objects at the front of the list
+//! list.push_front(a);
+//! list.push_front(b);
+//! list.push_front(c);
+//! assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [3, 2, 1]);
 //!
-//!     // At this point, the objects are owned by the list, and we can modify
-//!     // them through the list.
-//!     list.front().get().unwrap().value.set(4);
-//!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [4, 2, 1]);
+//! // At this point, the objects are owned by the list, and we can modify
+//! // them through the list.
+//! list.front().get().unwrap().value.set(4);
+//! assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [4, 2, 1]);
 //!
-//!     // Removing an object from an instrusive collection gives us back the
-//!     // Box<Test> that we originally inserted into it.
-//!     let a = list.pop_front().unwrap();
-//!     assert_eq!(a.value.get(), 4);
-//!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [2, 1]);
+//! // Removing an object from an instrusive collection gives us back the
+//! // Box<Test> that we originally inserted into it.
+//! let a = list.pop_front().unwrap();
+//! assert_eq!(a.value.get(), 4);
+//! assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [2, 1]);
 //!
-//!     // Dropping the collection will automatically free b and c by
-//!     // transforming them back into Box<Test> and dropping them.
-//!     drop(list);
-//! }
+//! // Dropping the collection will automatically free b and c by
+//! // transforming them back into Box<Test> and dropping them.
+//! drop(list);
 //! ```
 //!
 //! # Links and adapters
@@ -92,8 +89,7 @@
 //! keep all elements in the tree in ascending order.
 //!
 //! ```
-//! #[macro_use]
-//! extern crate intrusive_collections;
+//! use intrusive_collections::intrusive_adapter;
 //! use intrusive_collections::{SinglyLinkedListLink, SinglyLinkedList};
 //! use intrusive_collections::{LinkedListLink, LinkedList};
 //! use intrusive_collections::{XorLinkedList, XorLinkedListLink};
@@ -119,18 +115,16 @@
 //!     fn get_key(&self, x: &'a Test) -> i32 { x.value }
 //! }
 //!
-//! fn main() {
-//!     let mut a = LinkedList::new(MyAdapter::new());
-//!     let mut b = SinglyLinkedList::new(MyAdapter2::new());
-//!     let mut c = XorLinkedList::new(MyAdapter3::new());
-//!     let mut d = RBTree::new(MyAdapter4::new());
+//! let mut a = LinkedList::new(MyAdapter::new());
+//! let mut b = SinglyLinkedList::new(MyAdapter2::new());
+//! let mut c = XorLinkedList::new(MyAdapter3::new());
+//! let mut d = RBTree::new(MyAdapter4::new());
 //!
-//!     let test = Rc::new(Test::default());
-//!     a.push_front(test.clone());
-//!     b.push_front(test.clone());
-//!     c.push_front(test.clone());
-//!     d.insert(test);
-//! }
+//! let test = Rc::new(Test::default());
+//! a.push_front(test.clone());
+//! b.push_front(test.clone());
+//! c.push_front(test.clone());
+//! d.insert(test);
 //! ```
 //!
 //! # Cursors
@@ -156,8 +150,7 @@
 //! function which removes all values within a given range from a `RBTree`:
 //!
 //! ```
-//! #[macro_use]
-//! extern crate intrusive_collections;
+//! use intrusive_collections::intrusive_adapter;
 //! use intrusive_collections::{RBTreeLink, RBTree, KeyAdapter, Bound};
 //!
 //! struct Element {
@@ -183,7 +176,6 @@
 //!         cursor.remove();
 //!     }
 //! }
-//! # fn main() {}
 //! ```
 //!
 //! # Scoped collections
@@ -194,10 +186,7 @@
 //! intrusive collection will outlive the collection itself.
 //!
 //! ```
-//! #[macro_use]
-//! extern crate intrusive_collections;
-//! extern crate typed_arena;
-//!
+//! use intrusive_collections::intrusive_adapter;
 //! use intrusive_collections::{LinkedListLink, LinkedList};
 //! use typed_arena::Arena;
 //! use std::cell::Cell;
@@ -210,54 +199,52 @@
 //! // Note that we use a plain reference as the pointer type for the collection.
 //! intrusive_adapter!(ValueAdapter<'a> = &'a Value: Value { link: LinkedListLink });
 //!
-//! fn main() {
-//!     // Create an arena and a list. Note that since stack objects are dropped in
-//!     // reverse order, the Arena must be created before the LinkedList. This
-//!     // ensures that the list is dropped before the values are freed by the
-//!     // arena. This is enforced by the Rust lifetime system.
-//!     let arena = Arena::new();
-//!     let mut list = LinkedList::new(ValueAdapter::new());
+//! // Create an arena and a list. Note that since stack objects are dropped in
+//! // reverse order, the Arena must be created before the LinkedList. This
+//! // ensures that the list is dropped before the values are freed by the
+//! // arena. This is enforced by the Rust lifetime system.
+//! let arena = Arena::new();
+//! let mut list = LinkedList::new(ValueAdapter::new());
 //!
-//!     // We can now insert values allocated from the arena into the linked list
-//!     list.push_back(arena.alloc(Value {
-//!         link: LinkedListLink::new(),
-//!         value: Cell::new(1),
-//!     }));
-//!     list.push_back(arena.alloc(Value {
-//!         link: LinkedListLink::new(),
-//!         value: Cell::new(2),
-//!     }));
-//!     list.push_back(arena.alloc(Value {
-//!         link: LinkedListLink::new(),
-//!         value: Cell::new(3),
-//!     }));
-//!     assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [1, 2, 3]);
+//! // We can now insert values allocated from the arena into the linked list
+//! list.push_back(arena.alloc(Value {
+//!     link: LinkedListLink::new(),
+//!     value: Cell::new(1),
+//! }));
+//! list.push_back(arena.alloc(Value {
+//!     link: LinkedListLink::new(),
+//!     value: Cell::new(2),
+//! }));
+//! list.push_back(arena.alloc(Value {
+//!     link: LinkedListLink::new(),
+//!     value: Cell::new(3),
+//! }));
+//! assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [1, 2, 3]);
 //!
-//!     // We can also insert stack allocated values into an intrusive list.
-//!     // Again, the values must outlive the LinkedList.
-//!     let a = Value {
-//!         link: LinkedListLink::new(),
-//!         value: Cell::new(4),
-//!     };
-//!     let b = Value {
-//!         link: LinkedListLink::new(),
-//!         value: Cell::new(5),
-//!     };
-//!     let c = Value {
-//!         link: LinkedListLink::new(),
-//!         value: Cell::new(6),
-//!     };
-//!     let mut list2 = LinkedList::new(ValueAdapter::new());
-//!     list2.push_back(&a);
-//!     list2.push_back(&b);
-//!     list2.push_back(&c);
-//!     assert_eq!(list2.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [4, 5, 6]);
+//! // We can also insert stack allocated values into an intrusive list.
+//! // Again, the values must outlive the LinkedList.
+//! let a = Value {
+//!     link: LinkedListLink::new(),
+//!     value: Cell::new(4),
+//! };
+//! let b = Value {
+//!     link: LinkedListLink::new(),
+//!     value: Cell::new(5),
+//! };
+//! let c = Value {
+//!     link: LinkedListLink::new(),
+//!     value: Cell::new(6),
+//! };
+//! let mut list2 = LinkedList::new(ValueAdapter::new());
+//! list2.push_back(&a);
+//! list2.push_back(&b);
+//! list2.push_back(&c);
+//! assert_eq!(list2.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [4, 5, 6]);
 //!
-//!     // Since these are shared references, any changes in the values are reflected in
-//!     // the list.
-//!     a.value.set(7);
-//!     assert_eq!(list2.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [7, 5, 6]);
-//! }
+//! // Since these are shared references, any changes in the values are reflected in
+//! // the list.
+//! a.value.set(7);
+//! assert_eq!(list2.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [7, 5, 6]);
 //! ```
 //!
 //! # Safety
@@ -280,14 +267,12 @@
 #![warn(missing_docs)]
 #![warn(rust_2018_idioms)]
 #![no_std]
-#![cfg_attr(feature = "nightly", feature(const_fn, allow_internal_unstable))]
+#![cfg_attr(feature = "nightly", feature(const_fn))]
 
-// Use liballoc on nightly to avoid a dependency on libstd
-#[cfg(all(feature = "alloc"))]
+#[cfg(feature = "alloc")]
 extern crate alloc;
 
 #[cfg(test)]
-#[macro_use]
 extern crate std;
 
 mod unsafe_ref;
@@ -303,7 +288,6 @@ pub mod rbtree;
 pub mod singly_linked_list;
 pub mod xor_linked_list;
 
-pub use memoffset::offset_of;
 pub use crate::adapter::Adapter;
 pub use crate::key_adapter::KeyAdapter;
 pub use crate::link_ops::{DefaultLinkOps, LinkOps};
@@ -317,6 +301,7 @@ pub use crate::singly_linked_list::SinglyLinkedList;
 pub use crate::unsafe_ref::UnsafeRef;
 pub use crate::xor_linked_list::Link as XorLinkedListLink;
 pub use crate::xor_linked_list::XorLinkedList;
+pub use memoffset::offset_of;
 
 /// An endpoint of a range of keys.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]

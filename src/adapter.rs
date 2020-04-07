@@ -75,14 +75,13 @@ pub unsafe trait Adapter {
 /// # Examples
 ///
 /// ```
-/// # #[macro_use] extern crate intrusive_collections;
-/// # fn main() {
+/// use intrusive_collections::container_of;
+///
 /// struct S { x: u32, y: u32 };
 /// let container = S { x: 1, y: 2 };
 /// let field = &container.x;
 /// let container2: *const S = unsafe { container_of!(field, S, x) };
 /// assert_eq!(&container as *const S, container2);
-/// # }
 /// ```
 ///
 /// # Safety
@@ -136,9 +135,8 @@ macro_rules! container_of {
 /// # Examples
 ///
 /// ```
-/// #[macro_use]
-/// extern crate intrusive_collections;
 /// use intrusive_collections::{LinkedListLink, RBTreeLink};
+/// use intrusive_collections::intrusive_adapter;
 ///
 /// pub struct Test {
 ///     link: LinkedListLink,
@@ -154,7 +152,6 @@ macro_rules! container_of {
 ///     val: T,
 /// }
 /// intrusive_adapter!(MyAdapter3<'a, T> = &'a Test2<T>: Test2<T> { link: LinkedListLink } where T: ?Sized + Clone + 'a);
-/// # fn main() {}
 /// ```
 #[macro_export]
 macro_rules! intrusive_adapter {
