@@ -1259,7 +1259,7 @@ mod tests {
         Rc::new(Obj {
             link1: Link::new(),
             link2: Link::default(),
-            value: value,
+            value,
         })
     }
 

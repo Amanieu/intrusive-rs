@@ -48,12 +48,20 @@ pub unsafe trait Adapter {
     type PointerOps: PointerOps;
 
     /// Gets a reference to an object from a reference to a link in that object.
+    ///
+    /// # Safety
+    ///
+    /// `link` must be a valid pointer previously returned by `get_link`.
     unsafe fn get_value(
         &self,
         link: <Self::LinkOps as LinkOps>::LinkPtr,
     ) -> *const <Self::PointerOps as PointerOps>::Value;
 
     /// Gets a reference to the link for the given object.
+    ///
+    /// # Safety
+    ///
+    /// `value` must be a valid pointer.
     unsafe fn get_link(
         &self,
         value: *const <Self::PointerOps as PointerOps>::Value,

@@ -189,7 +189,7 @@ pub struct LinkOps;
 impl LinkOps {
     #[inline]
     unsafe fn set_parent_color(
-        &self,
+        self,
         ptr: <Self as link_ops::LinkOps>::LinkPtr,
         parent: Option<<Self as link_ops::LinkOps>::LinkPtr>,
         color: Color,
@@ -601,7 +601,7 @@ unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Opt
     } else {
         next(link_ops, ptr).unwrap_unchecked()
     };
-    let x = if !link_ops.left(y).is_none() {
+    let x = if link_ops.left(y).is_some() {
         link_ops.left(y)
     } else {
         link_ops.right(y)
@@ -2100,7 +2100,7 @@ mod tests {
     fn make_obj(value: i32) -> Rc<Obj> {
         Rc::new(Obj {
             link: Link::new(),
-            value: value,
+            value,
         })
     }
 
