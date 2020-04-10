@@ -14,22 +14,18 @@ pub unsafe trait LinkOps {
     /// The link pointer type.
     type LinkPtr: Copy + Eq;
 
-    /// Returns `true` if `ptr` is currently linked into an intrusive collection.
+    /// Attempts to acquire ownership of a link so that it can be used in an
+    /// intrusive collection.
     ///
-    /// # Safety
-    /// An implementation of `is_linked` must not panic.
-    unsafe fn is_linked(&self, ptr: Self::LinkPtr) -> bool;
+    /// If this function succeeds then the intrusive collection will have
+    /// exclusive access to the link until `release_link` is called.
+    unsafe fn acquire_link(&mut self, ptr: Self::LinkPtr) -> bool;
 
-    /// Forcibly unlinks `ptr` from an intrusive collection.
+    /// Releases ownership of a link that was previously acquired with `acquire_link`.
     ///
     /// # Safety
-    /// This function should only be used after calling the `fast_clear` method of the intrusive collection
-    /// since `fast_clear` "clears" the collection without unlinking the nodes.
-    ///
-    /// Otherwise, it is undefined behavior to call this function while `ptr` is still linked into an intrusive collection.
-    ///
-    /// An implementation of `mark_unlinked` must not panic.
-    unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr);
+    /// An implementation of `release_link` must not panic.
+    unsafe fn release_link(&mut self, ptr: Self::LinkPtr);
 }
 
 /// The default implementation of `LinkOps` associated with a link type.

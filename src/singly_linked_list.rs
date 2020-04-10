@@ -132,12 +132,17 @@ unsafe impl link_ops::LinkOps for LinkOps {
     type LinkPtr = NonNull<Link>;
 
     #[inline]
-    unsafe fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
-        ptr.as_ref().is_linked()
+    unsafe fn acquire_link(&mut self, ptr: Self::LinkPtr) -> bool {
+        if ptr.as_ref().is_linked() {
+            false
+        } else {
+            ptr.as_ref().next.set(None);
+            true
+        }
     }
 
     #[inline]
-    unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr) {
+    unsafe fn release_link(&mut self, ptr: Self::LinkPtr) {
         ptr.as_ref().next.set(UNLINKED_MARKER);
     }
 }
@@ -253,7 +258,7 @@ unsafe fn replace_with<T: SinglyLinkedListOps>(
         link_ops.set_next(prev, Some(new));
     }
     link_ops.set_next(new, link_ops.next(ptr));
-    link_ops.mark_unlinked(ptr);
+    link_ops.release_link(ptr);
 }
 
 #[inline]
@@ -265,7 +270,7 @@ unsafe fn remove<T: SinglyLinkedListOps>(
     if let Some(prev) = prev {
         link_ops.set_next(prev, link_ops.next(ptr));
     }
-    link_ops.mark_unlinked(ptr);
+    link_ops.release_link(ptr);
 }
 
 #[inline]
@@ -638,26 +643,23 @@ where
 {
     #[inline]
     fn node_from_value(
-        &self,
+        &mut self,
         val: <A::PointerOps as PointerOps>::Pointer,
     ) -> <A::LinkOps as link_ops::LinkOps>::LinkPtr {
         use link_ops::LinkOps;
 
         unsafe {
             let raw = self.adapter.pointer_ops().into_raw(val);
+            let link = self.adapter.get_link(raw);
 
-            if self
-                .adapter
-                .link_ops()
-                .is_linked(self.adapter.get_link(raw))
-            {
+            if !self.adapter.link_ops_mut().acquire_link(link) {
                 // convert the node back into a pointer
                 self.adapter.pointer_ops().from_raw(raw);
 
                 panic!("attempted to insert an object that is already linked");
             }
 
-            self.adapter.get_link(raw)
+            link
         }
     }
 
@@ -778,7 +780,7 @@ where
         while let Some(x) = current {
             unsafe {
                 let next = self.adapter.link_ops().next(x);
-                self.adapter.link_ops_mut().mark_unlinked(x);
+                self.adapter.link_ops_mut().release_link(x);
                 self.adapter
                     .pointer_ops()
                     .from_raw(self.adapter.get_value(x));
