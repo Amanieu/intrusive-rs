@@ -42,6 +42,7 @@ pub unsafe trait SinglyLinkedListOps: link_ops::LinkOps {
 
 /// Intrusive link that allows an object to be inserted into a
 /// `SinglyLinkedList`.
+#[repr(align(2))]
 pub struct Link {
     next: Cell<Option<NonNull<Link>>>,
 }
@@ -970,9 +971,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Link, SinglyLinkedList};
-    use crate::UnsafeRef;
-    use std::boxed::Box;
     use std::fmt;
+    use std::format;
+    use std::rc::Rc;
     use std::vec::Vec;
 
     struct Obj {
@@ -985,14 +986,14 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    intrusive_adapter!(ObjAdapter1 = UnsafeRef<Obj>: Obj { link1: Link });
-    intrusive_adapter!(ObjAdapter2 = UnsafeRef<Obj>: Obj { link2: Link });
-    fn make_obj(value: u32) -> UnsafeRef<Obj> {
-        UnsafeRef::from_box(Box::new(Obj {
+    intrusive_adapter!(ObjAdapter1 = Rc<Obj>: Obj { link1: Link });
+    intrusive_adapter!(ObjAdapter2 = Rc<Obj>: Obj { link2: Link });
+    fn make_obj(value: u32) -> Rc<Obj> {
+        Rc::new(Obj {
             link1: Link::new(),
             link2: Link::default(),
-            value: value,
-        }))
+            value,
+        })
     }
 
     #[test]

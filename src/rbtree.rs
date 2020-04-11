@@ -95,6 +95,7 @@ pub unsafe trait RBTreeOps: link_ops::LinkOps {
 
 /// Intrusive link that allows an object to be inserted into a
 /// `RBTree`.
+#[repr(align(2))]
 pub struct Link {
     left: Cell<Option<NonNull<Link>>>,
     right: Cell<Option<NonNull<Link>>>,
@@ -188,7 +189,7 @@ pub struct LinkOps;
 impl LinkOps {
     #[inline]
     unsafe fn set_parent_color(
-        &self,
+        self,
         ptr: <Self as link_ops::LinkOps>::LinkPtr,
         parent: Option<<Self as link_ops::LinkOps>::LinkPtr>,
         color: Color,
@@ -600,7 +601,7 @@ unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Opt
     } else {
         next(link_ops, ptr).unwrap_unchecked()
     };
-    let x = if !link_ops.left(y).is_none() {
+    let x = if link_ops.left(y).is_some() {
         link_ops.left(y)
     } else {
         link_ops.right(y)
@@ -2070,14 +2071,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use self::rand::{Rng, XorShiftRng};
     use super::{Entry, KeyAdapter, Link, PointerOps, RBTree};
     use crate::Bound::*;
-    use crate::UnsafeRef;
-    use rand;
-    use std::boxed::Box;
+    use rand::prelude::*;
+    use rand_xorshift::XorShiftRng;
     use std::fmt;
+    use std::rc::Rc;
     use std::vec::Vec;
+    use std::{format, vec};
 
     #[derive(Clone)]
     struct Obj {
@@ -2089,18 +2090,18 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    intrusive_adapter!(ObjAdapter = UnsafeRef<Obj>: Obj { link: Link });
+    intrusive_adapter!(ObjAdapter = Rc<Obj>: Obj { link: Link });
     impl<'a> KeyAdapter<'a> for ObjAdapter {
         type Key = i32;
         fn get_key(&self, value: &'a <Self::PointerOps as PointerOps>::Value) -> i32 {
             value.value
         }
     }
-    fn make_obj(value: i32) -> UnsafeRef<Obj> {
-        UnsafeRef::from_box(Box::new(Obj {
+    fn make_obj(value: i32) -> Rc<Obj> {
+        Rc::new(Obj {
             link: Link::new(),
-            value: value,
-        }))
+            value,
+        })
     }
 
     #[test]
@@ -2203,13 +2204,14 @@ mod tests {
         );
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn test_insert_remove() {
         let v = (0..100).map(make_obj).collect::<Vec<_>>();
         assert!(v.iter().all(|x| !x.link.is_linked()));
         let mut t = RBTree::new(ObjAdapter::new());
         assert!(t.is_empty());
-        let mut rng = XorShiftRng::new_unseeded();
+        let mut rng = XorShiftRng::seed_from_u64(0);
 
         {
             let mut expected = Vec::new();
@@ -2245,7 +2247,7 @@ mod tests {
 
         {
             let mut indices = (0..v.len()).collect::<Vec<_>>();
-            rng.shuffle(&mut indices);
+            indices.shuffle(&mut rng);
             let mut expected = Vec::new();
             for i in indices {
                 t.insert(v[i].clone());
@@ -2270,7 +2272,7 @@ mod tests {
 
         {
             let mut indices = (0..v.len()).collect::<Vec<_>>();
-            rng.shuffle(&mut indices);
+            indices.shuffle(&mut rng);
             let mut expected = Vec::new();
             for i in indices {
                 {
@@ -2298,7 +2300,7 @@ mod tests {
 
         {
             let mut indices = (0..v.len()).collect::<Vec<_>>();
-            rng.shuffle(&mut indices);
+            indices.shuffle(&mut rng);
             let mut expected = Vec::new();
             for i in indices {
                 {
@@ -2322,6 +2324,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn test_iter() {
         let v = (0..10).map(|x| make_obj(x * 10)).collect::<Vec<_>>();

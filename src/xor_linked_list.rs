@@ -87,6 +87,7 @@ pub unsafe trait XorLinkedListOps: link_ops::LinkOps {
 
 /// Intrusive link that allows an object to be inserted into a
 /// `XorLinkedList`.
+#[repr(align(2))]
 pub struct Link {
     packed: Cell<usize>,
 }
@@ -1404,11 +1405,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Link, XorLinkedList};
-    use crate::UnsafeRef;
     use core::cell::Cell;
     use core::ptr;
     use std::boxed::Box;
     use std::fmt;
+    use std::format;
+    use std::rc::Rc;
     use std::vec::Vec;
 
     struct Obj {
@@ -1421,15 +1423,15 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    intrusive_adapter!(ObjAdapter1 = UnsafeRef<Obj>: Obj { link1: Link });
-    intrusive_adapter!(ObjAdapter2 = UnsafeRef<Obj>: Obj { link2: Link });
+    intrusive_adapter!(ObjAdapter1 = Rc<Obj>: Obj { link1: Link });
+    intrusive_adapter!(ObjAdapter2 = Rc<Obj>: Obj { link2: Link });
 
-    fn make_obj(value: u32) -> UnsafeRef<Obj> {
-        UnsafeRef::from_box(Box::new(Obj {
+    fn make_obj(value: u32) -> Rc<Obj> {
+        Rc::new(Obj {
             link1: Link::new(),
             link2: Link::default(),
-            value: value,
-        }))
+            value,
+        })
     }
 
     #[test]

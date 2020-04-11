@@ -19,8 +19,7 @@ use crate::pointer_ops::PointerOps;
 /// # Examples
 ///
 /// ```
-/// #[macro_use]
-/// extern crate intrusive_collections;
+/// use intrusive_collections::intrusive_adapter;
 /// use intrusive_collections::{RBTreeLink, KeyAdapter};
 ///
 /// struct S {
@@ -57,8 +56,6 @@ use crate::pointer_ops::PointerOps;
 ///     type Key = (i32, &'a str, f64);
 ///     fn get_key(&self, u: &'a U) -> Self::Key { (u.key1, &u.key2, u.key3) }
 /// }
-///
-/// # fn main() {}
 /// ```
 pub trait KeyAdapter<'a>: Adapter {
     /// Type of the key returned by `get_key`.
