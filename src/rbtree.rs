@@ -208,12 +208,17 @@ unsafe impl link_ops::LinkOps for LinkOps {
     type LinkPtr = NonNull<Link>;
 
     #[inline]
-    unsafe fn is_linked(&self, ptr: Self::LinkPtr) -> bool {
-        ptr.as_ref().is_linked()
+    unsafe fn acquire_link(&mut self, ptr: Self::LinkPtr) -> bool {
+        if ptr.as_ref().is_linked() {
+            false
+        } else {
+            self.set_parent_color(ptr, None, Color::Black);
+            true
+        }
     }
 
     #[inline]
-    unsafe fn mark_unlinked(&mut self, ptr: Self::LinkPtr) {
+    unsafe fn release_link(&mut self, ptr: Self::LinkPtr) {
         ptr.as_ref().parent_color.set(UNLINKED_MARKER);
     }
 }
@@ -442,7 +447,7 @@ unsafe fn replace_with<T: RBTreeOps>(
     link_ops.set_right(new, link_ops.right(ptr));
     link_ops.set_parent(new, link_ops.parent(ptr));
     link_ops.set_color(new, link_ops.color(ptr));
-    link_ops.mark_unlinked(ptr);
+    link_ops.release_link(ptr);
 }
 
 #[inline]
@@ -741,7 +746,7 @@ unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Opt
             }
         }
     }
-    link_ops.mark_unlinked(ptr);
+    link_ops.release_link(ptr);
 }
 
 // =============================================================================
@@ -1176,26 +1181,23 @@ where
 {
     #[inline]
     fn node_from_value(
-        &self,
+        &mut self,
         val: <A::PointerOps as PointerOps>::Pointer,
     ) -> <A::LinkOps as link_ops::LinkOps>::LinkPtr {
         use link_ops::LinkOps;
 
         unsafe {
             let raw = self.adapter.pointer_ops().into_raw(val);
+            let link = self.adapter.get_link(raw);
 
-            if self
-                .adapter
-                .link_ops()
-                .is_linked(self.adapter.get_link(raw))
-            {
+            if !self.adapter.link_ops_mut().acquire_link(link) {
                 // convert the node back into a pointer
                 self.adapter.pointer_ops().from_raw(raw);
 
                 panic!("attempted to insert an object that is already linked");
             }
 
-            self.adapter.get_link(raw)
+            link
         }
     }
 
@@ -1352,7 +1354,7 @@ where
                 let right = self.adapter.link_ops_mut().right(current);
                 self.clear_recurse(left);
                 self.clear_recurse(right);
-                self.adapter.link_ops_mut().mark_unlinked(current);
+                self.adapter.link_ops_mut().release_link(current);
                 self.adapter
                     .pointer_ops()
                     .from_raw(self.adapter.get_value(current));
@@ -2015,7 +2017,7 @@ where
             } else {
                 self.head = link_ops.parent(head);
             }
-            link_ops.mark_unlinked(head);
+            link_ops.release_link(head);
             Some(
                 self.tree
                     .adapter
@@ -2054,7 +2056,7 @@ where
             } else {
                 self.tail = link_ops.parent(tail);
             }
-            link_ops.mark_unlinked(tail);
+            link_ops.release_link(tail);
             Some(
                 self.tree
                     .adapter
