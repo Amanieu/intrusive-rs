@@ -21,7 +21,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-intrusive-collections = "0.8"
+intrusive-collections = "0.9"
 ```
 
 This crate has two Cargo features:
