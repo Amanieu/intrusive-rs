@@ -267,13 +267,17 @@
 #![warn(missing_docs)]
 #![warn(rust_2018_idioms)]
 #![no_std]
-#![cfg_attr(feature = "nightly", feature(const_fn))]
+#![cfg_attr(
+    feature = "nightly",
+    feature(const_fn, const_generics, core_intrinsics)
+)]
 #![allow(clippy::declare_interior_mutable_const, clippy::collapsible_if)]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
 #[cfg(test)]
+#[macro_use]
 extern crate std;
 
 mod unsafe_ref;
@@ -284,16 +288,11 @@ mod link_ops;
 mod pointer_ops;
 mod unchecked_option;
 
+pub mod hash_table;
 pub mod linked_list;
 pub mod rbtree;
 pub mod singly_linked_list;
 pub mod xor_linked_list;
-
-pub mod array;
-pub mod dynamic_array;
-mod hash_adapter;
-mod hash_table;
-pub use hash_table::chaining as chained_hash_table;
 
 pub use crate::adapter::Adapter;
 pub use crate::key_adapter::KeyAdapter;
@@ -309,10 +308,6 @@ pub use crate::unsafe_ref::UnsafeRef;
 pub use crate::xor_linked_list::Link as XorLinkedListLink;
 pub use crate::xor_linked_list::XorLinkedList;
 pub use memoffset::offset_of;
-
-pub use crate::chained_hash_table::ChainedHashTable;
-pub use crate::chained_hash_table::ChainedLoadFactor;
-pub use crate::hash_adapter::HashAdapter;
 
 /// An endpoint of a range of keys.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]

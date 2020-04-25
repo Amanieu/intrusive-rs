@@ -1,54 +1,34 @@
-// Copyright 2019 Amari Robinson
+// Copyright 2020 Amari Robinson
 //
 // Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-pub mod chaining;
+use core::borrow::Borrow;
+use core::fmt;
 
-use core::cmp;
+use crate::adapter::Adapter;
+use crate::key_adapter::KeyAdapter;
+use crate::link_ops::{self, DefaultLinkOps};
+use crate::linked_list;
+use crate::pointer_ops::{DefaultPointerOps, PointerOps};
+use crate::singly_linked_list;
+use crate::unchecked_option::UncheckedOptionExt;
+use crate::unsafe_ref::UnsafeRef;
+use crate::xor_linked_list;
 
-/// Chaining Hash Table Load Factor
-#[derive(Clone, Copy, Debug, Eq)]
-pub struct ChainedLoadFactor {
-    /// The number of items in the hash table.
-    pub size: usize,
-    /// The number of buckets in the hash table.
-    pub bucket_count: usize,
-}
+mod array;
+mod bucket_ops;
+mod hash_ops;
+mod hash_table;
+mod load_factor;
 
-impl ChainedLoadFactor {
-    /// Returns a new `ChainedLoadFactor`.
-    #[inline]
-    pub fn new(size: usize, bucket_count: usize) -> ChainedLoadFactor {
-        ChainedLoadFactor { size, bucket_count }
-    }
-}
-
-impl PartialEq for ChainedLoadFactor {
-    #[inline]
-    fn eq(&self, rhs: &Self) -> bool {
-        self.size * rhs.bucket_count == rhs.size * self.bucket_count
-    }
-}
-
-impl PartialOrd for ChainedLoadFactor {
-    #[inline]
-    fn partial_cmp(&self, rhs: &Self) -> Option<cmp::Ordering> {
-        (self.size * rhs.bucket_count).partial_cmp(&(rhs.size * self.bucket_count))
-    }
-}
-
-impl Ord for ChainedLoadFactor {
-    #[inline]
-    fn cmp(&self, rhs: &Self) -> cmp::Ordering {
-        (self.size * rhs.bucket_count).cmp(&(rhs.size * self.bucket_count))
-    }
-}
-
-/// The default load factor of a chaining hash table.
-pub const DEFAULT_CHAINED_LOAD_FACTOR: ChainedLoadFactor = ChainedLoadFactor {
-    size: 1,
-    bucket_count: 1,
+pub use self::array::Array;
+pub use self::bucket_ops::{BucketOps, DefaultBucketOps};
+pub use self::hash_ops::{DefaultHashOps, HashOps};
+pub use self::hash_table::{
+    BucketCursor, BucketCursorMut, Cursor, CursorMut, Drain, HashTable, HashTableAdapter,
+    InsertCursor, IntoIter, Iter, KeyOps, RawEntryBuilder, RawEntryBuilderMut, RawEntryMut,
 };
+pub use self::load_factor::LoadFactor;
