@@ -2779,7 +2779,7 @@ mod tests {
 
         for obj in &m {
             assert_eq!(obj.value(), obj.key() * 2);
-            observed |= 1 << obj.key();
+            observed |= 1_u32 << obj.key();
         }
 
         assert_eq!(observed, 0xFFFF_FFFF);
