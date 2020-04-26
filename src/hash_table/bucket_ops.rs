@@ -12,42 +12,101 @@ use crate::adapter::Adapter;
 use crate::linked_list::{LinkedList, LinkedListOps};
 use crate::pointer_ops::PointerOps;
 use crate::singly_linked_list::{SinglyLinkedList, SinglyLinkedListOps};
-use crate::unchecked_option::UncheckedOptionExt;
-use crate::xor_linked_list::{XorLinkedList, XorLinkedListOps};
 
+/// Trait for bucket operations.
+///
+/// # Time Complexities
+///
+/// |Operation|`SinglyLinkedList`|`LinkedList`|
+/// |-|-|-|
+/// |`is_empty`|`O(1)`|`O(1)`|
+/// |`clear`|`O(n)`|`O(n)`|
+/// |`fast_clear`|`O(1)`|`O(1)`|
+/// |`is_null`|`O(1)`|`O(1)`|
+/// |`get`|`O(1)`|`O(1)`|
+/// |`cursor_from_ptr`|`O(1)`|`O(1)`|
+/// |`find_prev`|`O(n)`|`O(n)`|
+/// |`next`|`O(1)`|`O(1)`|
+/// |`insert_after`|`O(1)`|`O(1)`|
+/// |`remove_next`|`O(1)`|`O(1)`|
+/// |`remove`|`O(n)`|`O(1)`|
+/// |`replace_next_with`|`O(1)`|`O(1)`|
+/// |`replace_with`|`O(n)`|`O(1)`|
 pub unsafe trait BucketOps {
+    /// Collection-specific pointer conversions which allow an object to
+    /// be inserted in an intrusive collection.
     type PointerOps: PointerOps;
+
+    /// The hash table bucket type.
     type Bucket;
+
+    /// The cursor over elements within a bucket.
     type Cursor: Clone;
 
+    /// Returns `true` if the bucket is empty.
     unsafe fn is_empty(&self, bucket: &Self::Bucket) -> bool;
 
+    /// Removes all elements from the bucket.
+    ///
+    /// This will unlink all objects currently in the bucket, which requires iterating through
+    /// all elements in the bucket. Each element is converted back into an owned pointer and then dropped.
     unsafe fn clear(&mut self, bucket: &mut Self::Bucket);
 
+    /// Empties the bucket without unlinking or freeing the objects within it.
+    ///
+    /// Since this does not unlink any objects, any attempts to link these objects into another intrusive collection will fail,
+    /// but will not cause any memory unsafety.
+    /// To unlink those objects manually, you must call the `force_unlink` function on them.
     unsafe fn fast_clear(&mut self, bucket: &mut Self::Bucket);
 
+    /// Returns `true` if the cursor is pointing to the null object.
     unsafe fn is_null(&self, bucket: &Self::Bucket, cursor: &Self::Cursor) -> bool;
 
+    /// Returns a reference to the object that the cursor is currently pointing to.
+    ///
+    /// This returns `None` if the cursor is pointing to the null object.
     unsafe fn get(
         &self,
         bucket: &Self::Bucket,
         cursor: &Self::Cursor,
     ) -> Option<&<Self::PointerOps as PointerOps>::Value>;
 
+    /// Returns a null cursor for this bucket.
     unsafe fn cursor(&self, bucket: &Self::Bucket) -> Self::Cursor;
 
+    /// Creates a cursor from a pointer to an element.
+    ///
+    /// # Safety
+    /// `ptr` must be a pointer to an object that is a member of this bucket.
     unsafe fn cursor_from_ptr(
         &self,
         bucket: &Self::Bucket,
         ptr: *const <Self::PointerOps as PointerOps>::Value,
     ) -> Self::Cursor;
 
+    /// Searches the bucket for the first element where `is_match` returns `true`.
+    ///
+    /// Returns `None` if no match was found, or the bucket was empty.
     unsafe fn find_prev<F>(&self, bucket: &Self::Bucket, is_match: F) -> Option<Self::Cursor>
     where
         for<'b> F: FnMut(&'b <Self::PointerOps as PointerOps>::Value) -> bool;
 
+    /// Returns a cursor that points to the next element of the bucket.
+    ///
+    /// If `self` points to the null object,
+    /// then it will return a cursor that points to the first element of the bucket.
+    ///
+    /// If `self` points to the last element of the bucket,
+    /// then it will return a cursor that points to the null object.
     unsafe fn next(&self, bucket: &Self::Bucket, prev: &Self::Cursor) -> Self::Cursor;
 
+    /// Inserts a new element into the bucket after the current one.
+    ///
+    /// If the cursor currently points to the null object,
+    /// then the new element is inserted at the front of the bucket.
+    ///
+    /// # Panics
+    /// Panics if the new element is already linked to a different intrusive collection.
     unsafe fn insert_after(
         &mut self,
         bucket: &mut Self::Bucket,
@@ -55,18 +114,39 @@ pub unsafe trait BucketOps {
         value: <Self::PointerOps as PointerOps>::Pointer,
     );
 
+    /// Removes the next element from the bucket.
+    ///
+    /// Returns a pointer to the element that was removed.
+    /// The cursor is not moved.
+    ///
+    /// If the cursor currently points to the last element of the bucket, then no element is removed  and `None` is returned.
     unsafe fn remove_next(
         &mut self,
         bucket: &mut Self::Bucket,
         prev: &Self::Cursor,
     ) -> Option<<Self::PointerOps as PointerOps>::Pointer>;
 
+    /// Removes the current element from the bucket.
+    ///
+    /// Returns a pointer to the element that was removed.
+    /// The cursor is advanced to the next element of the bucket.
+    ///
+    /// If the cursor currently points to the null object, then no element is removed  and `None` is returned.
     unsafe fn remove(
         &mut self,
         bucket: &mut Self::Bucket,
         current: &mut Self::Cursor,
     ) -> Option<<Self::PointerOps as PointerOps>::Pointer>;
 
+    /// Removes the next element from the bucket, and inserts another object in its place.
+    ///
+    /// Returns a pointer to the element that was removed.
+    /// The cursor is not moved.
+    ///
+    /// If the cursor currently points to the last element of the bucket, then `Err(value)` is returned.
+    ///
+    /// # Panics
+    /// Panics if the new element is already linked to a different intrusive collection.
     unsafe fn replace_next_with(
         &mut self,
         bucket: &mut Self::Bucket,
@@ -74,21 +154,24 @@ pub unsafe trait BucketOps {
         value: <Self::PointerOps as PointerOps>::Pointer,
     ) -> Result<<Self::PointerOps as PointerOps>::Pointer, <Self::PointerOps as PointerOps>::Pointer>;
 
+    /// Removes the current element from the bucket, and inserts another object in its place.
+    ///
+    /// Returns a pointer to the element that was removed.
+    /// The cursor points to the newly added element.
+    ///
+    /// If the cursor currently points to the null object, then `Err(value)` is returned.
+    ///
+    /// # Panics
+    /// Panics if the new element is already linked to a different intrusive collection.
     unsafe fn replace_with(
         &mut self,
         bucket: &mut Self::Bucket,
         current: &mut Self::Cursor,
         value: <Self::PointerOps as PointerOps>::Pointer,
     ) -> Result<<Self::PointerOps as PointerOps>::Pointer, <Self::PointerOps as PointerOps>::Pointer>;
-
-    unsafe fn splice_after(
-        &mut self,
-        bucket: &mut Self::Bucket,
-        prev: &Self::Cursor,
-        other: Self::Bucket,
-    ) -> Result<(), Self::Bucket>;
 }
 
+/// The default implementation of `BucketOps`.
 pub struct DefaultBucketOps<T>(PhantomData<T>);
 
 impl<T> Default for DefaultBucketOps<T> {
@@ -283,24 +366,6 @@ where
 
         Err(value)
     }
-
-    #[inline]
-    unsafe fn splice_after(
-        &mut self,
-        bucket: &mut Self::Bucket,
-        prev: &Self::Cursor,
-        other: Self::Bucket,
-    ) -> Result<(), Self::Bucket> {
-        let mut cursor = if let Some(prev) = prev {
-            bucket.cursor_mut_from_ptr(prev.as_ptr())
-        } else {
-            bucket.cursor_mut()
-        };
-
-        cursor.splice_after(other);
-
-        Ok(())
-    }
 }
 
 unsafe impl<A: Adapter> BucketOps for DefaultBucketOps<LinkedList<A>>
@@ -485,23 +550,5 @@ where
         } else {
             Err(value)
         }
-    }
-
-    #[inline]
-    unsafe fn splice_after(
-        &mut self,
-        bucket: &mut Self::Bucket,
-        prev: &Self::Cursor,
-        other: Self::Bucket,
-    ) -> Result<(), Self::Bucket> {
-        let mut cursor = if let Some(prev) = prev {
-            bucket.cursor_mut_from_ptr(prev.as_ptr())
-        } else {
-            bucket.cursor_mut()
-        };
-
-        cursor.splice_after(other);
-
-        Ok(())
     }
 }

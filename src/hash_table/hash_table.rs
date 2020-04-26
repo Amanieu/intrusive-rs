@@ -7,53 +7,69 @@
 
 use core::borrow::Borrow;
 use core::fmt;
-#[cfg(feature = "nightly")]
-use core::intrinsics::unlikely;
 use core::iter::{ExactSizeIterator, Extend, FromIterator, FusedIterator, IntoIterator};
 use core::ops::Index;
 
-use crate::adapter::Adapter;
-use crate::key_adapter::KeyAdapter;
-use crate::link_ops::{self, DefaultLinkOps};
-use crate::linked_list;
-use crate::pointer_ops::{DefaultPointerOps, PointerOps};
-use crate::singly_linked_list;
+use crate::pointer_ops::PointerOps;
 use crate::unchecked_option::UncheckedOptionExt;
-use crate::unsafe_ref::UnsafeRef;
-use crate::xor_linked_list;
 
 use crate::hash_table::array::Array;
-use crate::hash_table::bucket_ops::{BucketOps, DefaultBucketOps};
-use crate::hash_table::hash_ops::{DefaultHashOps, HashOps};
-use crate::hash_table::load_factor::LoadFactor;
-
-#[cfg(not(feature = "nightly"))]
-#[inline]
-fn unlikely(b: bool) -> bool {
-    b
-}
+use crate::hash_table::bucket_ops::BucketOps;
+use crate::hash_table::hash_ops::HashOps;
 
 // =============================================================================
 // HashTableAdapter
 // =============================================================================
 
+/// An adapter trait which allows a type to be inserted into an intrusive hash table.
+///
+/// `PointerOps` implements the collection-specific pointer conversions which
+/// allow an object to be inserted into an intrusive hash table.
+/// `PointerOps` type may be stateful, allowing custom pointer types.
+///
+/// `BucketOps` implements the collection-specific operations which
+/// allow an object to be inserted into an intrusive hash table bucket.
+/// `BucketOps` type may be stateful, allowing custom bucket metadata without
+/// modifying the underlying container. (E.g. Bitset for tracking non-empty buckets.)
+///
+/// `KeyOps` implements the collection-specific key operations which
+/// allow an object to be inserted into an intrusive hash table.
+///
+/// `HashOps` implements the collection-specific hashing operations which
+/// allow an object to be inserted into an intrusive hash table.
+///
+/// A single object type may have multiple adapters, which allows it to be part
+/// of multiple intrusive collections simultaneously.
+///
+/// It is also possible to create stateful adapters.
+/// This allows links and containers to be separated and avoids the need for objects to be modified to
+/// contain a link.
 pub trait HashTableAdapter {
+    /// Collection-specific pointer conversions which allow an object to be inserted in an intrusive hash table.
     type PointerOps: PointerOps;
 
+    /// Collection-specific bucket operations which allow an object to be inserted in an intrusive hash table.
     type BucketOps: BucketOps<PointerOps = Self::PointerOps>;
 
+    /// Collection-specific key operations which allow an object to be inserted in an intrusive hash table.
     type KeyOps;
 
+    /// Collection-specific hash operations which allow an object to be inserted in an intrusive hash table.
     type HashOps;
 
+    /// Returns a reference to the pointer converter.
     fn pointer_ops(&self) -> &Self::PointerOps;
 
+    /// Returns a reference to the bucket operations.
     fn bucket_ops(&self) -> &Self::BucketOps;
 
+    /// Returns a reference to the bucket mutation operations.
     fn bucket_ops_mut(&mut self) -> &mut Self::BucketOps;
 
+    /// Returns a reference to the key operations.
     fn key_ops(&self) -> &Self::KeyOps;
 
+    /// Returns a reference to the hash operations.
     fn hash_ops(&self) -> &Self::HashOps;
 }
 
@@ -61,9 +77,12 @@ pub trait HashTableAdapter {
 // KeyOps
 // =============================================================================
 
+/// Key operations.
 pub trait KeyOps<'a, T: ?Sized> {
+    /// The key type.
     type Key;
 
+    /// Returns the key of `value`.
     fn key(&self, value: &'a T) -> Self::Key;
 }
 
@@ -71,23 +90,36 @@ pub trait KeyOps<'a, T: ?Sized> {
 // HashTable
 // =============================================================================
 
+/// An intrusive hash table.
+///
+/// When this collection is dropped, all elements linked into it
+/// will be converted back to owned pointers and dropped.
+///
+/// Note that you are responsible for ensuring that elements in a `HashTable`
+/// remain in the correct bucket. This property can be violated, either because a
+/// key was modified, the hash was modified (through a dependency), or because the
+/// `insert_before`/`insert_after` methods of `CursorMut` were used incorrectly.
+/// If this situation occurs, memory safety will not be violated but the any
+/// search and lookup operations may yield incorrect results.
 pub struct HashTable<A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
     pub(super) adapter: A,
     pub(super) buckets: B,
     pub(super) len: usize,
-    pub(super) load_factor_target: LoadFactor,
 }
 
 impl<A: HashTableAdapter + Default, B: Array<<A::BucketOps as BucketOps>::Bucket> + Default>
     HashTable<A, B>
 {
+    /// Creates an empty `HashTable`.
+    ///
+    /// The hash table is initially created with a capacity of 0,
+    /// so it will not allocate until it is first inserted into.
     #[inline]
     pub fn new() -> HashTable<A, B> {
         HashTable {
             adapter: Default::default(),
             buckets: Default::default(),
             len: 0,
-            load_factor_target: unsafe { LoadFactor::new_unchecked(24, 8) },
         }
     }
 }
@@ -102,13 +134,24 @@ impl<A: HashTableAdapter + Default, B: Array<<A::BucketOps as BucketOps>::Bucket
 }
 
 impl<A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> HashTable<A, B> {
+    /// Creates a `HashTable` directly from components.
+    ///
+    /// # Safety
+    ///
+    /// This is hightly unsafe, due to the number of invariants that aren't checked:
+    ///
+    /// * `adapter.pointer_ops()` must return an instance of `PointerOps` that is
+    ///   functionally equivalent to the `PointerOps` used to construct the buckets.
+    ///   (Before an instance of `A::BucketOps::Pointer` is inserted into a bucket,
+    ///   it is converted into `*const A::BucketOps::Value`, has its key extracted and hashed,
+    ///   and is then converted back into `A::BucketOps::Pointer`.)
+    /// * `length` needs to be less than or equal to `buckets.capacity()`.
     #[inline]
-    pub unsafe fn from_parts(adapter: A, buckets: B, len: usize) -> HashTable<A, B> {
+    pub unsafe fn from_parts(adapter: A, buckets: B, length: usize) -> HashTable<A, B> {
         HashTable {
             adapter,
             buckets,
-            len,
-            load_factor_target: LoadFactor::new_unchecked(24, 8),
+            len: length,
         }
     }
 }
@@ -139,21 +182,25 @@ where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
 {
+    /// Returns the number of elements the hash table can hold without reallocating.
     #[inline]
     pub fn capacity(&self) -> usize {
         self.buckets.capacity()
     }
 
+    /// Returns the number of elements in the hash table.
     #[inline]
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// Returns true if the hash table contains no elements.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
+    /// Returns a null `BucketCursor` for this hash table.
     #[inline]
     pub fn bucket_cursor(&self) -> BucketCursor<'_, A, B> {
         BucketCursor {
@@ -162,6 +209,7 @@ where
         }
     }
 
+    /// Returns a null `BucketCursorMut` for this hash table.
     #[inline]
     pub fn bucket_cursor_mut(&mut self) -> BucketCursorMut<'_, A, B> {
         BucketCursorMut {
@@ -170,6 +218,7 @@ where
         }
     }
 
+    /// Creates a `BucketCursor` from a given hash.
     #[inline]
     pub fn bucket_cursor_from_hash(&self, hash: u64) -> BucketCursor<'_, A, B> {
         let bucket_count = self.buckets.borrow().len();
@@ -180,6 +229,7 @@ where
         }
     }
 
+    /// Creates a `BucketCursorMut` from a given hash.
     #[inline]
     pub fn bucket_cursor_mut_from_hash(&mut self, hash: u64) -> BucketCursorMut<'_, A, B> {
         let bucket_count = self.buckets.borrow().len();
@@ -190,6 +240,7 @@ where
         }
     }
 
+    /// Returns a iterator over the objects in the `HashTable`.
     pub fn iter(&self) -> Iter<'_, A, B> {
         Iter {
             table: self,
@@ -198,6 +249,7 @@ where
         }
     }
 
+    /// Clears the hash table, returning all key-value pairs as an iterator.
     pub fn drain(&mut self) -> Drain<'_, A, B> {
         Drain {
             len: self.len,
@@ -206,6 +258,11 @@ where
         }
     }
 
+    /// Removes all elements from the `HashTable`.
+    ///
+    /// This will unlink all object currently in the hash table,
+    /// which requires iterating through all elements in the `HashTable`.
+    /// Each element is converted back to an owned pointer and then dropped.
     pub fn clear(&mut self) {
         for bucket in self.buckets.borrow_mut() {
             unsafe {
@@ -216,6 +273,11 @@ where
         self.len = 0;
     }
 
+    /// Empties the `HashTable` without unlinking or freeing the objects within it.
+    ///
+    /// Since this does not unlink any objects, any attempts to link these objects
+    /// into another intrusive collection will fail, but will not cause any memory unsafety.
+    /// To unlink those objects manually, you must call the `force_unlink` function on them.
     pub fn fast_clear(&mut self) {
         for bucket in self.buckets.borrow_mut() {
             unsafe {
@@ -316,6 +378,17 @@ where
         core::mem::replace(&mut self.buckets, new_buckets)
     }
 
+    /// Reserves capacity for at least `additional` more elements to be inserted
+    /// in the `HashTable`. The collection may reserve more space to avoid
+    /// frequent reallocations.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new allocation size overflows [`usize`].
+    ///
+    /// Panics if the underlying bucket array has a zero capacity and cannot grow.
+    ///
+    /// [`usize`]: ../../std/primitive.usize.html
     #[inline]
     pub fn reserve(&mut self, additional: usize) {
         // panic because if a `usize` overflows, the program is degenerate and therefore unsupported.
@@ -331,6 +404,9 @@ where
         }
     }
 
+    /// Shrinks the capacity of the hash table as much as possible. It will drop
+    /// down as much as possible while maintaining the internal rules
+    /// and possibly leaving some space in accordance with the resize policy.
     #[inline]
     pub fn shrink_to_fit(&mut self) {
         if let Some(new_buckets) = self.buckets.shrink_to(self.len) {
@@ -338,6 +414,12 @@ where
         }
     }
 
+    /// Inserts a new element into the `HashTable`.
+    ///
+    /// Returns a mutable cursor pointing to the newly added element.
+    ///
+    /// # Panics
+    /// Panics if the new element is already linked to a different intrusive collection.
     #[inline]
     pub fn insert<'b>(
         &mut self,
@@ -359,6 +441,10 @@ where
         cursor
     }
 
+    /// Removes a key from the map, returning the value at the key if the key
+    /// was previously in the map.
+    ///
+    /// If multiple elements with an identical key are found, then an arbitrary one is removed.
     pub fn remove<'b, Q: ?Sized>(&mut self, k: &Q) -> Option<<A::PointerOps as PointerOps>::Pointer>
     where
         <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
@@ -398,7 +484,7 @@ where
     {
         let bucket_count = self.buckets.borrow().len();
 
-        if unlikely(bucket_count == 0) {
+        if bucket_count == 0 {
             unreachable!("program is degenerate. a zero-sized bucket array is not valid.");
         }
 
@@ -429,6 +515,10 @@ where
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
     A::KeyOps: for<'b> KeyOps<'b, <A::PointerOps as PointerOps>::Value>,
 {
+    /// Returns a reference to the value corresponding to the key.
+    ///
+    /// The key may be any borrowed form of the map's key type,
+    /// but `Hash` and `Eq` on the borrowed form must match those for the key type.
     pub fn get<'b, Q: ?Sized>(&self, k: &Q) -> Option<&<A::PointerOps as PointerOps>::Value>
     where
         <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
@@ -439,6 +529,10 @@ where
         self.raw_entry().from_key(k).get()
     }
 
+    /// Returns `true` if the hash table contains a value for the specified key.
+    ///
+    /// The key may be any borrowed form of the map's key type,
+    /// but `Hash` and `Eq` on the borrowed form must match those for the key type.
     #[inline]
     pub fn contains_key<'b, Q: ?Sized>(&self, k: &Q) -> bool
     where
@@ -450,11 +544,47 @@ where
         !self.raw_entry().from_key(k).is_null()
     }
 
+    /// Creates a raw immutable entry builder for the HashTable.
+    ///
+    /// Raw entries provide the lowest level of control for searching and
+    /// manipulating a map. They must be manually initialized with a hash and
+    /// then manually searched.
+    ///
+    /// This is useful for
+    /// * Hash memoization
+    /// * Using a search key that doesn't work with the Borrow trait
+    /// * Using custom comparison logic without newtype wrappers
+    ///
+    /// Unless you are in such a situation, higher-level and more foolproof APIs like
+    /// `get` should be preferred.
+    ///
+    /// Immutable raw entries have very limited use; you might instead want `raw_entry_mut`.
     #[inline]
     pub fn raw_entry(&self) -> RawEntryBuilder<'_, A, B> {
         RawEntryBuilder { table: self }
     }
 
+    /// Creates a raw entry builder for the HashTable.
+    ///
+    /// Raw entries provide the lowest level of control for searching and
+    /// manipulating a hash table. They must be manually initialized with a hash and
+    /// then manually searched.
+    ///
+    /// Raw entries are useful for such exotic situations as:
+    ///
+    /// * Hash memoization
+    /// * Deferring the creation of an intrusive object until it is known to be required
+    /// * Using a search key that doesn't work with the Borrow trait
+    /// * Using custom comparison logic without newtype wrappers
+    ///
+    /// Because raw entries provide much more low-level control, it's much easier
+    /// to put the HashTable into an inconsistent state which, while memory-safe,
+    /// will cause the map to produce seemingly random results.
+    ///
+    /// In particular, the hash used to initialized the raw entry must still be
+    /// consistent with the hash of the key that is ultimately stored in the entry.
+    /// This is because implementations of HashTable may need to recompute hashes
+    /// when resizing, at which point only the keys are available.
     #[inline]
     pub fn raw_entry_mut(&mut self) -> RawEntryBuilderMut<'_, A, B> {
         RawEntryBuilderMut { table: self }
@@ -466,6 +596,7 @@ where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
 {
+    /// Retains only the elements specified by the predicate.
     pub fn retain<F>(&mut self, mut f: F)
     where
         F: FnMut(&<A::PointerOps as PointerOps>::Value) -> bool,
@@ -594,6 +725,7 @@ where
 // BucketCursor
 // =============================================================================
 
+/// A cursor which provides read-only access to the buckets within a `HashTable`.
 pub struct BucketCursor<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
     pub(super) table: &'a HashTable<A, B>,
     pub(super) index: Option<usize>,
@@ -603,21 +735,31 @@ where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
 {
+    /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
         self.index.is_none()
     }
 
+    /// Returns a reference to the object that the cursor is currently pointing to.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null object.
     #[inline]
     pub fn get(&self) -> Option<&<A::BucketOps as BucketOps>::Bucket> {
         Some(&self.table.buckets.borrow()[self.index?])
     }
 
+    /// Returns the index of the current bucket.
     #[inline]
     pub fn index(&self) -> Option<usize> {
         self.index
     }
 
+    /// Moves the cursor to the next bucket of the `HashTable`.
+    ///
+    /// If the cursor is pointer to the null object then this will move it to
+    /// the first bucket of the `HashTable`. If it is pointing to the last
+    /// bucket then this will move it to the null object.
     #[inline]
     pub fn move_next(&mut self) {
         if let Some(index) = self.index {
@@ -631,6 +773,11 @@ where
         }
     }
 
+    /// Moves the cursor to the previous bucket of the `HashTable`.
+    ///
+    /// If the cursor is pointer to the null object then this will move it to
+    /// the last bucket of the `HashTable`. If it is pointing to the first
+    /// bucket then this will move it to the null object.
     #[inline]
     pub fn move_prev(&mut self) {
         if let Some(index) = self.index {
@@ -644,6 +791,11 @@ where
         }
     }
 
+    /// Returns a cursor pointing to the next bucket of the `HashTable`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// first bucket of the `HashTable`. If it is pointing to the last
+    /// bucket of the `HashTable` then this will return a null cursor.
     #[inline]
     pub fn peek_next(&self) -> BucketCursor<'_, A, B> {
         let mut cursor = self.clone();
@@ -651,6 +803,11 @@ where
         cursor
     }
 
+    /// Returns a cursor pointing to the previous bucket of the `HashTable`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// last bucket of the `HashTable`. If it is pointing to the first
+    /// bucket of the `HashTable` then this will return a null cursor.
     #[inline]
     pub fn peek_prev(&self) -> BucketCursor<'_, A, B> {
         let mut cursor = self.clone();
@@ -658,6 +815,11 @@ where
         cursor
     }
 
+    /// Returns a read-only cursor pointing to the null object of the current bucket.
+    ///
+    /// The lifetime of the returned `Cursor` is bound to that of the
+    /// `BucketCursorMut`, which means it cannot outlive the `BucketCursorMut` and that the
+    /// `BucketCursorMut` is frozen for the lifetime of the `Cursor`.
     #[inline]
     pub fn cursor(&self) -> Cursor<'_, A, B> {
         if let Some(index) = self.index {
@@ -677,6 +839,10 @@ where
         }
     }
 
+    /// Creates a `Cursor` from a pointer to an element.
+    ///
+    /// # Safety
+    /// `ptr` must be a pointer to an object that is a member of the current bucket.
     #[inline]
     pub unsafe fn cursor_from_ptr(
         &self,
@@ -686,9 +852,10 @@ where
             let bucket = &self.table.buckets.borrow()[index];
 
             Cursor {
-                position: Some((index, unsafe {
-                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr)
-                })),
+                position: Some((
+                    index,
+                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr),
+                )),
                 table: self.table,
             }
         } else {
@@ -699,6 +866,7 @@ where
         }
     }
 
+    /// Returns a read-only cursor pointing to the null object of the current bucket.
     #[inline]
     pub fn into_cursor(self) -> Cursor<'a, A, B> {
         if let Some(index) = self.index {
@@ -718,6 +886,10 @@ where
         }
     }
 
+    /// Creates a `Cursor` from a pointer to an element.
+    ///
+    /// # Safety
+    /// `ptr` must be a pointer to an object that is a member of the current bucket.
     #[inline]
     pub unsafe fn into_cursor_from_ptr(
         self,
@@ -727,9 +899,10 @@ where
             let bucket = &self.table.buckets.borrow()[index];
 
             Cursor {
-                position: Some((index, unsafe {
-                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr)
-                })),
+                position: Some((
+                    index,
+                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr),
+                )),
                 table: self.table,
             }
         } else {
@@ -740,6 +913,8 @@ where
         }
     }
 
+    /// Returns a `Cursor` pointing to the first element of the bucket.
+    /// If the bucket is empty, then a null cursor is returned.
     #[inline]
     pub fn front(&self) -> Cursor<'_, A, B> {
         let mut cursor = self.cursor();
@@ -764,6 +939,7 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> Clo
 // BucketCursorMut
 // =============================================================================
 
+/// A cursor which provides mutable access to the buckets within a `HashTable`.
 pub struct BucketCursorMut<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
     pub(super) table: &'a mut HashTable<A, B>,
     pub(super) index: Option<usize>,
@@ -774,26 +950,39 @@ where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
 {
+    /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
         self.index.is_none()
     }
 
+    /// Returns a reference to the object that the cursor is currently pointing to.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null object.
     #[inline]
     pub fn get(&self) -> Option<&<A::BucketOps as BucketOps>::Bucket> {
         Some(&self.table.buckets.borrow()[self.index?])
     }
 
+    /// Returns a mutable reference to the object that the cursor is currently pointing to.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null object.
     #[inline]
     pub fn get_mut(&mut self) -> Option<&mut <A::BucketOps as BucketOps>::Bucket> {
         Some(&mut self.table.buckets.borrow_mut()[self.index?])
     }
 
+    /// Returns the index of the current bucket.
     #[inline]
     pub fn index(&self) -> Option<usize> {
         self.index
     }
 
+    /// Returns a read-only cursor pointing to the current bucket.
+    ///
+    /// The lifetime of the returned `BucketCursor` is bound to that of the
+    /// `BucketCursorMut`, which means it cannot outlive the `BucketCursorMut` and that the
+    /// `BucketCursorMut` is frozen for the lifetime of the `BucketCursor`.
     #[inline]
     pub fn as_bucket_cursor(&self) -> BucketCursor<'_, A, B> {
         BucketCursor {
@@ -802,6 +991,11 @@ where
         }
     }
 
+    /// Moves the cursor to the next bucket of the `HashTable`.
+    ///
+    /// If the cursor is pointer to the null object then this will move it to
+    /// the first bucket of the `HashTable`. If it is pointing to the last
+    /// bucket then this will move it to the null object.
     #[inline]
     pub fn move_next(&mut self) {
         if let Some(index) = self.index {
@@ -815,6 +1009,11 @@ where
         }
     }
 
+    /// Moves the cursor to the previous bucket of the `HashTable`.
+    ///
+    /// If the cursor is pointer to the null object then this will move it to
+    /// the last bucket of the `HashTable`. If it is pointing to the first
+    /// bucket then this will move it to the null object.
     #[inline]
     pub fn move_prev(&mut self) {
         if let Some(index) = self.index {
@@ -828,6 +1027,11 @@ where
         }
     }
 
+    /// Returns a cursor pointing to the next bucket of the `HashTable`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// first bucket of the `HashTable`. If it is pointing to the last
+    /// bucket of the `HashTable` then this will return a null cursor.
     #[inline]
     pub fn peek_next(&self) -> BucketCursor<'_, A, B> {
         let mut cursor = self.as_bucket_cursor();
@@ -835,6 +1039,11 @@ where
         cursor
     }
 
+    /// Returns a cursor pointing to the previous bucket of the `HashTable`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// last bucket of the `HashTable`. If it is pointing to the first
+    /// bucket of the `HashTable` then this will return a null cursor.
     #[inline]
     pub fn peek_prev(&self) -> BucketCursor<'_, A, B> {
         let mut cursor = self.as_bucket_cursor();
@@ -842,6 +1051,11 @@ where
         cursor
     }
 
+    /// Returns a read-only cursor pointing to the null object of the current bucket.
+    ///
+    /// The lifetime of the returned `Cursor` is bound to that of the
+    /// `BucketCursorMut`, which means it cannot outlive the `BucketCursorMut` and that the
+    /// `BucketCursorMut` is frozen for the lifetime of the `Cursor`.
     #[inline]
     pub fn cursor(&self) -> Cursor<'_, A, B> {
         if let Some(index) = self.index {
@@ -861,6 +1075,11 @@ where
         }
     }
 
+    /// Returns a mutable cursor pointing to the null object of the current bucket.
+    ///
+    /// The lifetime of the returned `CursorMut` is bound to that of the
+    /// `BucketCursorMut`, which means it cannot outlive the `BucketCursorMut` and that the
+    /// `BucketCursorMut` is frozen for the lifetime of the `CursorMut`.
     #[inline]
     pub fn cursor_mut(&mut self) -> CursorMut<'_, A, B> {
         if let Some(index) = self.index {
@@ -880,6 +1099,10 @@ where
         }
     }
 
+    /// Creates a `Cursor` from a pointer to an element.
+    ///
+    /// # Safety
+    /// `ptr` must be a pointer to an object that is a member of the current bucket.
     #[inline]
     pub unsafe fn cursor_from_ptr(
         &self,
@@ -889,9 +1112,10 @@ where
             let bucket = &self.table.buckets.borrow()[index];
 
             Cursor {
-                position: Some((index, unsafe {
-                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr)
-                })),
+                position: Some((
+                    index,
+                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr),
+                )),
                 table: self.table,
             }
         } else {
@@ -902,6 +1126,10 @@ where
         }
     }
 
+    /// Creates a `CursorMut` from a pointer to an element.
+    ///
+    /// # Safety
+    /// `ptr` must be a pointer to an object that is a member of the current bucket.
     #[inline]
     pub unsafe fn cursor_mut_from_ptr(
         &mut self,
@@ -911,9 +1139,10 @@ where
             let bucket = &self.table.buckets.borrow()[index];
 
             CursorMut {
-                position: Some((index, unsafe {
-                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr)
-                })),
+                position: Some((
+                    index,
+                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr),
+                )),
                 table: self.table,
             }
         } else {
@@ -924,6 +1153,7 @@ where
         }
     }
 
+    /// Returns a read-only cursor pointing to the null object of the current bucket.
     #[inline]
     pub fn into_cursor(self) -> Cursor<'a, A, B> {
         if let Some(index) = self.index {
@@ -943,6 +1173,7 @@ where
         }
     }
 
+    /// Returns a mutable cursor pointing to the null object of the current bucket.
     #[inline]
     pub fn into_cursor_mut(self) -> CursorMut<'a, A, B> {
         if let Some(index) = self.index {
@@ -962,6 +1193,10 @@ where
         }
     }
 
+    /// Creates a `Cursor` from a pointer to an element.
+    ///
+    /// # Safety
+    /// `ptr` must be a pointer to an object that is a member of the current bucket.
     #[inline]
     pub unsafe fn into_cursor_from_ptr(
         self,
@@ -971,9 +1206,10 @@ where
             let bucket = &self.table.buckets.borrow()[index];
 
             Cursor {
-                position: Some((index, unsafe {
-                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr)
-                })),
+                position: Some((
+                    index,
+                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr),
+                )),
                 table: self.table,
             }
         } else {
@@ -984,6 +1220,10 @@ where
         }
     }
 
+    /// Creates a `CursorMut` from a pointer to an element.
+    ///
+    /// # Safety
+    /// `ptr` must be a pointer to an object that is a member of the current bucket.
     #[inline]
     pub unsafe fn into_cursor_mut_from_ptr(
         self,
@@ -993,9 +1233,10 @@ where
             let bucket = &self.table.buckets.borrow()[index];
 
             CursorMut {
-                position: Some((index, unsafe {
-                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr)
-                })),
+                position: Some((
+                    index,
+                    self.table.adapter.bucket_ops().cursor_from_ptr(bucket, ptr),
+                )),
                 table: self.table,
             }
         } else {
@@ -1006,6 +1247,8 @@ where
         }
     }
 
+    /// Returns a `Cursor` pointing to the first element of the bucket.
+    /// If the bucket is empty, then a null cursor is returned.
     #[inline]
     pub fn front(&self) -> Cursor<'_, A, B> {
         let mut cursor = self.cursor();
@@ -1013,6 +1256,8 @@ where
         cursor
     }
 
+    /// Returns a `CursorMut` pointing to the first element of the bucket.
+    /// If the bucket is empty, then a null cursor is returned.
     #[inline]
     pub fn front_mut(&mut self) -> CursorMut<'_, A, B> {
         let mut cursor = self.cursor_mut();
@@ -1025,6 +1270,7 @@ where
 // Cursor
 // =============================================================================
 
+/// A cursor which provides read-only access to a hash table bucket.
 pub struct Cursor<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
     pub(super) table: &'a HashTable<A, B>,
     pub(super) position: Option<(usize, <A::BucketOps as BucketOps>::Cursor)>,
@@ -1035,6 +1281,7 @@ where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
 {
+    /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
         if let Some((index, current)) = &self.position {
@@ -1046,6 +1293,11 @@ where
         }
     }
 
+    /// Returns a reference to the object that the cursor is currently
+    /// pointing to.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null
+    /// object.
     #[inline]
     pub fn get(&self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
         if let Some((index, current)) = &self.position {
@@ -1059,6 +1311,11 @@ where
         }
     }
 
+    /// Clones and returns the pointer that points to the element that the
+    /// cursor is referencing.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null
+    /// object.
     #[inline]
     pub fn clone_pointer(&self) -> Option<<A::PointerOps as PointerOps>::Pointer>
     where
@@ -1073,6 +1330,11 @@ where
         })
     }
 
+    /// Moves the cursor to the next element of the bucket.
+    ///
+    /// If the cursor is pointer to the null object then this will move it to
+    /// the first element of the bucket. If it is pointing to the last
+    /// element of the bucket then this will move it to the null object.
     #[inline]
     pub fn move_next(&mut self) {
         if let Some((index, current)) = &mut self.position {
@@ -1083,6 +1345,11 @@ where
         }
     }
 
+    /// Returns a cursor pointing to the next element of the bucket.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// first element of the bucket. If it is pointing to the last
+    /// element of the bucket then this will return a null cursor.
     #[inline]
     pub fn peek_next(&self) -> Cursor<'_, A, B> {
         let mut cursor = self.clone();
@@ -1090,6 +1357,11 @@ where
         cursor
     }
 
+    /// Returns a read-only cursor pointing to the current bucket.
+    ///
+    /// The lifetime of the returned `BucketCursor` is bound to that of the
+    /// `Cursor`, which means it cannot outlive the `Cursor` and that the
+    /// `Cursor` is frozen for the lifetime of the `BucketCursor`.
     #[inline]
     pub fn as_bucket_cursor(&self) -> BucketCursor<'_, A, B> {
         BucketCursor {
@@ -1098,6 +1370,7 @@ where
         }
     }
 
+    /// Returns a read-only cursor pointing to the current bucket.
     #[inline]
     pub fn into_bucket_cursor(self) -> BucketCursor<'a, A, B> {
         BucketCursor {
@@ -1123,6 +1396,7 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> Clo
 // CursorMut
 // =============================================================================
 
+/// A cursor which provides mutable access to a hash table bucket.
 pub struct CursorMut<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
     pub(super) table: &'a mut HashTable<A, B>,
     pub(super) position: Option<(usize, <A::BucketOps as BucketOps>::Cursor)>,
@@ -1133,6 +1407,7 @@ where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
 {
+    /// Checks if the cursor is currently pointing to the null object.
     #[inline]
     pub fn is_null(&self) -> bool {
         if let Some((index, current)) = &self.position {
@@ -1144,6 +1419,11 @@ where
         }
     }
 
+    /// Returns a reference to the object that the cursor is currently
+    /// pointing to.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null
+    /// object.
     #[inline]
     pub fn get(&self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
         if let Some((index, current)) = &self.position {
@@ -1157,6 +1437,11 @@ where
         }
     }
 
+    /// Returns a read-only cursor pointing to the current element.
+    ///
+    /// The lifetime of the returned `Cursor` is bound to that of the
+    /// `CursorMut`, which means it cannot outlive the `CursorMut` and that the
+    /// `CursorMut` is frozen for the lifetime of the `Cursor`.
     #[inline]
     pub fn as_cursor(&self) -> Cursor<'_, A, B> {
         Cursor {
@@ -1165,6 +1450,11 @@ where
         }
     }
 
+    /// Moves the cursor to the next element of the bucket.
+    ///
+    /// If the cursor is pointer to the null object then this will move it to
+    /// the first element of the bucket. If it is pointing to the last
+    /// element of the bucket then this will move it to the null object.
     #[inline]
     pub fn move_next(&mut self) {
         if let Some((index, current)) = &mut self.position {
@@ -1175,6 +1465,11 @@ where
         }
     }
 
+    /// Returns a cursor pointing to the next element of the bucket.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// first element of the bucket. If it is pointing to the last
+    /// element of the bucket then this will return a null cursor.
     #[inline]
     pub fn peek_next(&self) -> Cursor<'_, A, B> {
         let mut cursor = self.as_cursor();
@@ -1183,6 +1478,11 @@ where
         cursor
     }
 
+    /// Returns a read-only cursor pointing to the current bucket.
+    ///
+    /// The lifetime of the returned `BucketCursor` is bound to that of the
+    /// `CursorMut`, which means it cannot outlive the `CursorMut` and that the
+    /// `CursorMut` is frozen for the lifetime of the `BucketCursor`.
     #[inline]
     pub fn as_bucket_cursor(&self) -> BucketCursor<'_, A, B> {
         BucketCursor {
@@ -1191,14 +1491,7 @@ where
         }
     }
 
-    #[inline]
-    pub fn as_bucket_cursor_mut(&mut self) -> BucketCursorMut<'_, A, B> {
-        BucketCursorMut {
-            table: self.table,
-            index: self.position.as_ref().map(|(index, _)| *index),
-        }
-    }
-
+    /// Returns a read-only cursor pointing to the current bucket.
     #[inline]
     pub fn into_bucket_cursor(self) -> BucketCursor<'a, A, B> {
         BucketCursor {
@@ -1207,6 +1500,7 @@ where
         }
     }
 
+    /// Returns a mutable cursor pointing to the current bucket.
     #[inline]
     pub fn into_bucket_cursor_mut(self) -> BucketCursorMut<'a, A, B> {
         BucketCursorMut {
@@ -1215,6 +1509,13 @@ where
         }
     }
 
+    /// Removes the next element from the current bucket.
+    ///
+    /// A pointer to the element that was removed is returned, and the cursor is
+    /// not moved.
+    ///
+    /// If the cursor is currently pointing to the last element of the
+    /// current bucket then no element is removed and `None` is returned.
     #[inline]
     pub fn remove_next(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         let (index, current) = self.position.clone()?;
@@ -1235,6 +1536,13 @@ where
         ret
     }
 
+    /// Removes the current element from the current bucket.
+    ///
+    /// A pointer to the element that was removed is returned, and the cursor is
+    /// moved to point to the next element in the current bucket.
+    ///
+    /// If the cursor is currently pointing to the null object then no element
+    /// is removed and `None` is returned.
     #[inline]
     pub fn remove(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         let (index, current) = self.position.as_mut()?;
@@ -1250,6 +1558,20 @@ where
         ret
     }
 
+    /// Removes the next element from the current bucket and inserts
+    /// another object in its place.
+    ///
+    /// A pointer to the element that was removed is returned, and the cursor is
+    /// not moved.
+    ///
+    /// If the cursor is currently pointing to the last element of the
+    /// current bucket then no element is added or removed and an error is
+    /// returned containing the given `val` parameter.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
     #[inline]
     pub fn replace_next_with(
         &mut self,
@@ -1270,6 +1592,19 @@ where
         }
     }
 
+    /// Removes the current element from the current bucket and inserts another
+    /// object in its place.
+    ///
+    /// A pointer to the element that was removed is returned, and the cursor is
+    /// modified to point to the newly added element.
+    ///
+    /// If the cursor is currently pointing to the null object then an error is
+    /// returned containing the given `val` parameter.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
     #[inline]
     pub fn replace_with(
         &mut self,
@@ -1290,6 +1625,15 @@ where
         }
     }
 
+    /// Inserts a new element into the current bucket after the current one.
+    ///
+    /// If the cursor is pointing at the null object then the new element is
+    /// inserted at the front of the current bucket.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
     #[inline]
     pub fn insert_after(&mut self, value: <A::PointerOps as PointerOps>::Pointer) {
         if let Some((index, current)) = self.position.clone() {
@@ -1313,6 +1657,7 @@ where
 // RawEntryBuilder
 // =============================================================================
 
+/// A builder for computing where in a `HashTable` an element would be stored.
 pub struct RawEntryBuilder<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
     table: &'a HashTable<A, B>,
 }
@@ -1322,6 +1667,7 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
 where
     A::KeyOps: for<'b> KeyOps<'b, <A::PointerOps as PointerOps>::Value>,
 {
+    /// Access an entry by key.
     #[inline]
     pub fn from_key<'b, Q: ?Sized>(self, k: &Q) -> Cursor<'a, A, B>
     where
@@ -1335,6 +1681,7 @@ where
         self.from_key_hashed_nocheck(hash, k)
     }
 
+    /// Access an entry by key and its hash.
     #[inline]
     pub fn from_key_hashed_nocheck<'b, Q: ?Sized>(self, hash: u64, k: &Q) -> Cursor<'a, A, B>
     where
@@ -1351,6 +1698,13 @@ where
         }
     }
 
+    /// Access an entry by key.
+    ///
+    /// On success, returns a cursor pointing to the predecessor of the matching element.
+    /// If multiple elements with an identical key are found, then an arbitrary one is selected.
+    ///
+    /// On failure, returns a cursor pointing to the null object
+    /// of the bucket that corresponds to the key.
     #[inline]
     pub fn prev_from_key<'b, Q: ?Sized>(self, k: &Q) -> Result<Cursor<'a, A, B>, Cursor<'a, A, B>>
     where
@@ -1364,6 +1718,13 @@ where
         self.prev_from_key_hashed_nocheck(hash, k)
     }
 
+    /// Access an entry by key and its hash.
+    ///
+    /// On success, returns a cursor pointing to the element.
+    /// If multiple elements with an identical key are found, then an arbitrary one is selected.
+    ///
+    /// On failure, returns a cursor pointing to the null object
+    /// of the bucket that corresponds to the key.
     #[inline]
     pub fn prev_from_key_hashed_nocheck<'b, Q: ?Sized>(
         self,
@@ -1390,12 +1751,13 @@ where
 impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
     RawEntryBuilder<'a, A, B>
 {
+    /// Access an entry by its hash.
     #[inline]
     pub fn from_hash<F>(self, hash: u64, is_match: F) -> Cursor<'a, A, B>
     where
         for<'b> F: FnMut(&'b <A::PointerOps as PointerOps>::Value) -> bool,
     {
-        if unlikely(self.table.buckets.borrow().len() == 0) {
+        if self.table.buckets.borrow().len() == 0 {
             return Cursor {
                 table: self.table,
                 position: None,
@@ -1410,6 +1772,13 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
         }
     }
 
+    /// Access an entry by its hash.
+    ///
+    /// On success, returns a cursor pointing to the predecessor of the matching element.
+    /// If multiple elements with an identical key are found, then an arbitrary one is selected.
+    ///
+    /// On failure, returns a cursor pointing to the null object
+    /// of the bucket that corresponds to the key.
     #[inline]
     pub fn prev_from_hash<F>(
         self,
@@ -1419,7 +1788,7 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
     where
         for<'b> F: FnMut(&'b <A::PointerOps as PointerOps>::Value) -> bool,
     {
-        if unlikely(self.table.buckets.borrow().len() == 0) {
+        if self.table.buckets.borrow().len() == 0 {
             return Ok(Cursor {
                 table: self.table,
                 position: None,
@@ -1439,13 +1808,11 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
                 table: self.table,
             })
         } else {
-            Err(unsafe {
-                BucketCursor {
-                    index: Some(index),
-                    table: self.table,
-                }
-                .into_cursor()
-            })
+            Err(BucketCursor {
+                index: Some(index),
+                table: self.table,
+            }
+            .into_cursor())
         }
     }
 }
@@ -1454,6 +1821,7 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
 // RawEntryBuilderMut
 // =============================================================================
 
+/// A builder for computing where in a `HashTable` an element would be stored.
 pub struct RawEntryBuilderMut<
     'a,
     A: HashTableAdapter,
@@ -1467,6 +1835,7 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
 where
     A::KeyOps: for<'b> KeyOps<'b, <A::PointerOps as PointerOps>::Value>,
 {
+    /// Creates a `RawEntryMut` from the given key.
     #[inline]
     pub fn from_key<'b, Q: ?Sized>(self, k: &Q) -> RawEntryMut<'a, A, B>
     where
@@ -1480,6 +1849,7 @@ where
         self.from_key_hashed_nocheck(hash, k)
     }
 
+    /// Creates a `RawEntryMut` from the given key and its hash.
     #[inline]
     pub fn from_key_hashed_nocheck<'b, Q: ?Sized>(self, hash: u64, k: &Q) -> RawEntryMut<'a, A, B>
     where
@@ -1496,6 +1866,13 @@ where
         }
     }
 
+    /// Creates a `RawEntryMut` from the given key.
+    ///
+    /// On success, returns a cursor pointing to the predecessor of the matching element.
+    /// If multiple elements with an identical key are found, then an arbitrary one is selected.
+    ///
+    /// On failure, returns a cursor pointing to the null object
+    /// of the bucket that corresponds to the key.
     #[inline]
     pub fn prev_from_key<'b, Q: ?Sized>(self, k: &Q) -> RawEntryMut<'a, A, B>
     where
@@ -1509,6 +1886,13 @@ where
         self.prev_from_key_hashed_nocheck(hash, k)
     }
 
+    /// Creates a `RawEntryMut` from the given key and its hash.
+    ///
+    /// On success, returns a cursor pointing to the predecessor of the matching element.
+    /// If multiple elements with an identical key are found, then an arbitrary one is selected.
+    ///
+    /// On failure, returns a cursor pointing to the null object
+    /// of the bucket that corresponds to the key.
     #[inline]
     pub fn prev_from_key_hashed_nocheck<'b, Q: ?Sized>(
         self,
@@ -1520,7 +1904,7 @@ where
         Q: Eq,
         <A::PointerOps as PointerOps>::Value: 'b,
     {
-        if unlikely(self.table.buckets.borrow().len() == 0) {
+        if self.table.buckets.borrow().len() == 0 {
             return RawEntryMut::Vacant(InsertCursor {
                 hash,
                 index: None,
@@ -1560,12 +1944,13 @@ where
 impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
     RawEntryBuilderMut<'a, A, B>
 {
+    /// Creates a `RawEntryMut` from the given hash.
     #[inline]
     pub fn from_hash<F>(self, hash: u64, is_match: F) -> RawEntryMut<'a, A, B>
     where
         for<'b> F: FnMut(&'b <A::PointerOps as PointerOps>::Value) -> bool,
     {
-        if unlikely(self.table.buckets.borrow().len() == 0) {
+        if self.table.buckets.borrow().len() == 0 {
             return RawEntryMut::Vacant(InsertCursor {
                 hash,
                 index: None,
@@ -1589,12 +1974,19 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
         }
     }
 
+    /// Creates a `RawEntryMut` from the given hash.
+    ///
+    /// On success, returns a cursor pointing to the predecessor of the matching element.
+    /// If multiple elements with an identical key are found, then an arbitrary one is selected.
+    ///
+    /// On failure, returns a cursor pointing to the null object
+    /// of the bucket that corresponds to the key.
     #[inline]
     pub fn prev_from_hash<F>(self, hash: u64, is_match: F) -> RawEntryMut<'a, A, B>
     where
         for<'b> F: FnMut(&'b <A::PointerOps as PointerOps>::Value) -> bool,
     {
-        if unlikely(self.table.buckets.borrow().len() == 0) {
+        if self.table.buckets.borrow().len() == 0 {
             return RawEntryMut::Vacant(InsertCursor {
                 hash,
                 index: None,
@@ -1628,12 +2020,13 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
 // RawEntryMut
 // =============================================================================
 
+/// A view into a singly entry in a hash table, which may be either vacant or occupied.
 pub enum RawEntryMut<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
+    /// An occupied entry.
     Occupied(CursorMut<'a, A, B>),
+    /// A vacant entry.
     Vacant(InsertCursor<'a, A, B>),
 }
-
-use self::RawEntryMut::{Occupied, Vacant};
 
 impl<'a, A, B> RawEntryMut<'a, A, B>
 where
@@ -1643,11 +2036,15 @@ where
     A::HashOps:
         for<'b> HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
 {
+    /// Ensures a value is in the entry by inserting the default if empty,
+    /// and returns a mutable cursor pointing entry.
     #[inline]
     pub fn or_insert(self, default: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'a, A, B> {
         self.or_insert_with(|| default)
     }
 
+    /// Ensures a value is in the entry by inserting the result of the default function if empty,
+    /// and returns a mutable cursor pointing entry.
     #[inline]
     pub fn or_insert_with<F>(self, default: F) -> CursorMut<'a, A, B>
     where
@@ -1665,6 +2062,7 @@ where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
 {
+    /// Provides in-place access to an occupied entry before any potential inserts into the map.
     #[inline]
     pub fn and_modify<F>(self, f: F) -> Self
     where
@@ -1684,6 +2082,7 @@ where
 // InsertCursor
 // =============================================================================
 
+/// A cursor pointing to a slot in which an element can be inserted into a `HashTable`.
 pub struct InsertCursor<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
     table: &'a mut HashTable<A, B>,
     hash: u64,
@@ -1698,11 +2097,13 @@ where
     A::HashOps:
         for<'b> HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
 {
+    /// Inserts a new element into the `HashTable` at the location indicated by this `InsertCursor`.
     #[inline]
     pub fn insert(self, default: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'a, A, B> {
         self.insert_with(|| default)
     }
 
+    /// Inserts a new element into the `HashTable` at the location indicated by this `InsertCursor`.
     #[inline]
     pub fn insert_with<F>(mut self, default: F) -> CursorMut<'a, A, B>
     where
@@ -1724,6 +2125,11 @@ where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
 {
+    /// Returns a read-only cursor pointing to the current bucket.
+    ///
+    /// The lifetime of the returned `BucketCursor` is bound to that of the
+    /// `InsertCursor`, which means it cannot outlive the `InsertCursor` and that the
+    /// `InsertCursor` is frozen for the lifetime of the `BucketCursor`.
     #[inline]
     pub fn as_bucket_cursor(&self) -> BucketCursor<'_, A, B> {
         BucketCursor {
@@ -1732,6 +2138,11 @@ where
         }
     }
 
+    /// Returns a mutable cursor pointing to the current bucket.
+    ///
+    /// The lifetime of the returned `BucketCursorMut` is bound to that of the
+    /// `InsertCursor`, which means it cannot outlive the `InsertCursor` and that the
+    /// `InsertCursor` is frozen for the lifetime of the `BucketCursorMut`.
     #[inline]
     pub fn as_bucket_cursor_mut(&mut self) -> BucketCursorMut<'_, A, B> {
         BucketCursorMut {
@@ -1740,6 +2151,7 @@ where
         }
     }
 
+    /// Returns a read-only cursor pointing to the current bucket.
     #[inline]
     pub fn into_bucket_cursor(self) -> BucketCursor<'a, A, B> {
         BucketCursor {
@@ -1748,6 +2160,7 @@ where
         }
     }
 
+    /// Returns a mutable cursor pointing to the current bucket.
     #[inline]
     pub fn into_bucket_cursor_mut(self) -> BucketCursorMut<'a, A, B> {
         BucketCursorMut {
@@ -1761,6 +2174,7 @@ where
 // Iter
 // =============================================================================
 
+/// An iterator over references to the items of a `HashTable`.
 pub struct Iter<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
     table: &'a HashTable<A, B>,
     bucket_cursor: Option<(usize, <A::BucketOps as BucketOps>::Cursor)>,
@@ -1877,6 +2291,7 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> Fus
 // Drain
 // =============================================================================
 
+/// An draining iterator over the items of a `HashTable`.
 pub struct Drain<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
     table: &'a mut HashTable<A, B>,
     bucket_cursor: Option<(usize, <A::BucketOps as BucketOps>::Cursor)>,
@@ -1983,6 +2398,7 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> Fus
 // IntoIter
 // =============================================================================
 
+/// An owning iterator over the items of a `HashTable`.
 pub struct IntoIter<A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
     table: HashTable<A, B>,
     bucket_cursor: Option<(usize, <A::BucketOps as BucketOps>::Cursor)>,
@@ -2081,24 +2497,16 @@ mod tests {
     use core::cell::Cell;
     use std::collections::hash_map::RandomState;
     use std::rc::Rc;
-    use std::vec::Vec;
 
     use super::*;
+
+    use self::RawEntryMut::{Occupied, Vacant};
+
+    use crate::hash_table::bucket_ops::DefaultBucketOps;
     use crate::hash_table::{array::DynamicArray, hash_ops::DefaultHashOps};
     use crate::pointer_ops::DefaultPointerOps;
-    use crate::singly_linked_list::SinglyLinkedListOps;
     use crate::SinglyLinkedList;
     use crate::SinglyLinkedListLink;
-
-    #[derive(Clone, Copy, Default)]
-    pub struct IdentityHashOps;
-
-    impl<T: Borrow<i32>> HashOps<T> for IdentityHashOps {
-        #[inline(always)]
-        fn hash(&self, value: &T) -> u64 {
-            *value.borrow() as u64
-        }
-    }
 
     #[derive(Debug, Clone)]
     struct Obj {
@@ -2308,15 +2716,15 @@ mod tests {
         assert!(!m.insert(make_obj(5, 3)).is_null());
         assert!(!m.insert(make_obj(9, 4)).is_null());
         match m.raw_entry_mut().from_key(&9) {
-            Occupied(mut entry) => assert_eq!(entry.get().unwrap().value(), 4),
+            Occupied(entry) => assert_eq!(entry.get().unwrap().value(), 4),
             Vacant(_) => panic!(),
         }
         match m.raw_entry_mut().from_key(&5) {
-            Occupied(mut entry) => assert_eq!(entry.get().unwrap().value(), 3),
+            Occupied(entry) => assert_eq!(entry.get().unwrap().value(), 3),
             Vacant(_) => panic!(),
         }
         match m.raw_entry_mut().from_key(&1) {
-            Occupied(mut entry) => assert_eq!(entry.get().unwrap().value(), 2),
+            Occupied(entry) => assert_eq!(entry.get().unwrap().value(), 2),
             Vacant(_) => panic!(),
         }
         assert_eq!(m.get(&9).unwrap().value(), 4);
@@ -2553,7 +2961,7 @@ mod tests {
     /*
     #[test]
     fn test_try_reserve() {
-        let mut empty_bytes: HashMap<u8, u8>: HashTable<ObjHashTableAdapter, DynamicArray<_>> = HashTable::new();
+        let mut empty_bytes: HashTable<u8, u8>: HashTable<ObjHashTableAdapter, DynamicArray<_>> = HashTable::new();
 
         const MAX_USIZE: usize = usize::MAX;
 
@@ -2585,8 +2993,6 @@ mod tests {
         let mut map: HashTable<ObjHashTableAdapter, DynamicArray<_>> = xs.iter().cloned().collect();
 
         let compute_hash = |map: &HashTable<ObjHashTableAdapter, DynamicArray<_>>, k: i32| -> u64 {
-            use core::hash::{BuildHasher, Hash, Hasher};
-
             map.adapter.hash_ops().hash(&k)
         };
 
@@ -2622,7 +3028,7 @@ mod tests {
         // Existing key (update)
         match map.raw_entry_mut().from_key(&2) {
             Vacant(_) => unreachable!(),
-            Occupied(mut view) => {
+            Occupied(view) => {
                 let v = view.get().unwrap();
                 let new_v = v.value() * 10;
                 v.value.set(new_v);
@@ -2710,15 +3116,15 @@ mod tests {
             );
 
             match map.raw_entry_mut().from_key(&k) {
-                Occupied(mut o) => assert_eq!(o.get().map(|obj| (obj.key(), obj)), kv),
+                Occupied(o) => assert_eq!(o.get().map(|obj| (obj.key(), obj)), kv),
                 Vacant(_) => assert_eq!(v, None),
             }
             match map.raw_entry_mut().from_key_hashed_nocheck(hash, &k) {
-                Occupied(mut o) => assert_eq!(o.get().map(|obj| (obj.key(), obj)), kv),
+                Occupied(o) => assert_eq!(o.get().map(|obj| (obj.key(), obj)), kv),
                 Vacant(_) => assert_eq!(v, None),
             }
             match map.raw_entry_mut().from_hash(hash, |q| q.key == k) {
-                Occupied(mut o) => assert_eq!(o.get().map(|obj| (obj.key(), obj)), kv),
+                Occupied(o) => assert_eq!(o.get().map(|obj| (obj.key(), obj)), kv),
                 Vacant(_) => assert_eq!(v, None),
             }
         }

@@ -5,13 +5,10 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-#[cfg(feature = "alloc")]
-use alloc::boxed::Box;
+use core::borrow::{Borrow, BorrowMut};
+
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
-
-use core::borrow::{Borrow, BorrowMut};
-use core::slice::SliceIndex;
 
 use crate::hash_table::LoadFactor;
 
@@ -118,6 +115,8 @@ impl<T> Default for DynamicArray<T> {
 
 #[cfg(feature = "alloc")]
 impl<T> DynamicArray<T> {
+    /// Constructs a new, empty`DynamicArray<T>`.
+    #[inline]
     pub fn new() -> DynamicArray<T> {
         DynamicArray {
             inner: Vec::new(),
@@ -130,13 +129,20 @@ impl<T> DynamicArray<T> {
 
 #[cfg(feature = "alloc")]
 impl<T: Default> DynamicArray<T> {
+    /// Constructs a new, empty`DynamicArray<T>` with the specified capacity.
+    ///
+    /// The dynamic array will be able to hold at least `capacity` elements without reallocating.
+    /// If `capacity` is 0, the dynamic array will not allocate.
+    #[inline]
     pub fn with_capacity(capacity: usize) -> DynamicArray<T> {
-        let mut inner = Vec::with_capacity(capacity);
-        inner.resize_with(capacity, Default::default);
+        let bucket_count = min_bucket_count(capacity, LoadFactor::default());
+
+        let mut inner = Vec::with_capacity(bucket_count);
+        inner.resize_with(bucket_count, Default::default);
 
         DynamicArray {
             inner,
-            capacity: 0,
+            capacity,
             load_factor: LoadFactor::default(),
             len: 0,
         }
@@ -163,7 +169,6 @@ impl<T> BorrowMut<[T]> for DynamicArray<T> {
 impl<T: Default> Array<T> for DynamicArray<T> {
     #[inline(never)]
     fn reserve(&mut self, new_capacity: usize) -> Option<Self> {
-        let old_len = self.len;
         let new_len = new_capacity;
 
         if new_len <= self.capacity {

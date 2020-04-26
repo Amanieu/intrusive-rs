@@ -5,18 +5,7 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 
-use core::borrow::Borrow;
-use core::fmt;
-
-use crate::adapter::Adapter;
-use crate::key_adapter::KeyAdapter;
-use crate::link_ops::{self, DefaultLinkOps};
-use crate::linked_list;
-use crate::pointer_ops::{DefaultPointerOps, PointerOps};
-use crate::singly_linked_list;
-use crate::unchecked_option::UncheckedOptionExt;
-use crate::unsafe_ref::UnsafeRef;
-use crate::xor_linked_list;
+//! Intrusive hash table.
 
 mod array;
 mod bucket_ops;

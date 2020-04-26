@@ -31,7 +31,7 @@ impl LoadFactor {
     }
 
     /// Returns a new `LoadFactor`.
-    /// 
+    ///
     /// # Safety
     /// `items` and `buckets` must be greater than zero.
     #[inline(always)]
