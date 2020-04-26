@@ -67,3 +67,31 @@ impl HashOps<u64> for IntegerIdentityHashOps {
         *value as u64
     }
 }
+
+impl HashOps<i8> for IntegerIdentityHashOps {
+    #[inline(always)]
+    fn hash(&self, value: &i8) -> u64 {
+        *value as u64
+    }
+}
+
+impl HashOps<i16> for IntegerIdentityHashOps {
+    #[inline(always)]
+    fn hash(&self, value: &i16) -> u64 {
+        *value as u64
+    }
+}
+
+impl HashOps<i32> for IntegerIdentityHashOps {
+    #[inline(always)]
+    fn hash(&self, value: &i32) -> u64 {
+        *value as u64
+    }
+}
+
+impl HashOps<i64> for IntegerIdentityHashOps {
+    #[inline(always)]
+    fn hash(&self, value: &i64) -> u64 {
+        *value as u64
+    }
+}

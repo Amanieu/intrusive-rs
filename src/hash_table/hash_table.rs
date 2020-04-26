@@ -16,6 +16,7 @@ use crate::unchecked_option::UncheckedOptionExt;
 use crate::hash_table::array::Array;
 use crate::hash_table::bucket_ops::BucketOps;
 use crate::hash_table::hash_ops::HashOps;
+use crate::hash_table::key_ops::KeyOps;
 
 // =============================================================================
 // HashTableAdapter
@@ -74,19 +75,6 @@ pub trait HashTableAdapter {
 }
 
 // =============================================================================
-// KeyOps
-// =============================================================================
-
-/// Key operations.
-pub trait KeyOps<'a, T: ?Sized> {
-    /// The key type.
-    type Key;
-
-    /// Returns the key of `value`.
-    fn key(&self, value: &'a T) -> Self::Key;
-}
-
-// =============================================================================
 // HashTable
 // =============================================================================
 
@@ -98,7 +86,7 @@ pub trait KeyOps<'a, T: ?Sized> {
 /// Note that you are responsible for ensuring that elements in a `HashTable`
 /// remain in the correct bucket. This property can be violated, either because a
 /// key was modified, the hash was modified (through a dependency), or because the
-/// `insert_before`/`insert_after` methods of `CursorMut` were used incorrectly.
+/// `insert_after` method of `CursorMut` was used incorrectly.
 /// If this situation occurs, memory safety will not be violated but the any
 /// search and lookup operations may yield incorrect results.
 pub struct HashTable<A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> {
@@ -290,14 +278,14 @@ where
 }
 
 #[inline]
-fn compute_hash<A: HashTableAdapter>(
+fn compute_hash<'a, A: HashTableAdapter>(
     adapter: &A,
     value: <A::PointerOps as PointerOps>::Pointer,
 ) -> (<A::PointerOps as PointerOps>::Pointer, u64)
 where
     A::KeyOps: for<'b> KeyOps<'b, <A::PointerOps as PointerOps>::Value>,
-    A::HashOps:
-        for<'b> HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
+    A::HashOps: HashOps<<A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key>,
+    <A::PointerOps as PointerOps>::Value: 'a,
 {
     /// Guard which converts an pointer back from its raw version
     /// when it gets dropped. This makes sure that the pointer is
@@ -339,12 +327,14 @@ impl<A, B> HashTable<A, B>
 where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
-    A::KeyOps: for<'b> KeyOps<'b, <A::PointerOps as PointerOps>::Value>,
-    A::HashOps:
-        for<'b> HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
+    A::KeyOps: for<'a> KeyOps<'a, <A::PointerOps as PointerOps>::Value>,
 {
     #[inline(always)]
-    fn rehash_move(&mut self, mut new_buckets: B) -> B {
+    fn rehash_move<'a>(&mut self, mut new_buckets: B) -> B
+    where
+        A::HashOps: HashOps<<A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key>,
+        <A::PointerOps as PointerOps>::Value: 'a,
+    {
         let new_bucket_count = new_buckets.borrow().len();
 
         for bucket in self.buckets.borrow_mut().iter_mut() {
@@ -390,7 +380,11 @@ where
     ///
     /// [`usize`]: ../../std/primitive.usize.html
     #[inline]
-    pub fn reserve(&mut self, additional: usize) {
+    pub fn reserve<'a>(&mut self, additional: usize)
+    where
+        A::HashOps: HashOps<<A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key>,
+        <A::PointerOps as PointerOps>::Value: 'a,
+    {
         // panic because if a `usize` overflows, the program is degenerate and therefore unsupported.
         let new_len = self.len.checked_add(additional).expect("capacity overflow");
 
@@ -408,7 +402,11 @@ where
     /// down as much as possible while maintaining the internal rules
     /// and possibly leaving some space in accordance with the resize policy.
     #[inline]
-    pub fn shrink_to_fit(&mut self) {
+    pub fn shrink_to_fit<'a>(&mut self)
+    where
+        A::HashOps: HashOps<<A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key>,
+        <A::PointerOps as PointerOps>::Value: 'a,
+    {
         if let Some(new_buckets) = self.buckets.shrink_to(self.len) {
             self.rehash_move(new_buckets);
         }
@@ -421,13 +419,14 @@ where
     /// # Panics
     /// Panics if the new element is already linked to a different intrusive collection.
     #[inline]
-    pub fn insert<'b>(
+    pub fn insert<'a>(
         &mut self,
         value: <A::PointerOps as PointerOps>::Pointer,
     ) -> CursorMut<'_, A, B>
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Eq,
-        <A::PointerOps as PointerOps>::Value: 'b,
+        <A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key: Eq,
+        A::HashOps: HashOps<<A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key>,
+        <A::PointerOps as PointerOps>::Value: 'a,
     {
         self.reserve(1);
 
@@ -445,12 +444,13 @@ where
     /// was previously in the map.
     ///
     /// If multiple elements with an identical key are found, then an arbitrary one is removed.
-    pub fn remove<'b, Q: ?Sized>(&mut self, k: &Q) -> Option<<A::PointerOps as PointerOps>::Pointer>
+    pub fn remove<'a, Q: ?Sized>(&mut self, k: &Q) -> Option<<A::PointerOps as PointerOps>::Pointer>
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
-        A::HashOps: HashOps<Q>,
         Q: Eq,
-        <A::PointerOps as PointerOps>::Value: 'b,
+        A::HashOps: HashOps<Q>,
+        <A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
+        A::HashOps: HashOps<<A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key>,
+        <A::PointerOps as PointerOps>::Value: 'a,
     {
         if self.is_empty() {
             return None;
@@ -480,7 +480,7 @@ where
         <A::BucketOps as BucketOps>::Cursor,
     )
     where
-        for<'b> F: FnMut(&'b <A::PointerOps as PointerOps>::Value) -> bool,
+        for<'a> F: FnMut(&'a <A::PointerOps as PointerOps>::Value) -> bool,
     {
         let bucket_count = self.buckets.borrow().len();
 
@@ -513,18 +513,18 @@ impl<A, B> HashTable<A, B>
 where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
-    A::KeyOps: for<'b> KeyOps<'b, <A::PointerOps as PointerOps>::Value>,
+    A::KeyOps: for<'a> KeyOps<'a, <A::PointerOps as PointerOps>::Value>,
 {
     /// Returns a reference to the value corresponding to the key.
     ///
     /// The key may be any borrowed form of the map's key type,
     /// but `Hash` and `Eq` on the borrowed form must match those for the key type.
-    pub fn get<'b, Q: ?Sized>(&self, k: &Q) -> Option<&<A::PointerOps as PointerOps>::Value>
+    pub fn get<'a, Q: ?Sized>(&self, k: &Q) -> Option<&<A::PointerOps as PointerOps>::Value>
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
-        A::HashOps: HashOps<Q>,
         Q: Eq,
-        <A::PointerOps as PointerOps>::Value: 'b,
+        A::HashOps: HashOps<Q>,
+        <A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
+        <A::PointerOps as PointerOps>::Value: 'a,
     {
         self.raw_entry().from_key(k).get()
     }
@@ -534,12 +534,12 @@ where
     /// The key may be any borrowed form of the map's key type,
     /// but `Hash` and `Eq` on the borrowed form must match those for the key type.
     #[inline]
-    pub fn contains_key<'b, Q: ?Sized>(&self, k: &Q) -> bool
+    pub fn contains_key<'a, Q: ?Sized>(&self, k: &Q) -> bool
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
-        A::HashOps: HashOps<Q>,
         Q: Eq,
-        <A::PointerOps as PointerOps>::Value: 'b,
+        A::HashOps: HashOps<Q>,
+        <A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
+        <A::PointerOps as PointerOps>::Value: 'a,
     {
         !self.raw_entry().from_key(k).is_null()
     }
@@ -664,8 +664,7 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
 where
     HashTable<A, B>: Default,
     A::KeyOps: for<'b> KeyOps<'b, <A::PointerOps as PointerOps>::Value>,
-    A::HashOps:
-        for<'b> HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
+    A::HashOps: HashOps<<A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key>,
     <A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key: Eq,
     <A::PointerOps as PointerOps>::Value: 'a,
 {
@@ -688,8 +687,7 @@ impl<'a, A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>>
     Extend<<A::PointerOps as PointerOps>::Pointer> for HashTable<A, B>
 where
     A::KeyOps: for<'b> KeyOps<'b, <A::PointerOps as PointerOps>::Value>,
-    A::HashOps:
-        for<'b> HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
+    A::HashOps: HashOps<<A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key>,
     <A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key: Eq,
     <A::PointerOps as PointerOps>::Value: 'a,
 {
@@ -704,19 +702,19 @@ where
     }
 }
 
-impl<'a, 'b, A, B, Q> Index<&'b Q> for HashTable<A, B>
+impl<'a, A, B, Q> Index<&'a Q> for HashTable<A, B>
 where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
-    A::KeyOps: for<'c> KeyOps<'c, <A::PointerOps as PointerOps>::Value>,
-    <A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
-    A::HashOps: HashOps<Q>,
     Q: Eq,
+    A::HashOps: HashOps<Q>,
+    A::KeyOps: for<'b> KeyOps<'b, <A::PointerOps as PointerOps>::Value>,
+    <A::KeyOps as KeyOps<'a, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
     <A::PointerOps as PointerOps>::Value: 'a,
 {
     type Output = <A::PointerOps as PointerOps>::Value;
 
-    fn index(&self, index: &'b Q) -> &Self::Output {
+    fn index(&self, index: &'a Q) -> &Self::Output {
         self.get(index).expect("no entry found for key")
     }
 }
@@ -1671,9 +1669,9 @@ where
     #[inline]
     pub fn from_key<'b, Q: ?Sized>(self, k: &Q) -> Cursor<'a, A, B>
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
-        A::HashOps: HashOps<Q>,
         Q: Eq,
+        A::HashOps: HashOps<Q>,
+        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'b,
     {
         let hash = self.table.adapter.hash_ops().hash(&k);
@@ -1685,8 +1683,8 @@ where
     #[inline]
     pub fn from_key_hashed_nocheck<'b, Q: ?Sized>(self, hash: u64, k: &Q) -> Cursor<'a, A, B>
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         Q: Eq,
+        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'b,
     {
         match self.prev_from_key_hashed_nocheck(hash, k) {
@@ -1708,9 +1706,9 @@ where
     #[inline]
     pub fn prev_from_key<'b, Q: ?Sized>(self, k: &Q) -> Result<Cursor<'a, A, B>, Cursor<'a, A, B>>
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
-        A::HashOps: HashOps<Q>,
         Q: Eq,
+        A::HashOps: HashOps<Q>,
+        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'b,
     {
         let hash = self.table.adapter.hash_ops().hash(&k);
@@ -1732,8 +1730,8 @@ where
         k: &Q,
     ) -> Result<Cursor<'a, A, B>, Cursor<'a, A, B>>
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         Q: Eq,
+        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'b,
     {
         let adapter = &self.table.adapter;
@@ -1839,9 +1837,9 @@ where
     #[inline]
     pub fn from_key<'b, Q: ?Sized>(self, k: &Q) -> RawEntryMut<'a, A, B>
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
-        A::HashOps: HashOps<Q>,
         Q: Eq,
+        A::HashOps: HashOps<Q>,
+        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'b,
     {
         let hash = self.table.adapter.hash_ops().hash(&k);
@@ -1853,8 +1851,8 @@ where
     #[inline]
     pub fn from_key_hashed_nocheck<'b, Q: ?Sized>(self, hash: u64, k: &Q) -> RawEntryMut<'a, A, B>
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         Q: Eq,
+        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'b,
     {
         match self.prev_from_key_hashed_nocheck(hash, k) {
@@ -1876,9 +1874,9 @@ where
     #[inline]
     pub fn prev_from_key<'b, Q: ?Sized>(self, k: &Q) -> RawEntryMut<'a, A, B>
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
-        A::HashOps: HashOps<Q>,
         Q: Eq,
+        A::HashOps: HashOps<Q>,
+        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'b,
     {
         let hash = self.table.adapter.hash_ops().hash(&k);
@@ -1900,8 +1898,8 @@ where
         k: &Q,
     ) -> RawEntryMut<'a, A, B>
     where
-        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         Q: Eq,
+        <A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key: Borrow<Q>,
         <A::PointerOps as PointerOps>::Value: 'b,
     {
         if self.table.buckets.borrow().len() == 0 {
@@ -2033,21 +2031,28 @@ where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
     A::KeyOps: for<'b> KeyOps<'b, <A::PointerOps as PointerOps>::Value>,
-    A::HashOps:
-        for<'b> HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
 {
     /// Ensures a value is in the entry by inserting the default if empty,
     /// and returns a mutable cursor pointing entry.
     #[inline]
-    pub fn or_insert(self, default: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'a, A, B> {
+    pub fn or_insert<'b>(
+        self,
+        default: <A::PointerOps as PointerOps>::Pointer,
+    ) -> CursorMut<'a, A, B>
+    where
+        A::HashOps: HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
+        <A::PointerOps as PointerOps>::Value: 'b,
+    {
         self.or_insert_with(|| default)
     }
 
     /// Ensures a value is in the entry by inserting the result of the default function if empty,
     /// and returns a mutable cursor pointing entry.
     #[inline]
-    pub fn or_insert_with<F>(self, default: F) -> CursorMut<'a, A, B>
+    pub fn or_insert_with<'b, F>(self, default: F) -> CursorMut<'a, A, B>
     where
+        A::HashOps: HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
+        <A::PointerOps as PointerOps>::Value: 'b,
         F: FnOnce() -> <A::PointerOps as PointerOps>::Pointer,
     {
         match self {
@@ -2094,19 +2099,23 @@ where
     A: HashTableAdapter,
     B: Array<<A::BucketOps as BucketOps>::Bucket>,
     A::KeyOps: for<'b> KeyOps<'b, <A::PointerOps as PointerOps>::Value>,
-    A::HashOps:
-        for<'b> HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
 {
     /// Inserts a new element into the `HashTable` at the location indicated by this `InsertCursor`.
     #[inline]
-    pub fn insert(self, default: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'a, A, B> {
+    pub fn insert<'b>(self, default: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'a, A, B>
+    where
+        A::HashOps: HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
+        <A::PointerOps as PointerOps>::Value: 'b,
+    {
         self.insert_with(|| default)
     }
 
     /// Inserts a new element into the `HashTable` at the location indicated by this `InsertCursor`.
     #[inline]
-    pub fn insert_with<F>(mut self, default: F) -> CursorMut<'a, A, B>
+    pub fn insert_with<'b, F>(mut self, default: F) -> CursorMut<'a, A, B>
     where
+        A::HashOps: HashOps<<A::KeyOps as KeyOps<'b, <A::PointerOps as PointerOps>::Value>>::Key>,
+        <A::PointerOps as PointerOps>::Value: 'b,
         F: FnOnce() -> <A::PointerOps as PointerOps>::Pointer,
     {
         self.table.reserve(1);
@@ -2495,7 +2504,6 @@ impl<A: HashTableAdapter, B: Array<<A::BucketOps as BucketOps>::Bucket>> FusedIt
 #[cfg(test)]
 mod tests {
     use core::cell::Cell;
-    use std::collections::hash_map::RandomState;
     use std::rc::Rc;
 
     use super::*;
@@ -2503,7 +2511,7 @@ mod tests {
     use self::RawEntryMut::{Occupied, Vacant};
 
     use crate::hash_table::bucket_ops::DefaultBucketOps;
-    use crate::hash_table::{array::DynamicArray, hash_ops::DefaultHashOps};
+    use crate::hash_table::{array::DynamicArray, hash_ops::IntegerIdentityHashOps};
     use crate::pointer_ops::DefaultPointerOps;
     use crate::SinglyLinkedList;
     use crate::SinglyLinkedListLink;
@@ -2567,7 +2575,7 @@ mod tests {
     #[derive(Default)]
     struct ObjHashTableAdapter {
         pointer_ops: DefaultPointerOps<Rc<Obj>>,
-        hash_ops: DefaultHashOps<RandomState>,
+        hash_ops: IntegerIdentityHashOps,
         bucket_ops: DefaultBucketOps<SinglyLinkedList<ObjAdapter>>,
         key_ops: ObjKeyOps,
     }
@@ -2579,7 +2587,7 @@ mod tests {
 
         type KeyOps = ObjKeyOps;
 
-        type HashOps = DefaultHashOps<RandomState>;
+        type HashOps = IntegerIdentityHashOps;
 
         fn pointer_ops(&self) -> &Self::PointerOps {
             &self.pointer_ops
@@ -2957,25 +2965,6 @@ mod tests {
         assert_eq!(map[&4].value(), 40);
         assert_eq!(map[&6].value(), 60);
     }
-
-    /*
-    #[test]
-    fn test_try_reserve() {
-        let mut empty_bytes: HashTable<u8, u8>: HashTable<ObjHashTableAdapter, DynamicArray<_>> = HashTable::new();
-
-        const MAX_USIZE: usize = usize::MAX;
-
-        if let Err(CapacityOverflow) = empty_bytes.try_reserve(MAX_USIZE) {
-        } else {
-            panic!("usize::MAX should trigger an overflow!");
-        }
-
-        if let Err(AllocError { .. }) = empty_bytes.try_reserve(MAX_USIZE / 8) {
-        } else {
-            panic!("usize::MAX / 8 should trigger an OOM!")
-        }
-    }
-    */
 
     #[test]
     fn test_raw_entry() {
