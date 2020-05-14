@@ -1218,6 +1218,14 @@ where
     pub fn pop_back(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
         self.back_mut().remove()
     }
+
+    /// Reverses the list in-place.
+    ///
+    /// Due to the structure of `XorLinkedList`, this operation is O(1).
+    #[inline]
+    pub fn reverse(&mut self) {
+        core::mem::swap(&mut self.head, &mut self.tail);
+    }
 }
 
 // Allow read-only access to values from multiple threads
@@ -1811,6 +1819,33 @@ mod tests {
         assert!(!a.link1.is_linked());
         assert!(!b.link1.is_linked());
         assert!(!c.link1.is_linked());
+    }
+
+    #[test]
+    fn test_reverse() {
+        let mut l = XorLinkedList::new(ObjAdapter1::new());
+
+        l.push_back(make_obj(1));
+        l.push_back(make_obj(2));
+        l.push_back(make_obj(3));
+        l.push_back(make_obj(4));
+        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
+
+        l.reverse();
+        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [4, 3, 2, 1]);
+
+        l.push_back(make_obj(5));
+        l.push_back(make_obj(6));
+        assert_eq!(
+            l.iter().map(|x| x.value).collect::<Vec<_>>(),
+            [4, 3, 2, 1, 5, 6]
+        );
+
+        l.reverse();
+        assert_eq!(
+            l.iter().map(|x| x.value).collect::<Vec<_>>(),
+            [6, 5, 1, 2, 3, 4]
+        );
     }
 
     #[test]
