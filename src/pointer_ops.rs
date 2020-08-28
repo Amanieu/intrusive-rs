@@ -15,6 +15,7 @@ use crate::UnsafeRef;
 use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
 use core::ops::Deref;
+use core::pin::Pin;
 
 /// Trait for pointer conversion operations.
 ///
@@ -84,6 +85,21 @@ unsafe impl<'a, T: ?Sized> PointerOps for DefaultPointerOps<&'a T> {
     }
 }
 
+unsafe impl<'a, T: ?Sized> PointerOps for DefaultPointerOps<Pin<&'a T>> {
+    type Value = T;
+    type Pointer = Pin<&'a T>;
+
+    #[inline]
+    unsafe fn from_raw(&self, raw: *const T) -> Pin<&'a T> {
+        Pin::new_unchecked(&*raw)
+    }
+
+    #[inline]
+    fn into_raw(&self, ptr: Pin<&'a T>) -> *const T {
+        unsafe { Pin::into_inner_unchecked(ptr) as *const T }
+    }
+}
+
 unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<UnsafeRef<T>> {
     type Value = T;
     type Pointer = UnsafeRef<T>;
@@ -96,6 +112,21 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<UnsafeRef<T>> {
     #[inline]
     fn into_raw(&self, ptr: UnsafeRef<T>) -> *const T {
         UnsafeRef::into_raw(ptr) as *const T
+    }
+}
+
+unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<UnsafeRef<T>>> {
+    type Value = T;
+    type Pointer = Pin<UnsafeRef<T>>;
+
+    #[inline]
+    unsafe fn from_raw(&self, raw: *const T) -> Pin<UnsafeRef<T>> {
+        Pin::new_unchecked(UnsafeRef::from_raw(raw as *mut T))
+    }
+
+    #[inline]
+    fn into_raw(&self, ptr: Pin<UnsafeRef<T>>) -> *const T {
+        UnsafeRef::into_raw(unsafe { Pin::into_inner_unchecked(ptr) }) as *const T
     }
 }
 
@@ -116,6 +147,22 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Box<T>> {
 }
 
 #[cfg(feature = "alloc")]
+unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<Box<T>>> {
+    type Value = T;
+    type Pointer = Pin<Box<T>>;
+
+    #[inline]
+    unsafe fn from_raw(&self, raw: *const T) -> Pin<Box<T>> {
+        Pin::new_unchecked(Box::from_raw(raw as *mut T))
+    }
+
+    #[inline]
+    fn into_raw(&self, ptr: Pin<Box<T>>) -> *const T {
+        Box::into_raw(unsafe { Pin::into_inner_unchecked(ptr) }) as *const T
+    }
+}
+
+#[cfg(feature = "alloc")]
 unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Rc<T>> {
     type Value = T;
     type Pointer = Rc<T>;
@@ -132,6 +179,22 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Rc<T>> {
 }
 
 #[cfg(feature = "alloc")]
+unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<Rc<T>>> {
+    type Value = T;
+    type Pointer = Pin<Rc<T>>;
+
+    #[inline]
+    unsafe fn from_raw(&self, raw: *const T) -> Pin<Rc<T>> {
+        Pin::new_unchecked(Rc::from_raw(raw))
+    }
+
+    #[inline]
+    fn into_raw(&self, ptr: Pin<Rc<T>>) -> *const T {
+        Rc::into_raw(unsafe { Pin::into_inner_unchecked(ptr) })
+    }
+}
+
+#[cfg(feature = "alloc")]
 unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Arc<T>> {
     type Value = T;
     type Pointer = Arc<T>;
@@ -144,6 +207,22 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Arc<T>> {
     #[inline]
     fn into_raw(&self, ptr: Arc<T>) -> *const T {
         Arc::into_raw(ptr)
+    }
+}
+
+#[cfg(feature = "alloc")]
+unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<Arc<T>>> {
+    type Value = T;
+    type Pointer = Pin<Arc<T>>;
+
+    #[inline]
+    unsafe fn from_raw(&self, raw: *const T) -> Pin<Arc<T>> {
+        Pin::new_unchecked(Arc::from_raw(raw))
+    }
+
+    #[inline]
+    fn into_raw(&self, ptr: Pin<Arc<T>>) -> *const T {
+        Arc::into_raw(unsafe { Pin::into_inner_unchecked(ptr) })
     }
 }
 
@@ -192,6 +271,7 @@ mod tests {
     use std::boxed::Box;
     use std::fmt::Debug;
     use std::mem;
+    use std::pin::Pin;
     use std::rc::Rc;
     use std::sync::Arc;
 
@@ -309,6 +389,123 @@ mod tests {
             let raw = &*p as *const i32;
             let p2: Rc<i32> = clone_pointer_from_raw(&pointer_ops, raw);
             assert_eq!(2, Rc::strong_count(&p2));
+        }
+    }
+
+    #[test]
+    fn test_pin_box() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Pin<Box<_>>>::new();
+            let p = Pin::new(Box::new(1));
+            let a: *const i32 = &*p;
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            let p2: Pin<Box<i32>> = pointer_ops.from_raw(r);
+            let a2: *const i32 = &*p2;
+            assert_eq!(a, a2);
+        }
+    }
+
+    #[test]
+    fn test_pin_rc() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Pin<Rc<_>>>::new();
+            let p = Pin::new(Rc::new(1));
+            let a: *const i32 = &*p;
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            let p2: Pin<Rc<i32>> = pointer_ops.from_raw(r);
+            let a2: *const i32 = &*p2;
+            assert_eq!(a, a2);
+        }
+    }
+
+    #[test]
+    fn test_pin_arc() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Pin<Arc<_>>>::new();
+            let p = Pin::new(Arc::new(1));
+            let a: *const i32 = &*p;
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            let p2: Pin<Arc<i32>> = pointer_ops.from_raw(r);
+            let a2: *const i32 = &*p2;
+            assert_eq!(a, a2);
+        }
+    }
+
+    #[test]
+    fn test_pin_box_unsized() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Pin<Box<_>>>::new();
+            let p = Pin::new(Box::new(1)) as Pin<Box<dyn Debug>>;
+            let a: *const dyn Debug = &*p;
+            let b: (usize, usize) = mem::transmute(a);
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            assert_eq!(b, mem::transmute(r));
+            let p2: Pin<Box<dyn Debug>> = pointer_ops.from_raw(r);
+            let a2: *const dyn Debug = &*p2;
+            assert_eq!(a, a2);
+            assert_eq!(b, mem::transmute(a2));
+        }
+    }
+
+    #[test]
+    fn test_pin_rc_unsized() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Pin<Rc<_>>>::new();
+            let p = Pin::new(Rc::new(1)) as Pin<Rc<dyn Debug>>;
+            let a: *const dyn Debug = &*p;
+            let b: (usize, usize) = mem::transmute(a);
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            assert_eq!(b, mem::transmute(r));
+            let p2: Pin<Rc<dyn Debug>> = pointer_ops.from_raw(r);
+            let a2: *const dyn Debug = &*p2;
+            assert_eq!(a, a2);
+            assert_eq!(b, mem::transmute(a2));
+        }
+    }
+
+    #[test]
+    fn test_pin_arc_unsized() {
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Pin<Arc<_>>>::new();
+            let p = Pin::new(Arc::new(1)) as Pin<Arc<dyn Debug>>;
+            let a: *const dyn Debug = &*p;
+            let b: (usize, usize) = mem::transmute(a);
+            let r = pointer_ops.into_raw(p);
+            assert_eq!(a, r);
+            assert_eq!(b, mem::transmute(r));
+            let p2: Pin<Arc<dyn Debug>> = pointer_ops.from_raw(r);
+            let a2: *const dyn Debug = &*p2;
+            assert_eq!(a, a2);
+            assert_eq!(b, mem::transmute(a2));
+        }
+    }
+
+    #[test]
+    fn clone_pin_arc_from_raw() {
+        use super::clone_pointer_from_raw;
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Pin<Arc<_>>>::new();
+            let p = Pin::new(Arc::new(1));
+            let raw = &*p as *const i32;
+            let p2: Pin<Arc<i32>> = clone_pointer_from_raw(&pointer_ops, raw);
+            assert_eq!(2, Arc::strong_count(&Pin::into_inner(p2)));
+        }
+    }
+
+    #[test]
+    fn clone_pin_rc_from_raw() {
+        use super::clone_pointer_from_raw;
+        unsafe {
+            let pointer_ops = DefaultPointerOps::<Pin<Rc<_>>>::new();
+            let p = Pin::new(Rc::new(1));
+            let raw = &*p as *const i32;
+            let p2: Pin<Rc<i32>> = clone_pointer_from_raw(&pointer_ops, raw);
+            assert_eq!(2, Rc::strong_count(&Pin::into_inner(p2)));
         }
     }
 }
