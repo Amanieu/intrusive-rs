@@ -267,13 +267,14 @@
 #![warn(missing_docs)]
 #![warn(rust_2018_idioms)]
 #![no_std]
-#![cfg_attr(feature = "nightly", feature(const_fn))]
+#![cfg_attr(feature = "nightly", feature(const_fn, const_generics))]
 #![allow(clippy::declare_interior_mutable_const, clippy::collapsible_if)]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
 #[cfg(test)]
+#[macro_use]
 extern crate std;
 
 mod unsafe_ref;
@@ -284,6 +285,7 @@ mod link_ops;
 mod pointer_ops;
 mod unchecked_option;
 
+pub mod hash_table;
 pub mod linked_list;
 pub mod rbtree;
 pub mod singly_linked_list;

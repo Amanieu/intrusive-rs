@@ -7,13 +7,14 @@ documentation = "https://docs.rs/intrusive-collections"
 license = "Apache-2.0/MIT"
 repository = "https://github.com/Amanieu/intrusive-rs"
 readme = "README.md"
-keywords = ["intrusive", "no_std", "list", "rbtree"]
+keywords = ["intrusive", "no_std", "list", "rbtree", "hashtable"]
 categories = ["data-structures", "no-std"]
 edition = "2018"
 
 [features]
 nightly = []
 alloc = []
+
 default = ["alloc"]
 
 [dependencies]
