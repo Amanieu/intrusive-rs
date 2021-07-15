@@ -2260,7 +2260,7 @@ mod tests {
 
             while !expected.is_empty() {
                 {
-                    let index = rng.gen_range(0, expected.len());
+                    let index = rng.gen_range(0..expected.len());
                     let mut c = t.cursor_mut();
                     for _ in 0..(index + 1) {
                         c.move_next();
