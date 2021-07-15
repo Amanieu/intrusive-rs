@@ -152,6 +152,7 @@ macro_rules! container_of {
 /// }
 /// intrusive_adapter!(MyAdapter = Box<Test>: Test { link: LinkedListLink });
 /// intrusive_adapter!(pub MyAdapter2 = Box<Test>: Test { link2: RBTreeLink });
+/// intrusive_adapter!(pub(crate) MyAdapter3 = Box<Test>: Test { link2: RBTreeLink });
 ///
 /// pub struct Test2<T>
 ///     where T: Clone + ?Sized
@@ -159,17 +160,17 @@ macro_rules! container_of {
 ///     link: LinkedListLink,
 ///     val: T,
 /// }
-/// intrusive_adapter!(MyAdapter3<'a, T> = &'a Test2<T>: Test2<T> { link: LinkedListLink } where T: ?Sized + Clone + 'a);
+/// intrusive_adapter!(MyAdapter4<'a, T> = &'a Test2<T>: Test2<T> { link: LinkedListLink } where T: ?Sized + Clone + 'a);
 /// ```
 #[macro_export]
 macro_rules! intrusive_adapter {
     (@impl
-        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident ($($args:tt),*)
+        $(#[$attr:meta])* $vis:vis $name:ident ($($args:tt),*)
         = $pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*
     ) => {
         #[allow(explicit_outlives_requirements)]
         $(#[$attr])*
-        $($privacy)* struct $name<$($args),*> $($where_)* {
+        $vis struct $name<$($args),*> $($where_)* {
             link_ops: <$link as $crate::DefaultLinkOps>::Ops,
             pointer_ops: $crate::DefaultPointerOps<$pointer>,
         }
@@ -230,41 +231,36 @@ macro_rules! intrusive_adapter {
         }
     };
     (@find_generic
-        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident ($($prev:tt)*) > $($rest:tt)*
+        $(#[$attr:meta])* $vis:vis $name:ident ($($prev:tt)*) > $($rest:tt)*
     ) => {
         intrusive_adapter!(@impl
-            $(#[$attr])* ($($privacy)*) $name ($($prev)*) $($rest)*
+            $(#[$attr])* $vis $name ($($prev)*) $($rest)*
         );
     };
     (@find_generic
-        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident ($($prev:tt)*) $cur:tt $($rest:tt)*
+        $(#[$attr:meta])* $vis:vis $name:ident ($($prev:tt)*) $cur:tt $($rest:tt)*
     ) => {
         intrusive_adapter!(@find_generic
-            $(#[$attr])* ($($privacy)*) $name ($($prev)* $cur) $($rest)*
+            $(#[$attr])* $vis $name ($($prev)* $cur) $($rest)*
         );
     };
     (@find_if_generic
-        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident < $($rest:tt)*
+        $(#[$attr:meta])* $vis:vis $name:ident < $($rest:tt)*
     ) => {
         intrusive_adapter!(@find_generic
-            $(#[$attr])* ($($privacy)*) $name () $($rest)*
+            $(#[$attr])* $vis $name () $($rest)*
         );
     };
     (@find_if_generic
-        $(#[$attr:meta])* ($($privacy:tt)*) $name:ident $($rest:tt)*
+        $(#[$attr:meta])* $vis:vis $name:ident $($rest:tt)*
     ) => {
         intrusive_adapter!(@impl
-            $(#[$attr])* ($($privacy)*) $name () $($rest)*
+            $(#[$attr])* $vis $name () $($rest)*
         );
     };
-    ($(#[$attr:meta])* pub $name:ident $($rest:tt)*) => {
+    ($(#[$attr:meta])* $vis:vis $name:ident $($rest:tt)*) => {
         intrusive_adapter!(@find_if_generic
-            $(#[$attr])* (pub) $name $($rest)*
-        );
-    };
-    ($(#[$attr:meta])* $name:ident $($rest:tt)*) => {
-        intrusive_adapter!(@find_if_generic
-            $(#[$attr])* () $name $($rest)*
+            $(#[$attr])* $vis $name $($rest)*
         );
     };
 }
