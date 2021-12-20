@@ -272,6 +272,7 @@ unsafe impl XorLinkedListOps for LinkOps {
 // AtomicLink
 // =============================================================================
 
+#[cfg(feature = "atomic")]
 /// Intrusive atomic link that allows an object to be inserted into a
 /// `LinkedList`. This link allows the structure to be shared between threads.
 #[repr(align(2))]
@@ -280,14 +281,19 @@ pub struct AtomicLink {
     prev: Cell<Option<NonNull<AtomicLink>>>,
 }
 
+#[cfg(feature = "atomic")]
 // Use a special value to indicate an unlinked node
 const ATOMIC_UNLINKED_MARKER_PTR: *mut AtomicLink = 1 as *mut AtomicLink;
-const ATOMIC_UNLINKED_MARKER: Option<NonNull<AtomicLink>> = unsafe { Some(NonNull::new_unchecked(ATOMIC_UNLINKED_MARKER_PTR)) };
+#[cfg(feature = "atomic")]
+// Use a special value to indicate an unlinked node
+const ATOMIC_UNLINKED_MARKER: Option<NonNull<AtomicLink>> =
+    unsafe { Some(NonNull::new_unchecked(ATOMIC_UNLINKED_MARKER_PTR)) };
 
+#[cfg(feature = "atomic")]
 impl AtomicLink {
     /// Creates a new `AtomicLink`.
     #[inline]
-    pub const fn new() -> Self {
+    pub const fn new() -> AtomicLink {
         Self {
             next: AtomicPtr::new(ATOMIC_UNLINKED_MARKER_PTR),
             prev: Cell::new(ATOMIC_UNLINKED_MARKER),
@@ -310,7 +316,8 @@ impl AtomicLink {
     /// the collection without marking the nodes as unlinked.
     #[inline]
     pub unsafe fn force_unlink(&self) {
-        self.next.store(ATOMIC_UNLINKED_MARKER_PTR, Ordering::Release)
+        self.next
+            .store(ATOMIC_UNLINKED_MARKER_PTR, Ordering::Release)
     }
 
     /// Access the `next` pointer in an exclusive context.
@@ -325,17 +332,21 @@ impl AtomicLink {
     }
 }
 
+#[cfg(feature = "atomic")]
 impl DefaultLinkOps for AtomicLink {
     type Ops = AtomicLinkOps;
 
     const NEW: Self::Ops = AtomicLinkOps;
 }
 
+#[cfg(feature = "atomic")]
 // An object containing a link can be sent to another thread since `acquire` is atomic.
 unsafe impl Send for AtomicLink {}
+#[cfg(feature = "atomic")]
 // An object containing a link can be shared between threads since `acquire` is atomic.
 unsafe impl Sync for AtomicLink {}
 
+#[cfg(feature = "atomic")]
 impl Clone for AtomicLink {
     #[inline]
     fn clone(&self) -> AtomicLink {
@@ -343,12 +354,15 @@ impl Clone for AtomicLink {
     }
 }
 
+#[cfg(feature = "atomic")]
 impl Default for AtomicLink {
     #[inline]
     fn default() -> AtomicLink {
         AtomicLink::new()
     }
 }
+
+#[cfg(feature = "atomic")]
 // Provide an implementation of Debug so that structs containing a link can
 // still derive Debug.
 impl fmt::Debug for AtomicLink {
@@ -368,30 +382,23 @@ impl fmt::Debug for AtomicLink {
 // AtomicLinkOps
 // =============================================================================
 
+#[cfg(feature = "atomic")]
 /// Default `AtomicLinkOps` implementation for `LinkedList`.
 #[derive(Clone, Copy, Default)]
 pub struct AtomicLinkOps;
 
+#[cfg(feature = "atomic")]
 unsafe impl link_ops::LinkOps for AtomicLinkOps {
     type LinkPtr = NonNull<AtomicLink>;
 
     #[inline]
     unsafe fn acquire_link(&mut self, ptr: Self::LinkPtr) -> bool {
-        loop {
-            let next = &ptr.as_ref().next;
-            let marker = next.load(Ordering::Relaxed);
-            // Check that the link is not acquire
-            if marker != ATOMIC_UNLINKED_MARKER_PTR {
-                return false;
-            }
-            // Try an atomic compare exchange, if it fails, there might be another thread accessing the value, try again.
-            if next
-                .compare_exchange_weak(marker, null_mut(), Ordering::Acquire, Ordering::Relaxed)
-                .is_ok()
-            {
-                return true;
-            }
-        }
+        ptr.as_ref().next.compare_exchange(
+            ATOMIC_UNLINKED_MARKER_PTR,
+            null_mut(),
+            Ordering::Acquire,
+            Ordering::Relaxed,
+        ).is_ok()
     }
 
     #[inline]
@@ -402,6 +409,7 @@ unsafe impl link_ops::LinkOps for AtomicLinkOps {
     }
 }
 
+#[cfg(feature = "atomic")]
 unsafe impl LinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
@@ -424,6 +432,7 @@ unsafe impl LinkedListOps for AtomicLinkOps {
     }
 }
 
+#[cfg(feature = "atomic")]
 unsafe impl SinglyLinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
@@ -436,6 +445,7 @@ unsafe impl SinglyLinkedListOps for AtomicLinkOps {
     }
 }
 
+#[cfg(feature = "atomic")]
 unsafe impl XorLinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(
