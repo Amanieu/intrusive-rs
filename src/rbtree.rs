@@ -14,6 +14,7 @@ use core::cmp::Ordering;
 use core::fmt;
 use core::mem;
 use core::ptr::NonNull;
+use core::sync::atomic::{self, AtomicUsize};
 
 use crate::Bound::{self, Excluded, Included, Unbounded};
 
@@ -305,6 +306,293 @@ unsafe impl LinkedListOps for LinkOps {
 }
 
 unsafe impl XorLinkedListOps for LinkOps {
+    #[inline]
+    unsafe fn next(
+        &self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
+        let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        NonNull::new(raw as *mut _)
+    }
+
+    #[inline]
+    unsafe fn prev(
+        &self,
+        ptr: Self::LinkPtr,
+        next: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
+        let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        NonNull::new(raw as *mut _)
+    }
+
+    #[inline]
+    unsafe fn set(
+        &mut self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+        next: Option<Self::LinkPtr>,
+    ) {
+        let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+
+        let new_next = NonNull::new(new_packed as *mut _);
+        self.set_right(ptr, new_next);
+    }
+
+    #[inline]
+    unsafe fn replace_next_or_prev(
+        &mut self,
+        ptr: Self::LinkPtr,
+        old: Option<Self::LinkPtr>,
+        new: Option<Self::LinkPtr>,
+    ) {
+        let packed = self.right(ptr).map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let new_packed = packed
+            ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
+
+        let new_next = NonNull::new(new_packed as *mut _);
+        self.set_right(ptr, new_next);
+    }
+}
+
+// =============================================================================
+// AtomicLink
+// =============================================================================
+
+/// Intrusive link that allows an object to be inserted into a
+/// `RBTree`. This link allows the structure to be shared between threads.
+
+#[repr(align(2))]
+pub struct AtomicLink {
+    left: Cell<Option<NonNull<AtomicLink>>>,
+    right: Cell<Option<NonNull<AtomicLink>>>,
+    parent_color: AtomicUsize,
+}
+
+impl AtomicLink {
+    #[inline]
+    /// Creates a new `AtomicLink`.
+    pub const fn new() -> AtomicLink {
+        AtomicLink {
+            left: Cell::new(None),
+            right: Cell::new(None),
+            parent_color: AtomicUsize::new(UNLINKED_MARKER),
+        }
+    }
+
+    /// Checks whether the `AtomicLink` is linked into a `RBTree`.
+    #[inline]
+    pub fn is_linked(&self) -> bool {
+        self.parent_color.load(atomic::Ordering::Relaxed) != UNLINKED_MARKER
+    }
+
+    /// Forcibly unlinks an object from a `RBTree`.
+    ///
+    /// # Safety
+    ///
+    /// It is undefined behavior to call this function while still linked into a
+    /// `RBTree`. The only situation where this function is useful is
+    /// after calling `fast_clear` on a `RBTree`, since this clears
+    /// the collection without marking the nodes as unlinked.
+    #[inline]
+    pub unsafe fn force_unlink(&self) {
+        self.parent_color
+            .store(UNLINKED_MARKER, atomic::Ordering::Release);
+    }
+
+    /// Access `parent_color` in an exclusive context.
+    ///
+    /// # Safety
+    ///
+    /// This can only be called after `acquire_link` has been succesfully called.
+    #[inline]
+    unsafe fn parent_color_exclusive(&self) -> &Cell<usize> {
+        // This is safe because currently AtomicUsize has the same representation Cell<usize>.
+        core::mem::transmute(&self.parent_color)
+    }
+}
+
+impl DefaultLinkOps for AtomicLink {
+    type Ops = AtomicLinkOps;
+
+    const NEW: Self::Ops = AtomicLinkOps;
+}
+
+// An object containing a link can be sent to another thread since `acquire_link` is atomic.
+unsafe impl Send for AtomicLink {}
+
+// An object containing a link can be shared between threads since `acquire_link` is atomic.
+unsafe impl Sync for AtomicLink {}
+
+impl Clone for AtomicLink {
+    #[inline]
+    fn clone(&self) -> AtomicLink {
+        AtomicLink::new()
+    }
+}
+
+impl Default for AtomicLink {
+    #[inline]
+    fn default() -> AtomicLink {
+        AtomicLink::new()
+    }
+}
+
+// Provide an implementation of Debug so that structs containing a link can
+// still derive Debug.
+impl fmt::Debug for AtomicLink {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // There isn't anything sensible to print here except whether the link
+        // is currently in a list.
+        if self.is_linked() {
+            write!(f, "linked")
+        } else {
+            write!(f, "unlinked")
+        }
+    }
+}
+
+// =============================================================================
+// AtomicLinkOps
+// =============================================================================
+
+/// Default `LinkOps` implementation for `RBTree`.
+#[derive(Clone, Copy, Default)]
+pub struct AtomicLinkOps;
+
+impl AtomicLinkOps {
+    #[inline]
+    unsafe fn set_parent_color(
+        self,
+        ptr: <Self as link_ops::LinkOps>::LinkPtr,
+        parent: Option<<Self as link_ops::LinkOps>::LinkPtr>,
+        color: Color,
+    ) {
+        assert!(mem::align_of::<Link>() >= 2);
+        let bit = match color {
+            Color::Red => 0,
+            Color::Black => 1,
+        };
+        let parent_usize = parent.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        ptr.as_ref()
+            .parent_color_exclusive()
+            .set((parent_usize & !1) | bit);
+    }
+}
+
+const LINKED_DEFAULT_VALUE: usize = 1;
+
+unsafe impl link_ops::LinkOps for AtomicLinkOps {
+    type LinkPtr = NonNull<AtomicLink>;
+
+    #[inline]
+    unsafe fn acquire_link(&mut self, ptr: Self::LinkPtr) -> bool {
+        ptr.as_ref()
+            .parent_color
+            .compare_exchange(
+                UNLINKED_MARKER,
+                LINKED_DEFAULT_VALUE,
+                atomic::Ordering::Acquire,
+                atomic::Ordering::Relaxed,
+            )
+            .is_ok()
+    }
+
+    #[inline]
+    unsafe fn release_link(&mut self, ptr: Self::LinkPtr) {
+        ptr.as_ref()
+            .parent_color
+            .store(UNLINKED_MARKER, atomic::Ordering::Release)
+    }
+}
+
+unsafe impl RBTreeOps for AtomicLinkOps {
+    #[inline]
+    unsafe fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        ptr.as_ref().left.get()
+    }
+
+    #[inline]
+    unsafe fn right(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        ptr.as_ref().right.get()
+    }
+
+    #[inline]
+    unsafe fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        let parent_usize = ptr.as_ref().parent_color_exclusive().get() & !1;
+        NonNull::new(parent_usize as *mut AtomicLink)
+    }
+
+    #[inline]
+    unsafe fn color(&self, ptr: Self::LinkPtr) -> Color {
+        if ptr.as_ref().parent_color_exclusive().get() & 1 == 1 {
+            Color::Black
+        } else {
+            Color::Red
+        }
+    }
+
+    #[inline]
+    unsafe fn set_left(&mut self, ptr: Self::LinkPtr, left: Option<Self::LinkPtr>) {
+        ptr.as_ref().left.set(left);
+    }
+
+    #[inline]
+    unsafe fn set_right(&mut self, ptr: Self::LinkPtr, right: Option<Self::LinkPtr>) {
+        ptr.as_ref().right.set(right);
+    }
+
+    #[inline]
+    unsafe fn set_parent(&mut self, ptr: Self::LinkPtr, parent: Option<Self::LinkPtr>) {
+        self.set_parent_color(ptr, parent, self.color(ptr));
+    }
+
+    #[inline]
+    unsafe fn set_color(&mut self, ptr: Self::LinkPtr, color: Color) {
+        self.set_parent_color(ptr, self.parent(ptr), color);
+    }
+}
+
+unsafe impl SinglyLinkedListOps for AtomicLinkOps {
+    #[inline]
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        self.right(ptr)
+    }
+
+    #[inline]
+    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
+        self.set_right(ptr, next);
+    }
+}
+
+unsafe impl LinkedListOps for AtomicLinkOps {
+    #[inline]
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        self.right(ptr)
+    }
+
+    #[inline]
+    unsafe fn prev(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        self.left(ptr)
+    }
+
+    #[inline]
+    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
+        self.set_right(ptr, next);
+    }
+
+    #[inline]
+    unsafe fn set_prev(&mut self, ptr: Self::LinkPtr, prev: Option<Self::LinkPtr>) {
+        self.set_left(ptr, prev);
+    }
+}
+
+unsafe impl XorLinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(
         &self,

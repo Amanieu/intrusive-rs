@@ -10,7 +10,8 @@
 
 use core::cell::Cell;
 use core::fmt;
-use core::ptr::NonNull;
+use core::ptr::{null_mut, NonNull};
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use crate::link_ops::{self, DefaultLinkOps};
 use crate::pointer_ops::PointerOps;
@@ -227,6 +228,213 @@ unsafe impl XorLinkedListOps for LinkOps {
 
         let new_next = NonNull::new(new_packed as *mut _);
         ptr.as_ref().next.set(new_next);
+    }
+}
+
+// =============================================================================
+// AtomicLink
+// =============================================================================
+
+/// Intrusive link that allows an object to be inserted into a
+/// `SinglyLinkedList`. This link allows the structure to be shared between threads.
+#[repr(align(2))]
+pub struct AtomicLink {
+    next: AtomicPtr<AtomicLink>,
+}
+const ATOMIC_UNLINKED_MARKER: *mut AtomicLink = 1 as *mut AtomicLink;
+
+impl AtomicLink {
+    /// Creates a new `AtomicLink`.
+    #[inline]
+    pub const fn new() -> AtomicLink {
+        AtomicLink {
+            next: AtomicPtr::new(ATOMIC_UNLINKED_MARKER),
+        }
+    }
+
+    /// Checks whether the `AtomicLink` is linked into a `SinglyLinkedList`.
+    #[inline]
+    pub fn is_linked(&self) -> bool {
+        self.next.load(Ordering::Relaxed) != ATOMIC_UNLINKED_MARKER
+    }
+
+    /// Forcibly unlinks an object from a `SinglyLinkedList`.
+    ///
+    /// # Safety
+    ///
+    /// It is undefined behavior to call this function while still linked into a
+    /// `SinglyLinkedList`. The only situation where this function is useful is
+    /// after calling `fast_clear` on a `SinglyLinkedList`, since this clears
+    /// the collection without marking the nodes as unlinked.
+    #[inline]
+    pub unsafe fn force_unlink(&self) {
+        self.next.store(ATOMIC_UNLINKED_MARKER, Ordering::Release);
+    }
+
+    /// Access the `next` pointer in an exclusive context.
+    ///
+    /// # Safety
+    ///
+    /// This can only be called after `acquire_link` has been succesfully called.
+    #[inline]
+    unsafe fn next_exclusive(&self) -> &Cell<Option<NonNull<AtomicLink>>> {
+        // This is safe because currently AtomicPtr<AtomicLink> has the same representation Cell<Option<NonNull<AtomicLink>>>.
+        core::mem::transmute(&self.next)
+    }
+}
+
+impl DefaultLinkOps for AtomicLink {
+    type Ops = AtomicLinkOps;
+
+    const NEW: Self::Ops = AtomicLinkOps;
+}
+
+// An object containing a link can be sent to another thread since `acquire_link` is atomic.
+unsafe impl Send for AtomicLink {}
+
+// An object containing a link can be shared between threads since `acquire_link` is atomic.
+unsafe impl Sync for AtomicLink {}
+
+impl Clone for AtomicLink {
+    #[inline]
+    fn clone(&self) -> AtomicLink {
+        AtomicLink::new()
+    }
+}
+
+impl Default for AtomicLink {
+    #[inline]
+    fn default() -> AtomicLink {
+        AtomicLink::new()
+    }
+}
+
+// Provide an implementation of Debug so that structs containing a link can
+// still derive Debug.
+impl fmt::Debug for AtomicLink {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // There isn't anything sensible to print here except whether the link
+        // is currently in a list.
+        if self.is_linked() {
+            write!(f, "linked")
+        } else {
+            write!(f, "unlinked")
+        }
+    }
+}
+
+// =============================================================================
+// AtomicLinkOps
+// =============================================================================
+
+/// Default `AtomicLinkOps` implementation for `LinkedList`.
+#[derive(Clone, Copy, Default)]
+pub struct AtomicLinkOps;
+
+unsafe impl link_ops::LinkOps for AtomicLinkOps {
+    type LinkPtr = NonNull<AtomicLink>;
+
+    #[inline]
+    unsafe fn acquire_link(&mut self, ptr: Self::LinkPtr) -> bool {
+        ptr.as_ref()
+            .next
+            .compare_exchange(
+                ATOMIC_UNLINKED_MARKER,
+                null_mut(),
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+    }
+
+    #[inline]
+    unsafe fn release_link(&mut self, ptr: Self::LinkPtr) {
+        ptr.as_ref()
+            .next
+            .store(ATOMIC_UNLINKED_MARKER, Ordering::Release)
+    }
+}
+
+unsafe impl SinglyLinkedListOps for AtomicLinkOps {
+    #[inline]
+    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+        ptr.as_ref().next_exclusive().get()
+    }
+
+    #[inline]
+    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
+        ptr.as_ref().next_exclusive().set(next);
+    }
+}
+
+unsafe impl XorLinkedListOps for AtomicLinkOps {
+    #[inline]
+    unsafe fn next(
+        &self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
+        let packed = ptr
+            .as_ref()
+            .next_exclusive()
+            .get()
+            .map(|x| x.as_ptr() as usize)
+            .unwrap_or(0);
+        let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
+
+        NonNull::new(raw as *mut _)
+    }
+
+    #[inline]
+    unsafe fn prev(
+        &self,
+        ptr: Self::LinkPtr,
+        next: Option<Self::LinkPtr>,
+    ) -> Option<Self::LinkPtr> {
+        let packed = ptr
+            .as_ref()
+            .next_exclusive()
+            .get()
+            .map(|x| x.as_ptr() as usize)
+            .unwrap_or(0);
+        let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        NonNull::new(raw as *mut _)
+    }
+
+    #[inline]
+    unsafe fn set(
+        &mut self,
+        ptr: Self::LinkPtr,
+        prev: Option<Self::LinkPtr>,
+        next: Option<Self::LinkPtr>,
+    ) {
+        let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+
+        let new_next = NonNull::new(new_packed as *mut _);
+        ptr.as_ref().next_exclusive().set(new_next);
+    }
+
+    #[inline]
+    unsafe fn replace_next_or_prev(
+        &mut self,
+        ptr: Self::LinkPtr,
+        old: Option<Self::LinkPtr>,
+        new: Option<Self::LinkPtr>,
+    ) {
+        let packed = ptr
+            .as_ref()
+            .next_exclusive()
+            .get()
+            .map(|x| x.as_ptr() as usize)
+            .unwrap_or(0);
+        let new_packed = packed
+            ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
+            ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
+
+        let new_next = NonNull::new(new_packed as *mut _);
+        ptr.as_ref().next_exclusive().set(new_next);
     }
 }
 
