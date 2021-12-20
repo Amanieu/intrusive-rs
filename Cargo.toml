@@ -14,8 +14,7 @@ edition = "2018"
 [features]
 nightly = []
 alloc = []
-atomic = []
-default = ["alloc", "atomic"]
+default = ["alloc"]
 
 [dependencies]
 memoffset = "0.5.4"

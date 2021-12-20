@@ -365,7 +365,7 @@ unsafe impl XorLinkedListOps for LinkOps {
 
 /// Intrusive link that allows an object to be inserted into a
 /// `RBTree`. This link allows the structure to be shared between threads.
-#[cfg(feature = "atomic")]
+
 #[repr(align(2))]
 pub struct AtomicLink {
     left: Cell<Option<NonNull<AtomicLink>>>,
@@ -373,7 +373,6 @@ pub struct AtomicLink {
     parent_color: AtomicUsize,
 }
 
-#[cfg(feature = "atomic")]
 impl AtomicLink {
     #[inline]
     /// Creates a new `AtomicLink`.
@@ -417,21 +416,18 @@ impl AtomicLink {
     }
 }
 
-#[cfg(feature = "atomic")]
 impl DefaultLinkOps for AtomicLink {
     type Ops = AtomicLinkOps;
 
     const NEW: Self::Ops = AtomicLinkOps;
 }
 
-#[cfg(feature = "atomic")]
 // An object containing a link can be sent to another thread since `acquire` is atomic.
 unsafe impl Send for AtomicLink {}
-#[cfg(feature = "atomic")]
+
 // An object containing a link can be shared between threads since `acquire` is atomic.
 unsafe impl Sync for AtomicLink {}
 
-#[cfg(feature = "atomic")]
 impl Clone for AtomicLink {
     #[inline]
     fn clone(&self) -> AtomicLink {
@@ -439,7 +435,6 @@ impl Clone for AtomicLink {
     }
 }
 
-#[cfg(feature = "atomic")]
 impl Default for AtomicLink {
     #[inline]
     fn default() -> AtomicLink {
@@ -447,7 +442,6 @@ impl Default for AtomicLink {
     }
 }
 
-#[cfg(feature = "atomic")]
 // Provide an implementation of Debug so that structs containing a link can
 // still derive Debug.
 impl fmt::Debug for AtomicLink {
@@ -467,12 +461,10 @@ impl fmt::Debug for AtomicLink {
 // AtomicLinkOps
 // =============================================================================
 
-#[cfg(feature = "atomic")]
 /// Default `LinkOps` implementation for `RBTree`.
 #[derive(Clone, Copy, Default)]
 pub struct AtomicLinkOps;
 
-#[cfg(feature = "atomic")]
 impl AtomicLinkOps {
     #[inline]
     unsafe fn set_parent_color(
@@ -493,10 +485,8 @@ impl AtomicLinkOps {
     }
 }
 
-#[cfg(feature = "atomic")]
 const LINKED_DEFAULT_VALUE: usize = 1;
 
-#[cfg(feature = "atomic")]
 unsafe impl link_ops::LinkOps for AtomicLinkOps {
     type LinkPtr = NonNull<AtomicLink>;
 
@@ -521,7 +511,6 @@ unsafe impl link_ops::LinkOps for AtomicLinkOps {
     }
 }
 
-#[cfg(feature = "atomic")]
 unsafe impl RBTreeOps for AtomicLinkOps {
     #[inline]
     unsafe fn left(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
@@ -569,7 +558,6 @@ unsafe impl RBTreeOps for AtomicLinkOps {
     }
 }
 
-#[cfg(feature = "atomic")]
 unsafe impl SinglyLinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
@@ -582,7 +570,6 @@ unsafe impl SinglyLinkedListOps for AtomicLinkOps {
     }
 }
 
-#[cfg(feature = "atomic")]
 unsafe impl LinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
@@ -605,7 +592,6 @@ unsafe impl LinkedListOps for AtomicLinkOps {
     }
 }
 
-#[cfg(feature = "atomic")]
 unsafe impl XorLinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(

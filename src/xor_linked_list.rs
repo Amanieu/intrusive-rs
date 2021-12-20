@@ -309,18 +309,16 @@ impl AtomicLink {
 
 impl DefaultLinkOps for AtomicLink {
     type Ops = AtomicLinkOps;
-    
+
     const NEW: Self::Ops = AtomicLinkOps;
 }
 
-#[cfg(feature = "atomic")]
 // An object containing a link can be sent to another thread since `acquire` is atomic.
 unsafe impl Send for AtomicLink {}
-#[cfg(feature = "atomic")]
+
 // An object containing a link can be shared between threads since `acquire` is atomic.
 unsafe impl Sync for AtomicLink {}
 
-#[cfg(feature = "atomic")]
 impl Clone for AtomicLink {
     #[inline]
     fn clone(&self) -> AtomicLink {
@@ -328,7 +326,6 @@ impl Clone for AtomicLink {
     }
 }
 
-#[cfg(feature = "atomic")]
 impl Default for AtomicLink {
     #[inline]
     fn default() -> AtomicLink {
@@ -336,7 +333,6 @@ impl Default for AtomicLink {
     }
 }
 
-#[cfg(feature = "atomic")]
 // Provide an implementation of Debug so that structs containing a link can
 // still derive Debug.
 impl fmt::Debug for AtomicLink {
@@ -356,26 +352,26 @@ impl fmt::Debug for AtomicLink {
 // AtomicLinkOps
 // =============================================================================
 
-#[cfg(feature = "atomic")]
 /// Default `AtomicLinkOps` implementation for `LinkedList`.
 #[derive(Clone, Copy, Default)]
 pub struct AtomicLinkOps;
 
-#[cfg(feature = "atomic")]
 const LINKED_DEFAULT_VALUE: usize = 0;
 
-#[cfg(feature = "atomic")]
 unsafe impl link_ops::LinkOps for AtomicLinkOps {
     type LinkPtr = NonNull<AtomicLink>;
 
     #[inline]
     unsafe fn acquire_link(&mut self, ptr: Self::LinkPtr) -> bool {
-        ptr.as_ref().packed.compare_exchange(
-            UNLINKED_MARKER,
-            LINKED_DEFAULT_VALUE,
-            Ordering::Acquire,
-            Ordering::Relaxed,
-        ).is_ok()
+        ptr.as_ref()
+            .packed
+            .compare_exchange(
+                UNLINKED_MARKER,
+                LINKED_DEFAULT_VALUE,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            )
+            .is_ok()
     }
 
     #[inline]
@@ -393,7 +389,8 @@ unsafe impl XorLinkedListOps for AtomicLinkOps {
         ptr: Self::LinkPtr,
         prev: Option<Self::LinkPtr>,
     ) -> Option<Self::LinkPtr> {
-        let raw = ptr.as_ref().packed_exclusive().get() ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw =
+            ptr.as_ref().packed_exclusive().get() ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
         NonNull::new(raw as *mut _)
     }
 
@@ -403,7 +400,8 @@ unsafe impl XorLinkedListOps for AtomicLinkOps {
         ptr: Self::LinkPtr,
         next: Option<Self::LinkPtr>,
     ) -> Option<Self::LinkPtr> {
-        let raw = ptr.as_ref().packed_exclusive().get() ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw =
+            ptr.as_ref().packed_exclusive().get() ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
         NonNull::new(raw as *mut _)
     }
 

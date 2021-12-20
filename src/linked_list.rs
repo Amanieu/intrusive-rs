@@ -272,7 +272,6 @@ unsafe impl XorLinkedListOps for LinkOps {
 // AtomicLink
 // =============================================================================
 
-#[cfg(feature = "atomic")]
 /// Intrusive atomic link that allows an object to be inserted into a
 /// `LinkedList`. This link allows the structure to be shared between threads.
 #[repr(align(2))]
@@ -281,15 +280,13 @@ pub struct AtomicLink {
     prev: Cell<Option<NonNull<AtomicLink>>>,
 }
 
-#[cfg(feature = "atomic")]
 // Use a special value to indicate an unlinked node
 const ATOMIC_UNLINKED_MARKER_PTR: *mut AtomicLink = 1 as *mut AtomicLink;
-#[cfg(feature = "atomic")]
+
 // Use a special value to indicate an unlinked node
 const ATOMIC_UNLINKED_MARKER: Option<NonNull<AtomicLink>> =
     unsafe { Some(NonNull::new_unchecked(ATOMIC_UNLINKED_MARKER_PTR)) };
 
-#[cfg(feature = "atomic")]
 impl AtomicLink {
     /// Creates a new `AtomicLink`.
     #[inline]
@@ -332,21 +329,18 @@ impl AtomicLink {
     }
 }
 
-#[cfg(feature = "atomic")]
 impl DefaultLinkOps for AtomicLink {
     type Ops = AtomicLinkOps;
 
     const NEW: Self::Ops = AtomicLinkOps;
 }
 
-#[cfg(feature = "atomic")]
 // An object containing a link can be sent to another thread since `acquire` is atomic.
 unsafe impl Send for AtomicLink {}
-#[cfg(feature = "atomic")]
+
 // An object containing a link can be shared between threads since `acquire` is atomic.
 unsafe impl Sync for AtomicLink {}
 
-#[cfg(feature = "atomic")]
 impl Clone for AtomicLink {
     #[inline]
     fn clone(&self) -> AtomicLink {
@@ -354,7 +348,6 @@ impl Clone for AtomicLink {
     }
 }
 
-#[cfg(feature = "atomic")]
 impl Default for AtomicLink {
     #[inline]
     fn default() -> AtomicLink {
@@ -362,7 +355,6 @@ impl Default for AtomicLink {
     }
 }
 
-#[cfg(feature = "atomic")]
 // Provide an implementation of Debug so that structs containing a link can
 // still derive Debug.
 impl fmt::Debug for AtomicLink {
@@ -382,23 +374,24 @@ impl fmt::Debug for AtomicLink {
 // AtomicLinkOps
 // =============================================================================
 
-#[cfg(feature = "atomic")]
 /// Default `AtomicLinkOps` implementation for `LinkedList`.
 #[derive(Clone, Copy, Default)]
 pub struct AtomicLinkOps;
 
-#[cfg(feature = "atomic")]
 unsafe impl link_ops::LinkOps for AtomicLinkOps {
     type LinkPtr = NonNull<AtomicLink>;
 
     #[inline]
     unsafe fn acquire_link(&mut self, ptr: Self::LinkPtr) -> bool {
-        ptr.as_ref().next.compare_exchange(
-            ATOMIC_UNLINKED_MARKER_PTR,
-            null_mut(),
-            Ordering::Acquire,
-            Ordering::Relaxed,
-        ).is_ok()
+        ptr.as_ref()
+            .next
+            .compare_exchange(
+                ATOMIC_UNLINKED_MARKER_PTR,
+                null_mut(),
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            )
+            .is_ok()
     }
 
     #[inline]
@@ -409,7 +402,6 @@ unsafe impl link_ops::LinkOps for AtomicLinkOps {
     }
 }
 
-#[cfg(feature = "atomic")]
 unsafe impl LinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
@@ -432,7 +424,6 @@ unsafe impl LinkedListOps for AtomicLinkOps {
     }
 }
 
-#[cfg(feature = "atomic")]
 unsafe impl SinglyLinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
@@ -445,7 +436,6 @@ unsafe impl SinglyLinkedListOps for AtomicLinkOps {
     }
 }
 
-#[cfg(feature = "atomic")]
 unsafe impl XorLinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(

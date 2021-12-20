@@ -10,7 +10,7 @@
 
 use core::cell::Cell;
 use core::fmt;
-use core::ptr::{NonNull, null_mut};
+use core::ptr::{null_mut, NonNull};
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 use crate::link_ops::{self, DefaultLinkOps};
@@ -285,18 +285,16 @@ impl AtomicLink {
 
 impl DefaultLinkOps for AtomicLink {
     type Ops = AtomicLinkOps;
-    
+
     const NEW: Self::Ops = AtomicLinkOps;
 }
 
-#[cfg(feature = "atomic")]
 // An object containing a link can be sent to another thread since `acquire` is atomic.
 unsafe impl Send for AtomicLink {}
-#[cfg(feature = "atomic")]
+
 // An object containing a link can be shared between threads since `acquire` is atomic.
 unsafe impl Sync for AtomicLink {}
 
-#[cfg(feature = "atomic")]
 impl Clone for AtomicLink {
     #[inline]
     fn clone(&self) -> AtomicLink {
@@ -304,7 +302,6 @@ impl Clone for AtomicLink {
     }
 }
 
-#[cfg(feature = "atomic")]
 impl Default for AtomicLink {
     #[inline]
     fn default() -> AtomicLink {
@@ -312,7 +309,6 @@ impl Default for AtomicLink {
     }
 }
 
-#[cfg(feature = "atomic")]
 // Provide an implementation of Debug so that structs containing a link can
 // still derive Debug.
 impl fmt::Debug for AtomicLink {
@@ -332,23 +328,24 @@ impl fmt::Debug for AtomicLink {
 // AtomicLinkOps
 // =============================================================================
 
-#[cfg(feature = "atomic")]
 /// Default `AtomicLinkOps` implementation for `LinkedList`.
 #[derive(Clone, Copy, Default)]
 pub struct AtomicLinkOps;
 
-#[cfg(feature = "atomic")]
 unsafe impl link_ops::LinkOps for AtomicLinkOps {
     type LinkPtr = NonNull<AtomicLink>;
 
     #[inline]
     unsafe fn acquire_link(&mut self, ptr: Self::LinkPtr) -> bool {
-        ptr.as_ref().next.compare_exchange(
-            ATOMIC_UNLINKED_MARKER,
-            null_mut(),
-            Ordering::Acquire,
-            Ordering::Relaxed,
-        ).is_ok()
+        ptr.as_ref()
+            .next
+            .compare_exchange(
+                ATOMIC_UNLINKED_MARKER,
+                null_mut(),
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            )
+            .is_ok()
     }
 
     #[inline]
@@ -359,7 +356,6 @@ unsafe impl link_ops::LinkOps for AtomicLinkOps {
     }
 }
 
-#[cfg(feature = "atomic")]
 unsafe impl SinglyLinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
@@ -372,7 +368,6 @@ unsafe impl SinglyLinkedListOps for AtomicLinkOps {
     }
 }
 
-#[cfg(feature = "atomic")]
 unsafe impl XorLinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(
