@@ -364,7 +364,7 @@ unsafe impl XorLinkedListOps for LinkOps {
 // =============================================================================
 
 /// Intrusive link that allows an object to be inserted into a
-/// `RBTree`.
+/// `RBTree`. This link allows the structure to be shared between threads.
 #[cfg(feature = "atomic")]
 #[repr(align(2))]
 pub struct AtomicLink {
@@ -487,7 +487,9 @@ impl AtomicLinkOps {
             Color::Black => 1,
         };
         let parent_usize = parent.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        ptr.as_ref().parent_color_exclusive().set((parent_usize & !1) | bit);
+        ptr.as_ref()
+            .parent_color_exclusive()
+            .set((parent_usize & !1) | bit);
     }
 }
 

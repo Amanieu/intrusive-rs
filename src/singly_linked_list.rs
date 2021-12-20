@@ -236,7 +236,7 @@ unsafe impl XorLinkedListOps for LinkOps {
 // =============================================================================
 
 /// Intrusive link that allows an object to be inserted into a
-/// `SinglyLinkedList`.
+/// `SinglyLinkedList`. This link allows the structure to be shared between threads.
 #[repr(align(2))]
 pub struct AtomicLink {
     next: AtomicPtr<AtomicLink>,
