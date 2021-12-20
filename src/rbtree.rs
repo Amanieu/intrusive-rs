@@ -408,7 +408,7 @@ impl AtomicLink {
     ///
     /// # Safety
     ///
-    /// This can only be called after `acquire` has been succesfully called.
+    /// This can only be called after `acquire_link` has been succesfully called.
     #[inline]
     unsafe fn parent_color_exclusive(&self) -> &Cell<usize> {
         // This is safe because currently AtomicUsize has the same representation Cell<usize>.
@@ -422,10 +422,10 @@ impl DefaultLinkOps for AtomicLink {
     const NEW: Self::Ops = AtomicLinkOps;
 }
 
-// An object containing a link can be sent to another thread since `acquire` is atomic.
+// An object containing a link can be sent to another thread since `acquire_link` is atomic.
 unsafe impl Send for AtomicLink {}
 
-// An object containing a link can be shared between threads since `acquire` is atomic.
+// An object containing a link can be shared between threads since `acquire_link` is atomic.
 unsafe impl Sync for AtomicLink {}
 
 impl Clone for AtomicLink {

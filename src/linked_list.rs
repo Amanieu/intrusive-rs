@@ -321,7 +321,7 @@ impl AtomicLink {
     ///
     /// # Safety
     ///
-    /// This can only be called after `acquire` has been succesfully called.
+    /// This can only be called after `acquire_link` has been succesfully called.
     #[inline]
     unsafe fn next_exclusive(&self) -> &Cell<Option<NonNull<AtomicLink>>> {
         // This is safe because currently AtomicPtr<AtomicLink> has the same representation Cell<Option<NonNull<AtomicLink>>>.
@@ -335,10 +335,10 @@ impl DefaultLinkOps for AtomicLink {
     const NEW: Self::Ops = AtomicLinkOps;
 }
 
-// An object containing a link can be sent to another thread since `acquire` is atomic.
+// An object containing a link can be sent to another thread since `acquire_link` is atomic.
 unsafe impl Send for AtomicLink {}
 
-// An object containing a link can be shared between threads since `acquire` is atomic.
+// An object containing a link can be shared between threads since `acquire_link` is atomic.
 unsafe impl Sync for AtomicLink {}
 
 impl Clone for AtomicLink {
