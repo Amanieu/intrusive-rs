@@ -1114,10 +1114,10 @@ mod tests {
         let b = make_obj(2);
         let c = make_obj(3);
         let d = make_obj(4);
-        l1.cursor_mut().insert_after(d.clone());
-        l1.cursor_mut().insert_after(c.clone());
-        l1.cursor_mut().insert_after(b.clone());
-        l1.cursor_mut().insert_after(a.clone());
+        l1.cursor_mut().insert_after(d);
+        l1.cursor_mut().insert_after(c);
+        l1.cursor_mut().insert_after(b);
+        l1.cursor_mut().insert_after(a);
         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
@@ -1263,10 +1263,10 @@ mod tests {
         l1.cursor_mut().insert_after(c.clone());
         l1.cursor_mut().insert_after(b.clone());
         l1.cursor_mut().insert_after(a.clone());
-        l2.cursor_mut().insert_after(a.clone());
-        l2.cursor_mut().insert_after(b.clone());
-        l2.cursor_mut().insert_after(c.clone());
-        l2.cursor_mut().insert_after(d.clone());
+        l2.cursor_mut().insert_after(a);
+        l2.cursor_mut().insert_after(b);
+        l2.cursor_mut().insert_after(c);
+        l2.cursor_mut().insert_after(d);
         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), [4, 3, 2, 1]);
     }

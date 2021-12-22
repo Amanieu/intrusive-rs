@@ -268,7 +268,7 @@
 #![warn(rust_2018_idioms)]
 #![no_std]
 #![cfg_attr(feature = "nightly", feature(const_fn_trait_bound))]
-#![allow(clippy::declare_interior_mutable_const, clippy::collapsible_if)]
+#![allow(clippy::declare_interior_mutable_const, clippy::collapsible_if, clippy::collapsible_else_if)]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;

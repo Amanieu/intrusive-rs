@@ -568,7 +568,6 @@ unsafe fn post_insert<T: RBTreeOps>(
             x = link_ops.parent(x).unwrap_unchecked();
             link_ops.set_color(x, Color::Red);
             rotate_right(link_ops, x, root);
-            break;
         } else {
             let y = link_ops.left(grandparent);
             if let Some(y) = y {
@@ -594,8 +593,8 @@ unsafe fn post_insert<T: RBTreeOps>(
             x = link_ops.parent(x).unwrap_unchecked();
             link_ops.set_color(x, Color::Red);
             rotate_left(link_ops, x, root);
-            break;
         }
+        break;
     }
 }
 
@@ -2183,19 +2182,19 @@ mod tests {
         let b2 = make_obj(2);
         let c2 = make_obj(3);
         assert_eq!(
-            cur.replace_with(a2.clone()).unwrap().as_ref() as *const _,
+            cur.replace_with(a2).unwrap().as_ref() as *const _,
             a.as_ref() as *const _
         );
         assert!(!a.link.is_linked());
         cur.move_next();
         assert_eq!(
-            cur.replace_with(b2.clone()).unwrap().as_ref() as *const _,
+            cur.replace_with(b2).unwrap().as_ref() as *const _,
             b.as_ref() as *const _
         );
         assert!(!b.link.is_linked());
         cur.move_next();
         assert_eq!(
-            cur.replace_with(c2.clone()).unwrap().as_ref() as *const _,
+            cur.replace_with(c2).unwrap().as_ref() as *const _,
             c.as_ref() as *const _
         );
         assert!(!c.link.is_linked());
@@ -2254,7 +2253,7 @@ mod tests {
             for i in indices {
                 t.insert(v[i].clone());
                 expected.push(v[i].value);
-                expected[..].sort();
+                expected[..].sort_unstable();
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
 
@@ -2292,7 +2291,7 @@ mod tests {
                     c.insert_before(v[i].clone());
                 }
                 expected.push(v[i].value);
-                expected[..].sort();
+                expected[..].sort_unstable();
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
 
@@ -2320,7 +2319,7 @@ mod tests {
                     c.insert_after(v[i].clone());
                 }
                 expected.push(v[i].value);
-                expected[..].sort();
+                expected[..].sort_unstable();
                 assert_eq!(t.iter().map(|x| x.value).collect::<Vec<_>>(), expected);
             }
         }
@@ -2737,9 +2736,9 @@ mod tests {
         let d = make_obj(4);
         let e = make_obj(5);
         let f = make_obj(6);
-        t.entry(&3).or_insert(c.clone());
+        t.entry(&3).or_insert(c);
         t.entry(&2).or_insert(b.clone());
-        t.entry(&1).or_insert(a.clone());
+        t.entry(&1).or_insert(a);
 
         match t.entry(&2) {
             Entry::Vacant(_) => unreachable!(),
