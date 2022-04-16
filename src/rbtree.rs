@@ -1130,6 +1130,18 @@ where
         }
     }
 
+    /// Moves the cursor to the parent of current element in the `RBTree`.
+    ///
+    /// If the cursor is null or pointing to the root object then this will return None.
+    #[inline]
+    pub fn move_parent(&mut self) {
+        if let Some(current) = self.current {
+            self.current = unsafe { self.tree.adapter.link_ops().parent(current) }
+        } else {
+            self.current = None;
+        }
+    }
+
     /// Returns a cursor pointing to the next element of the `RBTree`.
     ///
     /// If the cursor is pointer to the null object then this will return the
@@ -1154,16 +1166,14 @@ where
         prev
     }
 
-    /// Moves the cursor to the parent of current element in the `RBTree`.
+    /// Returns a cursor pointing to the parent of current element in the `RBTree`
     ///
     /// If the cursor is null or pointing to the root object then this will return None.
     #[inline]
-    pub fn parent(&mut self) {
-        if let Some(current) = self.current {
-            self.current = unsafe { self.tree.adapter.link_ops().parent(current) }
-        } else {
-            self.current = None;
-        }
+    pub fn peek_parent(&self) -> Cursor<'_, A> {
+        let mut parent = self.clone();
+        parent.move_parent();
+        parent
     }
 }
 
@@ -1241,6 +1251,18 @@ where
         }
     }
 
+    /// Moves the cursor to the parent of current element in the `RBTree`.
+    ///
+    /// If the cursor is null or pointing to the root object then this will return None.
+    #[inline]
+    pub fn move_parent(&mut self) {
+        if let Some(current) = self.current {
+            self.current = unsafe { self.tree.adapter.link_ops().parent(current) }
+        } else {
+            self.current = None;
+        }
+    }
+
     /// Returns a cursor pointing to the next element of the `RBTree`.
     ///
     /// If the cursor is pointer to the null object then this will return the
@@ -1265,16 +1287,14 @@ where
         prev
     }
 
-    /// Moves the cursor to the parent of current element in the `RBTree`.
+    /// Returns a cursor pointing to the parent of current element in the `RBTree`
     ///
     /// If the cursor is null or pointing to the root object then this will return None.
     #[inline]
-    pub fn parent(&mut self) {
-        if let Some(current) = self.current {
-            self.current = unsafe { self.tree.adapter.link_ops().parent(current) }
-        } else {
-            self.current = None;
-        }
+    pub fn peek_parent(&self) -> Cursor<'_, A> {
+        let mut parent = self.as_cursor();
+        parent.move_parent();
+        parent
     }
 
     /// Removes the current element from the `RBTree`.
