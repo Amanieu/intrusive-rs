@@ -1153,6 +1153,18 @@ where
         prev.move_prev();
         prev
     }
+
+    /// Moves the cursor to the parent of current element in the `RBTree`.
+    ///
+    /// If the cursor is null or pointing to the root object then this will return None.
+    #[inline]
+    pub fn parent(&mut self) {
+        if let Some(current) = self.current {
+            self.current = unsafe { self.tree.adapter.link_ops().parent(current) }
+        } else {
+            self.current = None;
+        }
+    }
 }
 
 /// A cursor which provides mutable access to a `RBTree`.
@@ -1251,6 +1263,18 @@ where
         let mut prev = self.as_cursor();
         prev.move_prev();
         prev
+    }
+
+    /// Moves the cursor to the parent of current element in the `RBTree`.
+    ///
+    /// If the cursor is null or pointing to the root object then this will return None.
+    #[inline]
+    pub fn parent(&mut self) {
+        if let Some(current) = self.current {
+            self.current = unsafe { self.tree.adapter.link_ops().parent(current) }
+        } else {
+            self.current = None;
+        }
     }
 
     /// Removes the current element from the `RBTree`.
