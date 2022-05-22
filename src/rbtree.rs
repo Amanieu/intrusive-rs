@@ -1180,7 +1180,7 @@ where
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Value> {
+    pub fn get(&self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
         Some(unsafe { &*self.tree.adapter.get_value(self.current?) })
     }
 
@@ -1720,9 +1720,10 @@ where
     /// If multiple elements with an identical key are found then an arbitrary
     /// one is returned.
     #[inline]
-    pub fn find<'a, Q: ?Sized + Ord>(&'a self, key: &Q) -> Cursor<'a, A>
+    pub fn find<'a, 'b, Q: ?Sized + Ord>(&'a self, key: &Q) -> Cursor<'a, A>
     where
-        <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+        <A as KeyAdapter<'b>>::Key: Borrow<Q>,
+        'a: 'b,
     {
         Cursor {
             current: self.find_internal(key),
@@ -1736,9 +1737,10 @@ where
     /// If multiple elements with an identical key are found then an arbitrary
     /// one is returned.
     #[inline]
-    pub fn find_mut<'a, Q: ?Sized + Ord>(&'a mut self, key: &Q) -> CursorMut<'a, A>
+    pub fn find_mut<'a, 'b, Q: ?Sized + Ord>(&'a mut self, key: &Q) -> CursorMut<'a, A>
     where
-        <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+        <A as KeyAdapter<'b>>::Key: Borrow<Q>,
+        'a: 'b,
     {
         CursorMut {
             current: self.find_internal(key),
@@ -1780,9 +1782,10 @@ where
     /// the given bound. If no such element is found then a null cursor is
     /// returned.
     #[inline]
-    pub fn lower_bound<'a, Q: ?Sized + Ord>(&'a self, bound: Bound<&Q>) -> Cursor<'a, A>
+    pub fn lower_bound<'a, 'b, Q: ?Sized + Ord>(&'a self, bound: Bound<&Q>) -> Cursor<'a, A>
     where
-        <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+        <A as KeyAdapter<'b>>::Key: Borrow<Q>,
+        'a: 'b,
     {
         Cursor {
             current: self.lower_bound_internal(bound),
@@ -1794,9 +1797,13 @@ where
     /// above the given bound. If no such element is found then a null
     /// cursor is returned.
     #[inline]
-    pub fn lower_bound_mut<'a, Q: ?Sized + Ord>(&'a mut self, bound: Bound<&Q>) -> CursorMut<'a, A>
+    pub fn lower_bound_mut<'a, 'b, Q: ?Sized + Ord>(
+        &'a mut self,
+        bound: Bound<&Q>,
+    ) -> CursorMut<'a, A>
     where
-        <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+        <A as KeyAdapter<'b>>::Key: Borrow<Q>,
+        'a: 'b,
     {
         CursorMut {
             current: self.lower_bound_internal(bound),
@@ -1838,9 +1845,10 @@ where
     /// the given bound. If no such element is found then a null cursor is
     /// returned.
     #[inline]
-    pub fn upper_bound<'a, Q: ?Sized + Ord>(&'a self, bound: Bound<&Q>) -> Cursor<'a, A>
+    pub fn upper_bound<'a, 'b, Q: ?Sized + Ord>(&'a self, bound: Bound<&Q>) -> Cursor<'a, A>
     where
-        <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+        <A as KeyAdapter<'b>>::Key: Borrow<Q>,
+        'a: 'b,
     {
         Cursor {
             current: self.upper_bound_internal(bound),
@@ -1852,9 +1860,13 @@ where
     /// below the given bound. If no such element is found then a null
     /// cursor is returned.
     #[inline]
-    pub fn upper_bound_mut<'a, Q: ?Sized + Ord>(&'a mut self, bound: Bound<&Q>) -> CursorMut<'a, A>
+    pub fn upper_bound_mut<'a, 'b, Q: ?Sized + Ord>(
+        &'a mut self,
+        bound: Bound<&Q>,
+    ) -> CursorMut<'a, A>
     where
-        <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+        <A as KeyAdapter<'b>>::Key: Borrow<Q>,
+        'a: 'b,
     {
         CursorMut {
             current: self.upper_bound_internal(bound),
