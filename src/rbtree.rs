@@ -1180,7 +1180,7 @@ where
     /// This returns None if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get(&self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Value> {
         Some(unsafe { &*self.tree.adapter.get_value(self.current?) })
     }
 
