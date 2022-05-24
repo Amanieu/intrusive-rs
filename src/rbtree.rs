@@ -1413,6 +1413,16 @@ where
             }
         }
     }
+
+    /// Consumes `CursorMut` and returns a reference to the object that
+    /// the cursor is currently pointing to. Unlike [get](Self::get),
+    /// the returned reference's lifetime is tied to `RBTree`'s lifetime.
+    ///
+    /// This returns None if the cursor is currently pointing to the null object.
+    #[inline]
+    pub fn into_ref(self) -> Option<&'a <A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { &*self.tree.adapter.get_value(self.current?) })
+    }
 }
 
 impl<'a, A: for<'b> KeyAdapter<'b>> CursorMut<'a, A>
