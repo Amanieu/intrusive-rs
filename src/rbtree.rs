@@ -22,7 +22,6 @@ use crate::link_ops::{self, DefaultLinkOps};
 use crate::linked_list::LinkedListOps;
 use crate::pointer_ops::PointerOps;
 use crate::singly_linked_list::SinglyLinkedListOps;
-use crate::unchecked_option::UncheckedOptionExt;
 use crate::xor_linked_list::XorLinkedListOps;
 use crate::Adapter;
 use crate::KeyAdapter;
@@ -1037,7 +1036,7 @@ unsafe fn remove<T: RBTreeOps>(link_ops: &mut T, ptr: T::LinkPtr, root: &mut Opt
 }
 
 // =============================================================================
-// Cursor, CursorMut
+// Cursor, CursorMut, CursorOwning
 // =============================================================================
 
 /// A cursor which provides read-only access to a `RBTree`.
@@ -1449,6 +1448,223 @@ where
     }
 }
 
+/// A cursor with ownership over the `RBTree` it points into.
+pub struct CursorOwning<A: Adapter>
+where
+    A::LinkOps: RBTreeOps,
+{
+    current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    tree: RBTree<A>,
+}
+
+impl<A: Adapter> CursorOwning<A>
+where
+    A::LinkOps: RBTreeOps,
+{
+    /// Consumes self and returns the inner `RBTree`.
+    #[inline]
+    pub fn take_tree(self) -> RBTree<A> {
+        self.tree
+    }
+
+    /// Checks if the cursor is currently pointing to the null object.
+    #[inline]
+    pub fn is_null(&self) -> bool {
+        self.current.is_none()
+    }
+
+    /// Returns a reference to the object that the cursor is currently
+    /// pointing to.
+    ///
+    /// This returns None if the cursor is currently pointing to the null
+    /// object.
+    #[inline]
+    pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Value> {
+        self.as_cursor().get()
+    }
+
+    /// Returns a read-only cursor pointing to the current element.
+    ///
+    /// The lifetime of the returned `Cursor` is bound to that of the
+    /// `CursorOwning`, which means it cannot outlive the `CursorOwning` and that the
+    /// `CursorOwning` is frozen for the lifetime of the `Cursor`.
+    #[inline]
+    pub fn as_cursor(&self) -> Cursor<'_, A> {
+        Cursor {
+            current: self.current,
+            tree: &self.tree,
+        }
+    }
+
+    /// Returns a cursor with mutable access to the `RBTree`, pointing to the current element.
+    ///
+    /// The lifetime of the returned `CursorMut` is bound to that of the
+    /// `CursorOwning`, which means it cannot outlive the `CursorOwning` and that the
+    /// `CursorOwning` is frozen for the lifetime of the `CursorMut`.
+    #[inline]
+    pub fn as_cursor_mut(&mut self) -> CursorMut<'_, A> {
+        CursorMut {
+            current: self.current,
+            tree: &mut self.tree,
+        }
+    }
+
+    /// Moves the cursor to the next element of the `RBTree`.
+    ///
+    /// If the cursor is pointer to the null object then this will move it to
+    /// the first element of the `RBTree`. If it is pointing to the last
+    /// element of the `RBTree` then this will move it to the null object.
+    #[inline]
+    pub fn move_next(&mut self) {
+        let mut c = self.as_cursor();
+        c.move_next();
+        self.current = c.current;
+    }
+
+    /// Moves the cursor to the previous element of the `RBTree`.
+    ///
+    /// If the cursor is pointer to the null object then this will move it to
+    /// the last element of the `RBTree`. If it is pointing to the first
+    /// element of the `RBTree` then this will move it to the null object.
+    #[inline]
+    pub fn move_prev(&mut self) {
+        let mut c = self.as_cursor();
+        c.move_prev();
+        self.current = c.current;
+    }
+
+    /// Returns a cursor pointing to the next element of the `RBTree`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// first element of the `RBTree`. If it is pointing to the last
+    /// element of the `RBTree` then this will return a null cursor.
+    #[inline]
+    pub fn peek_next(&self) -> Cursor<'_, A> {
+        let mut next = self.as_cursor();
+        next.move_next();
+        next
+    }
+
+    /// Returns a cursor pointing to the previous element of the `RBTree`.
+    ///
+    /// If the cursor is pointer to the null object then this will return the
+    /// last element of the `RBTree`. If it is pointing to the first
+    /// element of the `RBTree` then this will return a null cursor.
+    #[inline]
+    pub fn peek_prev(&self) -> Cursor<'_, A> {
+        let mut prev = self.as_cursor();
+        prev.move_prev();
+        prev
+    }
+
+    /// Removes the current element from the `RBTree`.
+    ///
+    /// A pointer to the element that was removed is returned, and the cursor is
+    /// moved to point to the next element in the `RBTree`.
+    ///
+    /// If the cursor is currently pointing to the null object then no element
+    /// is removed and `None` is returned.
+    #[inline]
+    pub fn remove(&mut self) -> Option<<A::PointerOps as PointerOps>::Pointer> {
+        let mut c = self.as_cursor_mut();
+        let removed = c.remove();
+        self.current = c.current;
+        removed
+    }
+
+    /// Removes the current element from the `RBTree` and inserts another
+    /// object in its place.
+    ///
+    /// A pointer to the element that was removed is returned, and the cursor is
+    /// modified to point to the newly added element.
+    ///
+    /// When using this function you must ensure that the elements in the
+    /// collection are maintained in increasing order. Failure to do this may
+    /// lead to `find`, `upper_bound`, `lower_bound` and `range` returning
+    /// incorrect results.
+    ///
+    /// If the cursor is currently pointing to the null object then an error is
+    /// returned containing the given `val` parameter.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn replace_with(
+        &mut self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> Result<<A::PointerOps as PointerOps>::Pointer, <A::PointerOps as PointerOps>::Pointer>
+    {
+        let mut c = self.as_cursor_mut();
+        let removed = c.replace_with(val);
+        self.current = c.current;
+        removed
+    }
+
+    /// Inserts a new element into the `RBTree` after the current one.
+    ///
+    /// When using this function you must ensure that the elements in the
+    /// collection are maintained in increasing order. Failure to do this may
+    /// lead to `find`, `upper_bound`, `lower_bound` and `range` returning
+    /// incorrect results.
+    ///
+    /// If the cursor is pointing at the null object then the new element is
+    /// inserted at the start of the `RBTree`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn insert_after(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
+        self.as_cursor_mut().insert_after(val)
+    }
+
+    /// Inserts a new element into the `RBTree` before the current one.
+    ///
+    /// When using this function you must ensure that the elements in the
+    /// collection are maintained in increasing order. Failure to do this may
+    /// lead to `find`, `upper_bound`, `lower_bound` and `range` returning
+    /// incorrect results.
+    ///
+    /// If the cursor is pointing at the null object then the new element is
+    /// inserted at the end of the `RBTree`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn insert_before(&mut self, val: <A::PointerOps as PointerOps>::Pointer) {
+        self.as_cursor_mut().insert_before(val)
+    }
+}
+
+impl<A: for<'b> KeyAdapter<'b>> CursorOwning<A>
+where
+    <A as Adapter>::LinkOps: RBTreeOps,
+{
+    /// Inserts a new element into the `RBTree`.
+    ///
+    /// The new element will be inserted at the correct position in the tree
+    /// based on its key, regardless of the current cursor position.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn insert<'c>(&'c mut self, val: <A::PointerOps as PointerOps>::Pointer)
+    where
+        <A as KeyAdapter<'c>>::Key: Ord,
+    {
+        // We explicitly drop the returned CursorMut here, otherwise we would
+        // end up with multiple CursorMut in the same collection.
+        self.tree.insert(val);
+    }
+}
+
 // =============================================================================
 // RBTree
 // =============================================================================
@@ -1542,6 +1758,15 @@ where
         }
     }
 
+    /// Returns a null `CursorOwning` for this tree.
+    #[inline]
+    pub fn cursor_owning(self) -> CursorOwning<A> {
+        CursorOwning {
+            current: None,
+            tree: self,
+        }
+    }
+
     /// Creates a `Cursor` from a pointer to an element.
     ///
     /// # Safety
@@ -1574,6 +1799,22 @@ where
         }
     }
 
+    /// Creates a `CursorOwning` from a pointer to an element.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be a pointer to an object that is part of this tree.
+    #[inline]
+    pub unsafe fn cursor_owning_from_ptr(
+        self,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+    ) -> CursorOwning<A> {
+        CursorOwning {
+            current: Some(self.adapter.get_link(ptr)),
+            tree: self,
+        }
+    }
+
     /// Returns a `Cursor` pointing to the first element of the tree. If the
     /// tree is empty then a null cursor is returned.
     #[inline]
@@ -1592,6 +1833,15 @@ where
         cursor
     }
 
+    /// Returns a `CursorOwning` pointing to the first element of the tree. If the
+    /// the tree is empty then a null cursor is returned.
+    #[inline]
+    pub fn front_owning(self) -> CursorOwning<A> {
+        let mut cursor = self.cursor_owning();
+        cursor.move_next();
+        cursor
+    }
+
     /// Returns a `Cursor` pointing to the last element of the tree. If the tree
     /// is empty then a null cursor is returned.
     #[inline]
@@ -1606,6 +1856,15 @@ where
     #[inline]
     pub fn back_mut(&mut self) -> CursorMut<'_, A> {
         let mut cursor = self.cursor_mut();
+        cursor.move_prev();
+        cursor
+    }
+
+    /// Returns a `CursorOwning` pointing to the last element of the tree. If the
+    /// tree is empty then a null cursor is returned.
+    #[inline]
+    pub fn back_owning(self) -> CursorOwning<A> {
+        let mut cursor = self.cursor_owning();
         cursor.move_prev();
         cursor
     }
@@ -1758,6 +2017,23 @@ where
         }
     }
 
+    // Returns a `CursorOwning` pointing to an element with the given key. If no
+    /// such element is found then a null cursor is returned.
+    ///
+    /// If multiple elements with an identical key are found then an arbitrary
+    /// one is returned.
+    #[inline]
+    pub fn find_owning<'a, Q: ?Sized + Ord>(self, key: &Q) -> CursorOwning<A>
+    where
+        <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+        Self: 'a,
+    {
+        CursorOwning {
+            current: self.find_internal(key),
+            tree: self,
+        }
+    }
+
     #[inline]
     fn lower_bound_internal<'a, Q: ?Sized + Ord>(
         &self,
@@ -1816,6 +2092,21 @@ where
         'a: 'b,
     {
         CursorMut {
+            current: self.lower_bound_internal(bound),
+            tree: self,
+        }
+    }
+
+    /// Returns a `CursorOwning` pointing to the first element whose key is
+    /// above the given bound. If no such element is found then a null
+    /// cursor is returned.
+    #[inline]
+    pub fn lower_bound_owning<'a, Q: ?Sized + Ord>(self, bound: Bound<&Q>) -> CursorOwning<A>
+    where
+        <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+        Self: 'a,
+    {
+        CursorOwning {
             current: self.lower_bound_internal(bound),
             tree: self,
         }
@@ -1884,21 +2175,28 @@ where
         }
     }
 
-    /// Inserts a new element into the `RBTree`.
-    ///
-    /// The new element will be inserted at the correct position in the tree
-    /// based on its key.
-    ///
-    /// Returns a mutable cursor pointing to the newly added element.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the new element is already linked to a different intrusive
-    /// collection.
+    /// Returns a `CursorOwning` pointing to the last element whose key is
+    /// below the given bound. If no such element is found then a null
+    /// cursor is returned.
     #[inline]
-    pub fn insert<'a>(&'a mut self, val: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'_, A>
+    pub fn upper_bound_owning<'a, Q: ?Sized + Ord>(self, bound: Bound<&Q>) -> CursorOwning<A>
+    where
+        <A as KeyAdapter<'a>>::Key: Borrow<Q>,
+        Self: 'a,
+    {
+        CursorOwning {
+            current: self.upper_bound_internal(bound),
+            tree: self,
+        }
+    }
+
+    fn insert_internal<'a>(
+        &mut self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> <<A as Adapter>::LinkOps as link_ops::LinkOps>::LinkPtr
     where
         <A as KeyAdapter<'a>>::Key: Ord,
+        <<A as Adapter>::PointerOps as PointerOps>::Value: 'a,
     {
         unsafe {
             let new = self.node_from_value(val);
@@ -1927,10 +2225,56 @@ where
             } else {
                 self.insert_root(new);
             }
-            CursorMut {
-                current: Some(new),
-                tree: self,
-            }
+
+            new
+        }
+    }
+
+    /// Inserts a new element into the `RBTree`.
+    ///
+    /// The new element will be inserted at the correct position in the tree
+    /// based on its key.
+    ///
+    /// Returns a mutable cursor pointing to the newly added element.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn insert<'a>(&'a mut self, val: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'_, A>
+    where
+        <A as KeyAdapter<'a>>::Key: Ord,
+    {
+        CursorMut {
+            current: Some(self.insert_internal(val)),
+            tree: self,
+        }
+    }
+
+    /// Inserts a new element into the `RBTree`.
+    ///
+    /// The new element will be inserted at the correct position in the tree
+    /// based on its key.
+    ///
+    /// Consumes the `RBTree` and returns an owning cursor pointing to the newly added element.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn insert_owning<'a>(
+        mut self,
+        val: <A::PointerOps as PointerOps>::Pointer,
+    ) -> CursorOwning<A>
+    where
+        <A as KeyAdapter<'a>>::Key: Ord,
+        Self: 'a,
+    {
+        CursorOwning {
+            current: Some(self.insert_internal(val)),
+            tree: self,
         }
     }
 
@@ -2382,7 +2726,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, KeyAdapter, Link, PointerOps, RBTree};
+    use super::{CursorOwning, Entry, KeyAdapter, Link, PointerOps, RBTree};
     use crate::Bound::*;
     use rand::prelude::*;
     use rand_xorshift::XorShiftRng;
@@ -2513,6 +2857,91 @@ mod tests {
             cur.replace_with(c.clone()).unwrap_err().as_ref() as *const _,
             c.as_ref() as *const _
         );
+    }
+
+    #[test]
+    fn test_cursor_owning() {
+        struct Container {
+            cur: CursorOwning<ObjAdapter>,
+        }
+
+        let a = make_obj(1);
+        let b = make_obj(2);
+        let c = make_obj(3);
+        let t = RBTree::new(ObjAdapter::new());
+
+        let mut con = Container {
+            cur: t.cursor_owning(),
+        };
+
+        assert!(con.cur.is_null());
+        assert!(con.cur.get().is_none());
+        assert!(con.cur.remove().is_none());
+
+        con.cur.insert_before(a.clone());
+        con.cur.insert_before(c.clone());
+        con.cur.move_prev();
+        con.cur.insert(b.clone());
+        assert!(con.cur.peek_next().is_null());
+        con.cur.move_next();
+        assert!(con.cur.is_null());
+
+        con.cur.move_next();
+        assert!(con.cur.peek_prev().is_null());
+        assert!(!con.cur.is_null());
+        assert_eq!(con.cur.get().unwrap() as *const _, a.as_ref() as *const _);
+
+        {
+            let mut cur2 = con.cur.as_cursor();
+            assert_eq!(cur2.get().unwrap() as *const _, a.as_ref() as *const _);
+            assert_eq!(cur2.peek_next().get().unwrap().value, 2);
+            cur2.move_next();
+            assert_eq!(cur2.get().unwrap().value, 2);
+            cur2.move_next();
+            assert_eq!(cur2.peek_prev().get().unwrap().value, 2);
+            assert_eq!(cur2.get().unwrap() as *const _, c.as_ref() as *const _);
+            cur2.move_prev();
+            assert_eq!(cur2.get().unwrap() as *const _, b.as_ref() as *const _);
+            cur2.move_next();
+            assert_eq!(cur2.get().unwrap() as *const _, c.as_ref() as *const _);
+            cur2.move_next();
+            assert!(cur2.is_null());
+            assert!(cur2.clone().get().is_none());
+        }
+        assert_eq!(con.cur.get().unwrap() as *const _, a.as_ref() as *const _);
+
+        let a2 = make_obj(1);
+        let b2 = make_obj(2);
+        let c2 = make_obj(3);
+        assert_eq!(
+            con.cur.replace_with(a2.clone()).unwrap().as_ref() as *const _,
+            a.as_ref() as *const _
+        );
+        assert!(!a.link.is_linked());
+        con.cur.move_next();
+        assert_eq!(
+            con.cur.replace_with(b2.clone()).unwrap().as_ref() as *const _,
+            b.as_ref() as *const _
+        );
+        assert!(!b.link.is_linked());
+        con.cur.move_next();
+        assert_eq!(
+            con.cur.replace_with(c2.clone()).unwrap().as_ref() as *const _,
+            c.as_ref() as *const _
+        );
+        assert!(!c.link.is_linked());
+        con.cur.move_next();
+        assert_eq!(
+            con.cur.replace_with(c.clone()).unwrap_err().as_ref() as *const _,
+            c.as_ref() as *const _
+        );
+
+        let t = con.cur.take_tree();
+        let mut it = t.iter();
+        assert_eq!(it.next().unwrap() as *const _, a2.as_ref() as *const _);
+        assert_eq!(it.next().unwrap() as *const _, b2.as_ref() as *const _);
+        assert_eq!(it.next().unwrap() as *const _, c2.as_ref() as *const _);
+        assert!(it.next().is_none());
     }
 
     #[cfg(not(miri))]
