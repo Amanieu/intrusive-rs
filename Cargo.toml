@@ -1,6 +1,6 @@
 [package]
 name = "intrusive-collections"
-version = "0.9.4"
+version = "0.9.5"
 authors = ["Amanieu d'Antras <amanieu@gmail.com>"]
 description = "Intrusive collections for Rust (linked list and red-black tree)"
 documentation = "https://docs.rs/intrusive-collections"
@@ -17,7 +17,7 @@ alloc = []
 default = ["alloc"]
 
 [dependencies]
-memoffset = "0.5.4"
+memoffset = "0.8"
 
 [dev-dependencies]
 rand = "0.8.4"
