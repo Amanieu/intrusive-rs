@@ -1496,6 +1496,12 @@ where
         ret
     }
 }
+unsafe impl<A: Adapter> Send for CursorOwning<A>
+where
+    RBTree<A>: Send,
+    A::LinkOps: RBTreeOps,
+{
+}
 
 // =============================================================================
 // RBTree
