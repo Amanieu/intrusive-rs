@@ -2028,13 +2028,21 @@ where
         }
     }
 
-    fn insert_internal<'a>(
-        &mut self,
-        val: <A::PointerOps as PointerOps>::Pointer,
-    ) -> <<A as Adapter>::LinkOps as link_ops::LinkOps>::LinkPtr
+    /// Inserts a new element into the `RBTree`.
+    ///
+    /// The new element will be inserted at the correct position in the tree
+    /// based on its key.
+    ///
+    /// Returns a mutable cursor pointing to the newly added element.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new element is already linked to a different intrusive
+    /// collection.
+    #[inline]
+    pub fn insert<'a>(&'a mut self, val: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'_, A>
     where
         <A as KeyAdapter<'a>>::Key: Ord,
-        <<A as Adapter>::PointerOps as PointerOps>::Value: 'a,
     {
         unsafe {
             let new = self.node_from_value(val);
@@ -2064,55 +2072,10 @@ where
                 self.insert_root(new);
             }
 
-            new
-        }
-    }
-
-    /// Inserts a new element into the `RBTree`.
-    ///
-    /// The new element will be inserted at the correct position in the tree
-    /// based on its key.
-    ///
-    /// Returns a mutable cursor pointing to the newly added element.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the new element is already linked to a different intrusive
-    /// collection.
-    #[inline]
-    pub fn insert<'a>(&'a mut self, val: <A::PointerOps as PointerOps>::Pointer) -> CursorMut<'_, A>
-    where
-        <A as KeyAdapter<'a>>::Key: Ord,
-    {
-        CursorMut {
-            current: Some(self.insert_internal(val)),
-            tree: self,
-        }
-    }
-
-    /// Inserts a new element into the `RBTree`.
-    ///
-    /// The new element will be inserted at the correct position in the tree
-    /// based on its key.
-    ///
-    /// Consumes the `RBTree` and returns an owning cursor pointing to the newly added element.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the new element is already linked to a different intrusive
-    /// collection.
-    #[inline]
-    pub fn insert_owning<'a>(
-        mut self,
-        val: <A::PointerOps as PointerOps>::Pointer,
-    ) -> CursorOwning<A>
-    where
-        <A as KeyAdapter<'a>>::Key: Ord,
-        Self: 'a,
-    {
-        CursorOwning {
-            current: Some(self.insert_internal(val)),
-            tree: self,
+            CursorMut {
+                current: Some(new),
+                tree: self,
+            }
         }
     }
 
