@@ -1463,7 +1463,7 @@ where
 {
     /// Consumes self and returns the inner `RBTree`.
     #[inline]
-    pub fn take_tree(self) -> RBTree<A> {
+    pub fn into_inner(self) -> RBTree<A> {
         self.tree
     }
 
@@ -2713,13 +2713,13 @@ mod tests {
         };
         assert!(con.cur.as_cursor().is_null());
 
-        con.cur = con.cur.take_tree().front_owning();
+        con.cur = con.cur.into_inner().front_owning();
         assert_eq!(con.cur.as_cursor().get().unwrap().value, 1);
 
-        con.cur = con.cur.take_tree().back_owning();
+        con.cur = con.cur.into_inner().back_owning();
         assert_eq!(con.cur.as_cursor().get().unwrap().value, 4);
 
-        con.cur = con.cur.take_tree().find_owning(&2);
+        con.cur = con.cur.into_inner().find_owning(&2);
         assert_eq!(con.cur.as_cursor().get().unwrap().value, 2);
 
         con.cur.with_cursor_mut(|c| c.move_next());
