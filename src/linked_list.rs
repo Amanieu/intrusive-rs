@@ -1063,7 +1063,7 @@ where
     }
 }
 
-/// A cursor with ownership over the `XorLinkedList` it points into.
+/// A cursor with ownership over the `LinkedList` it points into.
 pub struct CursorOwning<A: Adapter>
 where
     A::LinkOps: LinkedListOps,
