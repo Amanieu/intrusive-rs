@@ -16,7 +16,6 @@ use core::sync::atomic::{AtomicPtr, Ordering};
 use crate::link_ops::{self, DefaultLinkOps};
 use crate::pointer_ops::PointerOps;
 use crate::singly_linked_list::SinglyLinkedListOps;
-use crate::unchecked_option::UncheckedOptionExt;
 use crate::xor_linked_list::XorLinkedListOps;
 use crate::Adapter;
 
@@ -1487,6 +1486,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloc::boxed::Box;
+
+    use crate::UnsafeRef;
+
     use super::{Link, LinkedList};
     use std::fmt;
     use std::format;
@@ -1505,17 +1508,23 @@ mod tests {
     }
     intrusive_adapter!(ObjAdapter1 = Rc<Obj>: Obj { link1: Link });
     intrusive_adapter!(ObjAdapter2 = Rc<Obj>: Obj { link2: Link });
-    fn make_obj(value: u32) -> Rc<Obj> {
-        Rc::new(Obj {
+    intrusive_adapter!(UnsafeRefObjAdapter1 = UnsafeRef<Obj>: Obj { link1: Link });
+
+    fn make_rc_obj(value: u32) -> Rc<Obj> {
+        Rc::new(make_obj(value))
+    }
+
+    fn make_obj(value: u32) -> Obj {
+        Obj {
             link1: Link::new(),
             link2: Link::default(),
             value,
-        })
+        }
     }
 
     #[test]
     fn test_link() {
-        let a = make_obj(1);
+        let a = make_rc_obj(1);
         assert!(!a.link1.is_linked());
         assert!(!a.link2.is_linked());
 
@@ -1540,9 +1549,9 @@ mod tests {
 
     #[test]
     fn test_cursor() {
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
 
         let mut l = LinkedList::new(ObjAdapter1::new());
         let mut cur = l.cursor_mut();
@@ -1623,9 +1632,9 @@ mod tests {
 
     #[test]
     fn test_push_pop() {
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
 
         let mut l = LinkedList::new(ObjAdapter1::new());
         l.push_front(a);
@@ -1652,10 +1661,10 @@ mod tests {
         let mut l2 = LinkedList::new(ObjAdapter1::new());
         let mut l3 = LinkedList::new(ObjAdapter1::new());
 
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
-        let d = make_obj(4);
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
+        let d = make_rc_obj(4);
         l1.cursor_mut().insert_before(a);
         l1.cursor_mut().insert_before(b);
         l1.cursor_mut().insert_before(c);
@@ -1740,10 +1749,10 @@ mod tests {
     #[test]
     fn test_iter() {
         let mut l = LinkedList::new(ObjAdapter1::new());
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
-        let d = make_obj(4);
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
+        let d = make_rc_obj(4);
         l.cursor_mut().insert_before(a.clone());
         l.cursor_mut().insert_before(b.clone());
         l.cursor_mut().insert_before(c.clone());
@@ -1814,10 +1823,10 @@ mod tests {
     fn test_multi_list() {
         let mut l1 = LinkedList::new(ObjAdapter1::new());
         let mut l2 = LinkedList::new(ObjAdapter2::new());
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
-        let d = make_obj(4);
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
+        let d = make_rc_obj(4);
         l1.cursor_mut().insert_before(a.clone());
         l1.cursor_mut().insert_before(b.clone());
         l1.cursor_mut().insert_before(c.clone());
@@ -1831,29 +1840,39 @@ mod tests {
     }
 
     #[test]
-    fn test_force_unlink() {
-        let mut l = LinkedList::new(ObjAdapter1::new());
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
+    fn test_fast_clear_force_unlink() {
+        let mut l = LinkedList::new(UnsafeRefObjAdapter1::new());
+        let a = UnsafeRef::from_box(Box::new(make_obj(1)));
+        let b = UnsafeRef::from_box(Box::new(make_obj(2)));
+        let c = UnsafeRef::from_box(Box::new(make_obj(3)));
         l.cursor_mut().insert_before(a.clone());
         l.cursor_mut().insert_before(b.clone());
         l.cursor_mut().insert_before(c.clone());
 
         l.fast_clear();
         assert!(l.is_empty());
-        assert!(a.link1.is_linked());
-        assert!(b.link1.is_linked());
-        assert!(c.link1.is_linked());
+
         unsafe {
+            assert!(a.link1.is_linked());
+            assert!(b.link1.is_linked());
+            assert!(c.link1.is_linked());
+
             a.link1.force_unlink();
             b.link1.force_unlink();
             c.link1.force_unlink();
+
+            assert!(l.is_empty());
+
+            assert!(!a.link1.is_linked());
+            assert!(!b.link1.is_linked());
+            assert!(!c.link1.is_linked());
         }
-        assert!(l.is_empty());
-        assert!(!a.link1.is_linked());
-        assert!(!b.link1.is_linked());
-        assert!(!c.link1.is_linked());
+
+        unsafe {
+            UnsafeRef::into_box(a);
+            UnsafeRef::into_box(b);
+            UnsafeRef::into_box(c);
+        }
     }
 
     #[test]
