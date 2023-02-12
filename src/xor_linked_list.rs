@@ -19,6 +19,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::link_ops::{self, DefaultLinkOps};
 use crate::pointer_ops::PointerOps;
 use crate::singly_linked_list::SinglyLinkedListOps;
+use crate::unchecked_option::UncheckedOptionExt;
 use crate::Adapter;
 
 // =============================================================================

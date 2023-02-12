@@ -17,6 +17,7 @@ use crate::link_ops::{self, DefaultLinkOps};
 use crate::pointer_ops::PointerOps;
 use crate::singly_linked_list::SinglyLinkedListOps;
 use crate::xor_linked_list::XorLinkedListOps;
+use crate::unchecked_option::UncheckedOptionExt;
 use crate::Adapter;
 
 // =============================================================================
