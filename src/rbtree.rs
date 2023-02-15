@@ -2531,7 +2531,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{CursorOwning, Entry, KeyAdapter, Link, PointerOps, RBTree};
-    use crate::Bound::*;
+    use crate::{Bound::*, UnsafeRef};
+    use alloc::boxed::Box;
     use rand::prelude::*;
     use rand_xorshift::XorShiftRng;
     use std::fmt;
@@ -2549,27 +2550,42 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    intrusive_adapter!(ObjAdapter = Rc<Obj>: Obj { link: Link });
-    impl<'a> KeyAdapter<'a> for ObjAdapter {
+    intrusive_adapter!(RcObjAdapter = Rc<Obj>: Obj { link: Link });
+
+    impl<'a> KeyAdapter<'a> for RcObjAdapter {
         type Key = i32;
         fn get_key(&self, value: &'a <Self::PointerOps as PointerOps>::Value) -> i32 {
             value.value
         }
     }
-    fn make_obj(value: i32) -> Rc<Obj> {
-        Rc::new(Obj {
+
+    intrusive_adapter!(UnsafeRefObjAdapter = UnsafeRef<Obj>: Obj { link: Link });
+
+    impl<'a> KeyAdapter<'a> for UnsafeRefObjAdapter {
+        type Key = i32;
+        fn get_key(&self, value: &'a <Self::PointerOps as PointerOps>::Value) -> i32 {
+            value.value
+        }
+    }
+
+    fn make_rc_obj(value: i32) -> Rc<Obj> {
+        Rc::new(make_obj(value))
+    }
+
+    fn make_obj(value: i32) -> Obj {
+        Obj {
             link: Link::new(),
             value,
-        })
+        }
     }
 
     #[test]
     fn test_link() {
-        let a = make_obj(1);
+        let a = make_rc_obj(1);
         assert!(!a.link.is_linked());
         assert_eq!(format!("{:?}", a.link), "unlinked");
 
-        let mut b = RBTree::<ObjAdapter>::default();
+        let mut b = RBTree::<RcObjAdapter>::default();
         assert!(b.is_empty());
 
         assert_eq!(b.insert(a.clone()).get().unwrap().value, 1);
@@ -2595,10 +2611,10 @@ mod tests {
 
     #[test]
     fn test_cursor() {
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
-        let mut t = RBTree::new(ObjAdapter::new());
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
+        let mut t = RBTree::new(RcObjAdapter::new());
         let mut cur = t.cursor_mut();
         assert!(cur.is_null());
         assert!(cur.get().is_none());
@@ -2636,9 +2652,9 @@ mod tests {
         }
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
 
-        let a2 = make_obj(1);
-        let b2 = make_obj(2);
-        let c2 = make_obj(3);
+        let a2 = make_rc_obj(1);
+        let b2 = make_rc_obj(2);
+        let c2 = make_rc_obj(3);
         assert_eq!(
             cur.replace_with(a2).unwrap().as_ref() as *const _,
             a.as_ref() as *const _
@@ -2666,14 +2682,14 @@ mod tests {
     #[test]
     fn test_cursor_owning() {
         struct Container {
-            cur: CursorOwning<ObjAdapter>,
+            cur: CursorOwning<RcObjAdapter>,
         }
 
-        let mut t = RBTree::new(ObjAdapter::new());
-        t.insert(make_obj(1));
-        t.insert(make_obj(2));
-        t.insert(make_obj(3));
-        t.insert(make_obj(4));
+        let mut t = RBTree::new(RcObjAdapter::new());
+        t.insert(make_rc_obj(1));
+        t.insert(make_rc_obj(2));
+        t.insert(make_rc_obj(3));
+        t.insert(make_rc_obj(4));
         let mut con = Container {
             cur: t.cursor_owning(),
         };
@@ -2695,9 +2711,9 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn test_insert_remove() {
-        let v = (0..100).map(make_obj).collect::<Vec<_>>();
+        let v = (0..100).map(make_rc_obj).collect::<Vec<_>>();
         assert!(v.iter().all(|x| !x.link.is_linked()));
-        let mut t = RBTree::new(ObjAdapter::new());
+        let mut t = RBTree::new(RcObjAdapter::new());
         assert!(t.is_empty());
         let mut rng = XorShiftRng::seed_from_u64(0);
 
@@ -2815,8 +2831,8 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn test_iter() {
-        let v = (0..10).map(|x| make_obj(x * 10)).collect::<Vec<_>>();
-        let mut t = RBTree::new(ObjAdapter::new());
+        let v = (0..10).map(|x| make_rc_obj(x * 10)).collect::<Vec<_>>();
+        let mut t = RBTree::new(RcObjAdapter::new());
         for x in v.iter() {
             t.insert(x.clone());
         }
@@ -3061,8 +3077,8 @@ mod tests {
 
     #[test]
     fn test_find() {
-        let v = (0..10).map(|x| make_obj(x * 10)).collect::<Vec<_>>();
-        let mut t = RBTree::new(ObjAdapter::new());
+        let v = (0..10).map(|x| make_rc_obj(x * 10)).collect::<Vec<_>>();
+        let mut t = RBTree::new(RcObjAdapter::new());
         for x in v.iter() {
             t.insert(x.clone());
         }
@@ -3189,40 +3205,50 @@ mod tests {
     }
 
     #[test]
-    fn test_fast_clear() {
-        let mut t = RBTree::new(ObjAdapter::new());
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
+    fn test_fast_clear_force_unlink() {
+        let mut t = RBTree::new(UnsafeRefObjAdapter::new());
+        let a = UnsafeRef::from_box(Box::new(make_obj(1)));
+        let b = UnsafeRef::from_box(Box::new(make_obj(2)));
+        let c = UnsafeRef::from_box(Box::new(make_obj(3)));
         t.insert(a.clone());
         t.insert(b.clone());
         t.insert(c.clone());
 
         t.fast_clear();
         assert!(t.is_empty());
-        assert!(a.link.is_linked());
-        assert!(b.link.is_linked());
-        assert!(c.link.is_linked());
+
         unsafe {
+            assert!(a.link.is_linked());
+            assert!(b.link.is_linked());
+            assert!(c.link.is_linked());
+
             a.link.force_unlink();
             b.link.force_unlink();
             c.link.force_unlink();
+
+            assert!(t.is_empty());
+
+            assert!(!a.link.is_linked());
+            assert!(!b.link.is_linked());
+            assert!(!c.link.is_linked());
         }
-        assert!(t.is_empty());
-        assert!(!a.link.is_linked());
-        assert!(!b.link.is_linked());
-        assert!(!c.link.is_linked());
+
+        unsafe {
+            UnsafeRef::into_box(a);
+            UnsafeRef::into_box(b);
+            UnsafeRef::into_box(c);
+        }
     }
 
     #[test]
     fn test_entry() {
-        let mut t = RBTree::new(ObjAdapter::new());
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
-        let d = make_obj(4);
-        let e = make_obj(5);
-        let f = make_obj(6);
+        let mut t = RBTree::new(RcObjAdapter::new());
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
+        let d = make_rc_obj(4);
+        let e = make_rc_obj(5);
+        let f = make_rc_obj(6);
         t.entry(&3).or_insert(c);
         t.entry(&2).or_insert(b.clone());
         t.entry(&1).or_insert(a);
@@ -3266,8 +3292,8 @@ mod tests {
             link: Link,
             value: &'a T,
         }
-        intrusive_adapter!(ObjAdapter<'a, T> = &'a Obj<'a, T>: Obj<'a, T> {link: Link} where T: 'a);
-        impl<'a, 'b, T: 'a + 'b> KeyAdapter<'a> for ObjAdapter<'b, T> {
+        intrusive_adapter!(RcObjAdapter<'a, T> = &'a Obj<'a, T>: Obj<'a, T> {link: Link} where T: 'a);
+        impl<'a, 'b, T: 'a + 'b> KeyAdapter<'a> for RcObjAdapter<'b, T> {
             type Key = &'a T;
             fn get_key(&self, value: &'a Obj<'b, T>) -> &'a T {
                 value.value
@@ -3280,7 +3306,7 @@ mod tests {
             value: &v,
         };
         let b = a.clone();
-        let mut l = RBTree::new(ObjAdapter::new());
+        let mut l = RBTree::new(RcObjAdapter::new());
         l.insert(&a);
         l.insert(&b);
         assert_eq!(*l.front().get().unwrap().value, 5);
@@ -3296,8 +3322,8 @@ mod tests {
                 link: Link,
                 value: usize,
             }
-            intrusive_adapter!(ObjAdapter = $ptr<Obj>: Obj { link: Link });
-            impl<'a> KeyAdapter<'a> for ObjAdapter {
+            intrusive_adapter!(RcObjAdapter = $ptr<Obj>: Obj { link: Link });
+            impl<'a> KeyAdapter<'a> for RcObjAdapter {
                 type Key = usize;
                 fn get_key(&self, value: &'a Obj) -> usize {
                     value.value
@@ -3308,7 +3334,7 @@ mod tests {
                 link: Link::new(),
                 value: 5,
             });
-            let mut l = RBTree::new(ObjAdapter::new());
+            let mut l = RBTree::new(RcObjAdapter::new());
             l.insert(a.clone());
             assert_eq!(2, $ptr::strong_count(&a));
 

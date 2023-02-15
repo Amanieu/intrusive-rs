@@ -1769,6 +1769,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::UnsafeRef;
+
     use super::{CursorOwning, Link, XorLinkedList};
     use core::cell::Cell;
     use core::ptr;
@@ -1788,24 +1790,29 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    intrusive_adapter!(ObjAdapter1 = Rc<Obj>: Obj { link1: Link });
-    intrusive_adapter!(ObjAdapter2 = Rc<Obj>: Obj { link2: Link });
+    intrusive_adapter!(RcObjAdapter1 = Rc<Obj>: Obj { link1: Link });
+    intrusive_adapter!(RcObjAdapter2 = Rc<Obj>: Obj { link2: Link });
+    intrusive_adapter!(UnsafeRefObjAdapter1 = UnsafeRef<Obj>: Obj { link1: Link });
 
-    fn make_obj(value: u32) -> Rc<Obj> {
-        Rc::new(Obj {
+    fn make_rc_obj(value: u32) -> Rc<Obj> {
+        Rc::new(make_obj(value))
+    }
+
+    fn make_obj(value: u32) -> Obj {
+        Obj {
             link1: Link::new(),
             link2: Link::default(),
             value,
-        })
+        }
     }
 
     #[test]
     fn test_link() {
-        let a = make_obj(1);
+        let a = make_rc_obj(1);
         assert!(!a.link1.is_linked());
         assert!(!a.link2.is_linked());
 
-        let mut b = XorLinkedList::<ObjAdapter1>::default();
+        let mut b = XorLinkedList::<RcObjAdapter1>::default();
         assert!(b.is_empty());
 
         b.cursor_mut().insert_after(a.clone());
@@ -1826,11 +1833,11 @@ mod tests {
 
     #[test]
     fn test_cursor() {
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
 
-        let mut l = XorLinkedList::new(ObjAdapter1::new());
+        let mut l = XorLinkedList::new(RcObjAdapter1::new());
         let mut cur = l.cursor_mut();
         assert!(cur.is_null());
         assert!(cur.get().is_none());
@@ -1910,14 +1917,14 @@ mod tests {
     #[test]
     fn test_cursor_owning() {
         struct Container {
-            cur: CursorOwning<ObjAdapter1>,
+            cur: CursorOwning<RcObjAdapter1>,
         }
 
-        let mut l = XorLinkedList::new(ObjAdapter1::new());
-        l.push_back(make_obj(1));
-        l.push_back(make_obj(2));
-        l.push_back(make_obj(3));
-        l.push_back(make_obj(4));
+        let mut l = XorLinkedList::new(RcObjAdapter1::new());
+        l.push_back(make_rc_obj(1));
+        l.push_back(make_rc_obj(2));
+        l.push_back(make_rc_obj(3));
+        l.push_back(make_rc_obj(4));
         let mut con = Container {
             cur: l.cursor_owning(),
         };
@@ -1935,11 +1942,11 @@ mod tests {
 
     #[test]
     fn test_push_pop() {
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
 
-        let mut l = XorLinkedList::new(ObjAdapter1::new());
+        let mut l = XorLinkedList::new(RcObjAdapter1::new());
         l.push_front(a);
         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1]);
         l.push_front(b);
@@ -1960,14 +1967,14 @@ mod tests {
 
     #[test]
     fn test_split_splice() {
-        let mut l1 = XorLinkedList::new(ObjAdapter1::new());
-        let mut l2 = XorLinkedList::new(ObjAdapter1::new());
-        let mut l3 = XorLinkedList::new(ObjAdapter1::new());
+        let mut l1 = XorLinkedList::new(RcObjAdapter1::new());
+        let mut l2 = XorLinkedList::new(RcObjAdapter1::new());
+        let mut l3 = XorLinkedList::new(RcObjAdapter1::new());
 
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
-        let d = make_obj(4);
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
+        let d = make_rc_obj(4);
         l1.cursor_mut().insert_before(a);
         l1.cursor_mut().insert_before(b);
         l1.cursor_mut().insert_before(c);
@@ -2051,11 +2058,11 @@ mod tests {
 
     #[test]
     fn test_iter() {
-        let mut l = XorLinkedList::new(ObjAdapter1::new());
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
-        let d = make_obj(4);
+        let mut l = XorLinkedList::new(RcObjAdapter1::new());
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
+        let d = make_rc_obj(4);
         l.cursor_mut().insert_before(a.clone());
         l.cursor_mut().insert_before(b.clone());
         l.cursor_mut().insert_before(c.clone());
@@ -2158,12 +2165,12 @@ mod tests {
 
     #[test]
     fn test_multi_list() {
-        let mut l1 = XorLinkedList::new(ObjAdapter1::new());
-        let mut l2 = XorLinkedList::new(ObjAdapter2::new());
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
-        let d = make_obj(4);
+        let mut l1 = XorLinkedList::new(RcObjAdapter1::new());
+        let mut l2 = XorLinkedList::new(RcObjAdapter2::new());
+        let a = make_rc_obj(1);
+        let b = make_rc_obj(2);
+        let c = make_rc_obj(3);
+        let d = make_rc_obj(4);
         l1.cursor_mut().insert_before(a.clone());
         l1.cursor_mut().insert_before(b.clone());
         l1.cursor_mut().insert_before(c.clone());
@@ -2177,46 +2184,56 @@ mod tests {
     }
 
     #[test]
-    fn test_force_unlink() {
-        let mut l = XorLinkedList::new(ObjAdapter1::new());
-        let a = make_obj(1);
-        let b = make_obj(2);
-        let c = make_obj(3);
+    fn test_fast_clear_force_unlink() {
+        let mut l = XorLinkedList::new(UnsafeRefObjAdapter1::new());
+        let a = UnsafeRef::from_box(Box::new(make_obj(1)));
+        let b = UnsafeRef::from_box(Box::new(make_obj(2)));
+        let c = UnsafeRef::from_box(Box::new(make_obj(3)));
         l.cursor_mut().insert_before(a.clone());
         l.cursor_mut().insert_before(b.clone());
         l.cursor_mut().insert_before(c.clone());
 
         l.fast_clear();
         assert!(l.is_empty());
-        assert!(a.link1.is_linked());
-        assert!(b.link1.is_linked());
-        assert!(c.link1.is_linked());
+
         unsafe {
+            assert!(a.link1.is_linked());
+            assert!(b.link1.is_linked());
+            assert!(c.link1.is_linked());
+
             a.link1.force_unlink();
             b.link1.force_unlink();
             c.link1.force_unlink();
+
+            assert!(l.is_empty());
+
+            assert!(!a.link1.is_linked());
+            assert!(!b.link1.is_linked());
+            assert!(!c.link1.is_linked());
         }
-        assert!(l.is_empty());
-        assert!(!a.link1.is_linked());
-        assert!(!b.link1.is_linked());
-        assert!(!c.link1.is_linked());
+
+        unsafe {
+            UnsafeRef::into_box(a);
+            UnsafeRef::into_box(b);
+            UnsafeRef::into_box(c);
+        }
     }
 
     #[test]
     fn test_reverse() {
-        let mut l = XorLinkedList::new(ObjAdapter1::new());
+        let mut l = XorLinkedList::new(RcObjAdapter1::new());
 
-        l.push_back(make_obj(1));
-        l.push_back(make_obj(2));
-        l.push_back(make_obj(3));
-        l.push_back(make_obj(4));
+        l.push_back(make_rc_obj(1));
+        l.push_back(make_rc_obj(2));
+        l.push_back(make_rc_obj(3));
+        l.push_back(make_rc_obj(4));
         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
 
         l.reverse();
         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [4, 3, 2, 1]);
 
-        l.push_back(make_obj(5));
-        l.push_back(make_obj(6));
+        l.push_back(make_rc_obj(5));
+        l.push_back(make_rc_obj(6));
         assert_eq!(
             l.iter().map(|x| x.value).collect::<Vec<_>>(),
             [4, 3, 2, 1, 5, 6]
