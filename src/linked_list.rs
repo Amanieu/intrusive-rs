@@ -16,9 +16,11 @@ use core::sync::atomic::{AtomicPtr, Ordering};
 use crate::link_ops::{self, DefaultLinkOps};
 use crate::pointer_ops::PointerOps;
 use crate::singly_linked_list::SinglyLinkedListOps;
-use crate::unchecked_option::UncheckedOptionExt;
 use crate::xor_linked_list::XorLinkedListOps;
 use crate::Adapter;
+// Necessary for Rust 1.56 compatability
+#[allow(unused_imports)]
+use crate::unchecked_option::UncheckedOptionExt;
 
 // =============================================================================
 // LinkedListOps

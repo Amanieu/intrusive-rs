@@ -25,6 +25,9 @@ use crate::singly_linked_list::SinglyLinkedListOps;
 use crate::xor_linked_list::XorLinkedListOps;
 use crate::Adapter;
 use crate::KeyAdapter;
+// Necessary for Rust 1.56 compatability
+#[allow(unused_imports)]
+use crate::unchecked_option::UncheckedOptionExt;
 
 // =============================================================================
 // RBTreeOps
