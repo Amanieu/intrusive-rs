@@ -16,9 +16,11 @@ use core::sync::atomic::{AtomicPtr, Ordering};
 use crate::link_ops::{self, DefaultLinkOps};
 use crate::pointer_ops::PointerOps;
 use crate::singly_linked_list::SinglyLinkedListOps;
-use crate::unchecked_option::UncheckedOptionExt;
 use crate::xor_linked_list::XorLinkedListOps;
 use crate::Adapter;
+// Necessary for Rust 1.56 compatability
+#[allow(unused_imports)]
+use crate::unchecked_option::UncheckedOptionExt;
 
 // =============================================================================
 // LinkedListOps
@@ -581,7 +583,7 @@ unsafe fn splice<T: LinkedListOps>(
 }
 
 // =============================================================================
-// Cursor, CursorMut
+// Cursor, CursorMut, CursorOwning
 // =============================================================================
 
 /// A cursor which provides read-only access to a `LinkedList`.
@@ -1064,6 +1066,61 @@ where
     }
 }
 
+/// A cursor with ownership over the `LinkedList` it points into.
+pub struct CursorOwning<A: Adapter>
+where
+    A::LinkOps: LinkedListOps,
+{
+    current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+    list: LinkedList<A>,
+}
+
+impl<A: Adapter> CursorOwning<A>
+where
+    A::LinkOps: LinkedListOps,
+{
+    /// Consumes self and returns the inner `LinkedList`.
+    #[inline]
+    pub fn into_inner(self) -> LinkedList<A> {
+        self.list
+    }
+
+    /// Returns a read-only cursor pointing to the current element.
+    ///
+    /// The lifetime of the returned `Cursor` is bound to that of the
+    /// `CursorOwning`, which means it cannot outlive the `CursorOwning` and that the
+    /// `CursorOwning` is frozen for the lifetime of the `Cursor`.
+    ///
+    /// Mutations of the returned cursor are _not_ reflected in the original.
+    #[inline]
+    pub fn as_cursor(&self) -> Cursor<'_, A> {
+        Cursor {
+            current: self.current,
+            list: &self.list,
+        }
+    }
+
+    /// Perform action with mutable reference to the cursor.
+    ///
+    /// All mutations of the cursor are reflected in the original.
+    #[inline]
+    pub fn with_cursor_mut<T>(&mut self, f: impl FnOnce(&mut CursorMut<'_, A>) -> T) -> T {
+        let mut cursor = CursorMut {
+            current: self.current,
+            list: &mut self.list,
+        };
+        let ret = f(&mut cursor);
+        self.current = cursor.current;
+        ret
+    }
+}
+unsafe impl<A: Adapter> Send for CursorOwning<A>
+where
+    LinkedList<A>: Send,
+    A::LinkOps: LinkedListOps,
+{
+}
+
 // =============================================================================
 // LinkedList
 // =============================================================================
@@ -1153,6 +1210,15 @@ where
         }
     }
 
+    /// Returns a null `CursorOwning` for this list.
+    #[inline]
+    pub fn cursor_owning(self) -> CursorOwning<A> {
+        CursorOwning {
+            current: None,
+            list: self,
+        }
+    }
+
     /// Creates a `Cursor` from a pointer to an element.
     ///
     /// # Safety
@@ -1185,6 +1251,22 @@ where
         }
     }
 
+    /// Creates a `CursorOwning` from a pointer to an element.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be a pointer to an object that is part of this list.
+    #[inline]
+    pub unsafe fn cursor_owning_from_ptr(
+        self,
+        ptr: *const <A::PointerOps as PointerOps>::Value,
+    ) -> CursorOwning<A> {
+        CursorOwning {
+            current: Some(self.adapter.get_link(ptr)),
+            list: self,
+        }
+    }
+
     /// Returns a `Cursor` pointing to the first element of the list. If the
     /// list is empty then a null cursor is returned.
     #[inline]
@@ -1203,6 +1285,15 @@ where
         cursor
     }
 
+    /// Returns a `CursorOwning` pointing to the first element of the list. If the
+    /// the list is empty then a null cursor is returned.
+    #[inline]
+    pub fn front_owning(self) -> CursorOwning<A> {
+        let mut cursor = self.cursor_owning();
+        cursor.with_cursor_mut(|c| c.move_next());
+        cursor
+    }
+
     /// Returns a `Cursor` pointing to the last element of the list. If the list
     /// is empty then a null cursor is returned.
     #[inline]
@@ -1218,6 +1309,15 @@ where
     pub fn back_mut(&mut self) -> CursorMut<'_, A> {
         let mut cursor = self.cursor_mut();
         cursor.move_prev();
+        cursor
+    }
+
+    /// Returns a `CursorOwning` pointing to the last element of the list. If the
+    /// list is empty then a null cursor is returned.
+    #[inline]
+    pub fn back_owning(self) -> CursorOwning<A> {
+        let mut cursor = self.cursor_owning();
+        cursor.with_cursor_mut(|c| c.move_prev());
         cursor
     }
 
@@ -1491,7 +1591,7 @@ mod tests {
 
     use crate::UnsafeRef;
 
-    use super::{Link, LinkedList};
+    use super::{CursorOwning, Link, LinkedList};
     use std::fmt;
     use std::format;
     use std::rc::Rc;
@@ -1629,6 +1729,32 @@ mod tests {
         assert!(!b.link1.is_linked());
         assert!(c.link1.is_linked());
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
+    }
+
+    #[test]
+    fn test_cursor_owning() {
+        struct Container {
+            cur: CursorOwning<ObjAdapter1>,
+        }
+
+        let mut l = LinkedList::new(ObjAdapter1::new());
+        l.push_back(make_rc_obj(1));
+        l.push_back(make_rc_obj(2));
+        l.push_back(make_rc_obj(3));
+        l.push_back(make_rc_obj(4));
+        let mut con = Container {
+            cur: l.cursor_owning(),
+        };
+        assert!(con.cur.as_cursor().is_null());
+
+        con.cur = con.cur.into_inner().front_owning();
+        assert_eq!(con.cur.as_cursor().get().unwrap().value, 1);
+
+        con.cur.with_cursor_mut(|c| c.move_next());
+        assert_eq!(con.cur.as_cursor().get().unwrap().value, 2);
+
+        con.cur = con.cur.into_inner().back_owning();
+        assert_eq!(con.cur.as_cursor().get().unwrap().value, 4);
     }
 
     #[test]
