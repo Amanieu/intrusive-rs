@@ -2708,10 +2708,10 @@ mod tests {
         assert_eq!(con.cur.as_cursor().get().unwrap().value, 3);
     }
 
-    #[cfg(not(miri))]
     #[test]
     fn test_insert_remove() {
-        let v = (0..100).map(make_rc_obj).collect::<Vec<_>>();
+        let len = if cfg!(miri) { 10 } else { 100 };
+        let v = (0..len).map(make_rc_obj).collect::<Vec<_>>();
         assert!(v.iter().all(|x| !x.link.is_linked()));
         let mut t = RBTree::new(RcObjAdapter::new());
         assert!(t.is_empty());
@@ -2828,7 +2828,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(miri))]
     #[test]
     fn test_iter() {
         let v = (0..10).map(|x| make_rc_obj(x * 10)).collect::<Vec<_>>();

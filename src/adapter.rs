@@ -274,7 +274,6 @@ mod tests {
         link: LinkedListLink,
     }
 
-    #[deny(missing_docs)]
     intrusive_adapter! {
         /// Test doc comment
         ObjAdapter1 = Rc<Obj>: Obj { link: LinkedListLink }
