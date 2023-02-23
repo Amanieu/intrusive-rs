@@ -26,7 +26,6 @@ jobs:
       with:
         command: test
         args: --features nightly
-
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
@@ -42,3 +41,15 @@ jobs:
         with:
           command: fmt
           args: -- --check
+  miri:
+    name: Miri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+      - run: rustup component add miri
+      - run: cargo miri test --verbose --all-features
