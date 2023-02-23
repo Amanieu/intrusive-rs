@@ -1094,7 +1094,7 @@ where
     where
         <A::PointerOps as PointerOps>::Pointer: Clone,
     {
-        let raw_pointer = self.get()? as *const <A::PointerOps as PointerOps>::Value;
+        let raw_pointer = unsafe { self.tree.adapter.get_value(self.current?) };
         Some(unsafe {
             crate::pointer_ops::clone_pointer_from_raw(self.tree.adapter.pointer_ops(), raw_pointer)
         })

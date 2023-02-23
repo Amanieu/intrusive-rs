@@ -374,7 +374,7 @@ mod tests {
         unsafe {
             let pointer_ops = DefaultPointerOps::<Arc<_>>::new();
             let p = Arc::new(1);
-            let raw = &*p as *const i32;
+            let raw = Arc::as_ptr(&p);
             let p2: Arc<i32> = clone_pointer_from_raw(&pointer_ops, raw);
             assert_eq!(2, Arc::strong_count(&p2));
         }
@@ -386,7 +386,7 @@ mod tests {
         unsafe {
             let pointer_ops = DefaultPointerOps::<Rc<_>>::new();
             let p = Rc::new(1);
-            let raw = &*p as *const i32;
+            let raw = Rc::as_ptr(&p);
             let p2: Rc<i32> = clone_pointer_from_raw(&pointer_ops, raw);
             assert_eq!(2, Rc::strong_count(&p2));
         }
@@ -491,8 +491,9 @@ mod tests {
         unsafe {
             let pointer_ops = DefaultPointerOps::<Pin<Arc<_>>>::new();
             let p = Pin::new(Arc::new(1));
-            let raw = &*p as *const i32;
+            let raw = pointer_ops.into_raw(p);
             let p2: Pin<Arc<i32>> = clone_pointer_from_raw(&pointer_ops, raw);
+            let _p = pointer_ops.from_raw(raw);
             assert_eq!(2, Arc::strong_count(&Pin::into_inner(p2)));
         }
     }
@@ -503,8 +504,9 @@ mod tests {
         unsafe {
             let pointer_ops = DefaultPointerOps::<Pin<Rc<_>>>::new();
             let p = Pin::new(Rc::new(1));
-            let raw = &*p as *const i32;
+            let raw = pointer_ops.into_raw(p);
             let p2: Pin<Rc<i32>> = clone_pointer_from_raw(&pointer_ops, raw);
+            let _p = pointer_ops.from_raw(raw);
             assert_eq!(2, Rc::strong_count(&Pin::into_inner(p2)));
         }
     }
