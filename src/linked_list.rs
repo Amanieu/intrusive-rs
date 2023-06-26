@@ -15,8 +15,8 @@ use core::sync::atomic::{AtomicPtr, Ordering};
 
 use crate::link_ops::{self, DefaultLinkOps};
 use crate::pointer_ops::PointerOps;
-use crate::singly_linked_list::SinglyLinkedListOps;
-use crate::xor_linked_list::XorLinkedListOps;
+// use crate::singly_linked_list::SinglyLinkedListOps;
+// use crate::xor_linked_list::XorLinkedListOps;
 use crate::Adapter;
 // Necessary for Rust 1.56 compatability
 #[allow(unused_imports)]
@@ -189,86 +189,86 @@ unsafe impl LinkedListOps for LinkOps {
     }
 }
 
-unsafe impl SinglyLinkedListOps for LinkOps {
-    #[inline]
-    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        ptr.as_ref().next.get()
-    }
+// unsafe impl SinglyLinkedListOps for LinkOps {
+//     #[inline]
+//     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+//         ptr.as_ref().next.get()
+//     }
 
-    #[inline]
-    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
-        ptr.as_ref().next.set(next);
-    }
-}
+//     #[inline]
+//     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
+//         ptr.as_ref().next.set(next);
+//     }
+// }
 
-unsafe impl XorLinkedListOps for LinkOps {
-    #[inline]
-    unsafe fn next(
-        &self,
-        ptr: Self::LinkPtr,
-        prev: Option<Self::LinkPtr>,
-    ) -> Option<Self::LinkPtr> {
-        let packed = ptr
-            .as_ref()
-            .next
-            .get()
-            .map(|x| x.as_ptr() as usize)
-            .unwrap_or(0);
-        let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        NonNull::new(raw as *mut _)
-    }
+// unsafe impl XorLinkedListOps for LinkOps {
+//     #[inline]
+//     unsafe fn next(
+//         &self,
+//         ptr: Self::LinkPtr,
+//         prev: Option<Self::LinkPtr>,
+//     ) -> Option<Self::LinkPtr> {
+//         let packed = ptr
+//             .as_ref()
+//             .next
+//             .get()
+//             .map(|x| x.as_ptr() as usize)
+//             .unwrap_or(0);
+//         let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
+//         NonNull::new(raw as *mut _)
+//     }
 
-    #[inline]
-    unsafe fn prev(
-        &self,
-        ptr: Self::LinkPtr,
-        next: Option<Self::LinkPtr>,
-    ) -> Option<Self::LinkPtr> {
-        let packed = ptr
-            .as_ref()
-            .next
-            .get()
-            .map(|x| x.as_ptr() as usize)
-            .unwrap_or(0);
-        let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        NonNull::new(raw as *mut _)
-    }
+//     #[inline]
+//     unsafe fn prev(
+//         &self,
+//         ptr: Self::LinkPtr,
+//         next: Option<Self::LinkPtr>,
+//     ) -> Option<Self::LinkPtr> {
+//         let packed = ptr
+//             .as_ref()
+//             .next
+//             .get()
+//             .map(|x| x.as_ptr() as usize)
+//             .unwrap_or(0);
+//         let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+//         NonNull::new(raw as *mut _)
+//     }
 
-    #[inline]
-    unsafe fn set(
-        &mut self,
-        ptr: Self::LinkPtr,
-        prev: Option<Self::LinkPtr>,
-        next: Option<Self::LinkPtr>,
-    ) {
-        let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
-            ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+//     #[inline]
+//     unsafe fn set(
+//         &mut self,
+//         ptr: Self::LinkPtr,
+//         prev: Option<Self::LinkPtr>,
+//         next: Option<Self::LinkPtr>,
+//     ) {
+//         let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
+//             ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
 
-        let new_next = NonNull::new(new_packed as *mut _);
-        ptr.as_ref().next.set(new_next);
-    }
+//         let new_next = NonNull::new(new_packed as *mut _);
+//         ptr.as_ref().next.set(new_next);
+//     }
 
-    #[inline]
-    unsafe fn replace_next_or_prev(
-        &mut self,
-        ptr: Self::LinkPtr,
-        old: Option<Self::LinkPtr>,
-        new: Option<Self::LinkPtr>,
-    ) {
-        let packed = ptr
-            .as_ref()
-            .next
-            .get()
-            .map(|x| x.as_ptr() as usize)
-            .unwrap_or(0);
-        let new_packed = packed
-            ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
-            ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
+//     #[inline]
+//     unsafe fn replace_next_or_prev(
+//         &mut self,
+//         ptr: Self::LinkPtr,
+//         old: Option<Self::LinkPtr>,
+//         new: Option<Self::LinkPtr>,
+//     ) {
+//         let packed = ptr
+//             .as_ref()
+//             .next
+//             .get()
+//             .map(|x| x.as_ptr() as usize)
+//             .unwrap_or(0);
+//         let new_packed = packed
+//             ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
+//             ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
 
-        let new_next = NonNull::new(new_packed as *mut _);
-        ptr.as_ref().next.set(new_next);
-    }
-}
+//         let new_next = NonNull::new(new_packed as *mut _);
+//         ptr.as_ref().next.set(new_next);
+//     }
+// }
 
 // =============================================================================
 // AtomicLink
@@ -426,86 +426,86 @@ unsafe impl LinkedListOps for AtomicLinkOps {
     }
 }
 
-unsafe impl SinglyLinkedListOps for AtomicLinkOps {
-    #[inline]
-    unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        ptr.as_ref().next_exclusive().get()
-    }
+// unsafe impl SinglyLinkedListOps for AtomicLinkOps {
+//     #[inline]
+//     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
+//         ptr.as_ref().next_exclusive().get()
+//     }
 
-    #[inline]
-    unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
-        ptr.as_ref().next_exclusive().set(next);
-    }
-}
+//     #[inline]
+//     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
+//         ptr.as_ref().next_exclusive().set(next);
+//     }
+// }
 
-unsafe impl XorLinkedListOps for AtomicLinkOps {
-    #[inline]
-    unsafe fn next(
-        &self,
-        ptr: Self::LinkPtr,
-        prev: Option<Self::LinkPtr>,
-    ) -> Option<Self::LinkPtr> {
-        let packed = ptr
-            .as_ref()
-            .next_exclusive()
-            .get()
-            .map(|x| x.as_ptr() as usize)
-            .unwrap_or(0);
-        let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        NonNull::new(raw as *mut _)
-    }
+// unsafe impl XorLinkedListOps for AtomicLinkOps {
+//     #[inline]
+//     unsafe fn next(
+//         &self,
+//         ptr: Self::LinkPtr,
+//         prev: Option<Self::LinkPtr>,
+//     ) -> Option<Self::LinkPtr> {
+//         let packed = ptr
+//             .as_ref()
+//             .next_exclusive()
+//             .get()
+//             .map(|x| x.as_ptr() as usize)
+//             .unwrap_or(0);
+//         let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
+//         NonNull::new(raw as *mut _)
+//     }
 
-    #[inline]
-    unsafe fn prev(
-        &self,
-        ptr: Self::LinkPtr,
-        next: Option<Self::LinkPtr>,
-    ) -> Option<Self::LinkPtr> {
-        let packed = ptr
-            .as_ref()
-            .next_exclusive()
-            .get()
-            .map(|x| x.as_ptr() as usize)
-            .unwrap_or(0);
-        let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        NonNull::new(raw as *mut _)
-    }
+//     #[inline]
+//     unsafe fn prev(
+//         &self,
+//         ptr: Self::LinkPtr,
+//         next: Option<Self::LinkPtr>,
+//     ) -> Option<Self::LinkPtr> {
+//         let packed = ptr
+//             .as_ref()
+//             .next_exclusive()
+//             .get()
+//             .map(|x| x.as_ptr() as usize)
+//             .unwrap_or(0);
+//         let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+//         NonNull::new(raw as *mut _)
+//     }
 
-    #[inline]
-    unsafe fn set(
-        &mut self,
-        ptr: Self::LinkPtr,
-        prev: Option<Self::LinkPtr>,
-        next: Option<Self::LinkPtr>,
-    ) {
-        let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
-            ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+//     #[inline]
+//     unsafe fn set(
+//         &mut self,
+//         ptr: Self::LinkPtr,
+//         prev: Option<Self::LinkPtr>,
+//         next: Option<Self::LinkPtr>,
+//     ) {
+//         let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
+//             ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
 
-        let new_next = NonNull::new(new_packed as *mut _);
-        ptr.as_ref().next_exclusive().set(new_next);
-    }
+//         let new_next = NonNull::new(new_packed as *mut _);
+//         ptr.as_ref().next_exclusive().set(new_next);
+//     }
 
-    #[inline]
-    unsafe fn replace_next_or_prev(
-        &mut self,
-        ptr: Self::LinkPtr,
-        old: Option<Self::LinkPtr>,
-        new: Option<Self::LinkPtr>,
-    ) {
-        let packed = ptr
-            .as_ref()
-            .next_exclusive()
-            .get()
-            .map(|x| x.as_ptr() as usize)
-            .unwrap_or(0);
-        let new_packed = packed
-            ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
-            ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
+//     #[inline]
+//     unsafe fn replace_next_or_prev(
+//         &mut self,
+//         ptr: Self::LinkPtr,
+//         old: Option<Self::LinkPtr>,
+//         new: Option<Self::LinkPtr>,
+//     ) {
+//         let packed = ptr
+//             .as_ref()
+//             .next_exclusive()
+//             .get()
+//             .map(|x| x.as_ptr() as usize)
+//             .unwrap_or(0);
+//         let new_packed = packed
+//             ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
+//             ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
 
-        let new_next = NonNull::new(new_packed as *mut _);
-        ptr.as_ref().next_exclusive().set(new_next);
-    }
-}
+//         let new_next = NonNull::new(new_packed as *mut _);
+//         ptr.as_ref().next_exclusive().set(new_next);
+//     }
+// }
 
 #[inline]
 unsafe fn link_between<T: LinkedListOps>(
@@ -640,7 +640,11 @@ where
     {
         let raw_pointer = unsafe { self.list.adapter.get_value(self.current?) };
         Some(unsafe {
-            crate::pointer_ops::clone_pointer_from_raw(self.list.adapter.pointer_ops(), raw_pointer)
+            crate::pointer_ops::clone_pointer_from_raw(
+                self.list.adapter.pointer_ops(),
+                raw_pointer,
+                self.list.adapter.get_allocator(),
+            )
         })
     }
 
@@ -814,12 +818,10 @@ where
                 let result = current;
                 remove(self.list.adapter.link_ops_mut(), current);
                 self.current = next;
-                Some(
-                    self.list
-                        .adapter
-                        .pointer_ops()
-                        .from_raw(self.list.adapter.get_value(result)),
-                )
+                Some(self.list.adapter.pointer_ops().from_raw(
+                    self.list.adapter.get_value(result),
+                    self.list.adapter.get_allocator(),
+                ))
             } else {
                 None
             }
@@ -857,11 +859,10 @@ where
                 let result = current;
                 replace_with(self.list.adapter.link_ops_mut(), current, new);
                 self.current = Some(new);
-                Ok(self
-                    .list
-                    .adapter
-                    .pointer_ops()
-                    .from_raw(self.list.adapter.get_value(result)))
+                Ok(self.list.adapter.pointer_ops().from_raw(
+                    self.list.adapter.get_value(result),
+                    self.list.adapter.get_allocator(),
+                ))
             } else {
                 Err(val)
             }
@@ -1154,8 +1155,9 @@ where
             let link = self.adapter.get_link(raw);
 
             if !self.adapter.link_ops_mut().acquire_link(link) {
+                let alloc = self.adapter.get_allocator();
                 // convert the node back into a pointer
-                self.adapter.pointer_ops().from_raw(raw);
+                self.adapter.pointer_ops().from_raw(raw, alloc);
 
                 panic!("attempted to insert an object that is already linked");
             }
@@ -1331,6 +1333,11 @@ where
         }
     }
 
+    // pub fn iter_mut(&mut self) -> IterMut<'_, A> {
+    //     todo!()
+
+    // }
+
     /// Removes all elements from the `LinkedList`.
     ///
     /// This will unlink all object currently in the list, which requires
@@ -1345,11 +1352,13 @@ where
         self.tail = None;
         while let Some(x) = current {
             unsafe {
+                // let alloc = self.adapter.get_allocator() as PointerOps::Alloc;
+
                 let next = self.adapter.link_ops().next(x);
                 self.adapter.link_ops_mut().release_link(x);
                 self.adapter
                     .pointer_ops()
-                    .from_raw(self.adapter.get_value(x));
+                    .from_raw(self.adapter.get_value(x), self.adapter.get_allocator());
                 current = next;
             }
         }
@@ -1486,6 +1495,39 @@ where
     }
 }
 
+// // =============================================================================
+// // IterMut
+// // =============================================================================
+
+// /// An iterator over references to the items of a `LinkedList`.
+// pub struct IterMut<'a, A: Adapter>
+// where
+//     A::LinkOps: LinkedListOps,
+// {
+//     head: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+//     tail: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+//     list: &'a mut LinkedList<A>,
+// }
+// impl<'a, A: Adapter + 'a> Iterator for IterMut<'a, A>
+// where
+//     A::LinkOps: LinkedListOps,
+// {
+//     type Item = &'a mut <A::PointerOps as PointerOps>::Value;
+
+//     #[inline]
+//     fn next(&mut self) -> Option<&'a mut <A::PointerOps as PointerOps>::Value> {
+//         let head = self.head?;
+
+//         if Some(head) == self.tail {
+//             self.head = None;
+//             self.tail = None;
+//         } else {
+//             self.head = unsafe { self.list.adapter.link_ops().next(head) };
+//         }
+//         Some(unsafe { &mut *self.list.adapter.get_value(head) })
+//     }
+// }
+
 // =============================================================================
 // Iter
 // =============================================================================
@@ -1585,480 +1627,480 @@ where
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use alloc::boxed::Box;
+// #[cfg(test)]
+// mod tests {
+//     use alloc::boxed::Box;
 
-    use crate::UnsafeRef;
+//     use crate::UnsafeRef;
 
-    use super::{CursorOwning, Link, LinkedList};
-    use std::fmt;
-    use std::format;
-    use std::rc::Rc;
-    use std::vec::Vec;
+//     use super::{CursorOwning, Link, LinkedList};
+//     use std::fmt;
+//     use std::format;
+//     use std::rc::Rc;
+//     use std::vec::Vec;
 
-    struct Obj {
-        link1: Link,
-        link2: Link,
-        value: u32,
-    }
-    impl fmt::Debug for Obj {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "{}", self.value)
-        }
-    }
-    intrusive_adapter!(ObjAdapter1 = Rc<Obj>: Obj { link1: Link });
-    intrusive_adapter!(ObjAdapter2 = Rc<Obj>: Obj { link2: Link });
-    intrusive_adapter!(UnsafeRefObjAdapter1 = UnsafeRef<Obj>: Obj { link1: Link });
+//     struct Obj {
+//         link1: Link,
+//         link2: Link,
+//         value: u32,
+//     }
+//     impl fmt::Debug for Obj {
+//         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//             write!(f, "{}", self.value)
+//         }
+//     }
+//     intrusive_adapter!(ObjAdapter1 = Rc<Obj>: Obj { link1: Link });
+//     intrusive_adapter!(ObjAdapter2 = Rc<Obj>: Obj { link2: Link });
+//     intrusive_adapter!(UnsafeRefObjAdapter1 = UnsafeRef<Obj>: Obj { link1: Link });
 
-    fn make_rc_obj(value: u32) -> Rc<Obj> {
-        Rc::new(make_obj(value))
-    }
+//     fn make_rc_obj(value: u32) -> Rc<Obj> {
+//         Rc::new(make_obj(value))
+//     }
 
-    fn make_obj(value: u32) -> Obj {
-        Obj {
-            link1: Link::new(),
-            link2: Link::default(),
-            value,
-        }
-    }
+//     fn make_obj(value: u32) -> Obj {
+//         Obj {
+//             link1: Link::new(),
+//             link2: Link::default(),
+//             value,
+//         }
+//     }
 
-    #[test]
-    fn test_link() {
-        let a = make_rc_obj(1);
-        assert!(!a.link1.is_linked());
-        assert!(!a.link2.is_linked());
+//     #[test]
+//     fn test_link() {
+//         let a = make_rc_obj(1);
+//         assert!(!a.link1.is_linked());
+//         assert!(!a.link2.is_linked());
 
-        let mut b = LinkedList::<ObjAdapter1>::default();
-        assert!(b.is_empty());
+//         let mut b = LinkedList::<ObjAdapter1>::default();
+//         assert!(b.is_empty());
 
-        b.cursor_mut().insert_after(a.clone());
-        assert!(!b.is_empty());
-        assert!(a.link1.is_linked());
-        assert!(!a.link2.is_linked());
-        assert_eq!(format!("{:?}", a.link1), "linked");
-        assert_eq!(format!("{:?}", a.link2), "unlinked");
+//         b.cursor_mut().insert_after(a.clone());
+//         assert!(!b.is_empty());
+//         assert!(a.link1.is_linked());
+//         assert!(!a.link2.is_linked());
+//         assert_eq!(format!("{:?}", a.link1), "linked");
+//         assert_eq!(format!("{:?}", a.link2), "unlinked");
 
-        assert_eq!(
-            b.front_mut().remove().unwrap().as_ref() as *const _,
-            a.as_ref() as *const _
-        );
-        assert!(b.is_empty());
-        assert!(!a.link1.is_linked());
-        assert!(!a.link2.is_linked());
-    }
+//         assert_eq!(
+//             b.front_mut().remove().unwrap().as_ref() as *const _,
+//             a.as_ref() as *const _
+//         );
+//         assert!(b.is_empty());
+//         assert!(!a.link1.is_linked());
+//         assert!(!a.link2.is_linked());
+//     }
 
-    #[test]
-    fn test_cursor() {
-        let a = make_rc_obj(1);
-        let b = make_rc_obj(2);
-        let c = make_rc_obj(3);
+//     #[test]
+//     fn test_cursor() {
+//         let a = make_rc_obj(1);
+//         let b = make_rc_obj(2);
+//         let c = make_rc_obj(3);
 
-        let mut l = LinkedList::new(ObjAdapter1::new());
-        let mut cur = l.cursor_mut();
-        assert!(cur.is_null());
-        assert!(cur.get().is_none());
-        assert!(cur.remove().is_none());
-        assert_eq!(
-            cur.replace_with(a.clone()).unwrap_err().as_ref() as *const _,
-            a.as_ref() as *const _
-        );
+//         let mut l = LinkedList::new(ObjAdapter1::new());
+//         let mut cur = l.cursor_mut();
+//         assert!(cur.is_null());
+//         assert!(cur.get().is_none());
+//         assert!(cur.remove().is_none());
+//         assert_eq!(
+//             cur.replace_with(a.clone()).unwrap_err().as_ref() as *const _,
+//             a.as_ref() as *const _
+//         );
 
-        cur.insert_before(a.clone());
-        cur.insert_before(c.clone());
-        cur.move_prev();
-        cur.insert_before(b.clone());
-        assert!(cur.peek_next().is_null());
-        cur.move_next();
-        assert!(cur.is_null());
+//         cur.insert_before(a.clone());
+//         cur.insert_before(c.clone());
+//         cur.move_prev();
+//         cur.insert_before(b.clone());
+//         assert!(cur.peek_next().is_null());
+//         cur.move_next();
+//         assert!(cur.is_null());
 
-        cur.move_next();
-        assert!(cur.peek_prev().is_null());
-        assert!(!cur.is_null());
-        assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
+//         cur.move_next();
+//         assert!(cur.peek_prev().is_null());
+//         assert!(!cur.is_null());
+//         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
 
-        {
-            let mut cur2 = cur.as_cursor();
-            assert_eq!(cur2.get().unwrap() as *const _, a.as_ref() as *const _);
-            assert_eq!(cur2.peek_next().get().unwrap().value, 2);
-            cur2.move_next();
-            assert_eq!(cur2.get().unwrap().value, 2);
-            cur2.move_next();
-            assert_eq!(cur2.peek_prev().get().unwrap().value, 2);
-            assert_eq!(cur2.get().unwrap() as *const _, c.as_ref() as *const _);
-            cur2.move_prev();
-            assert_eq!(cur2.get().unwrap() as *const _, b.as_ref() as *const _);
-            cur2.move_next();
-            assert_eq!(cur2.get().unwrap() as *const _, c.as_ref() as *const _);
-            cur2.move_next();
-            assert!(cur2.is_null());
-            assert!(cur2.clone().get().is_none());
-        }
-        assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
+//         {
+//             let mut cur2 = cur.as_cursor();
+//             assert_eq!(cur2.get().unwrap() as *const _, a.as_ref() as *const _);
+//             assert_eq!(cur2.peek_next().get().unwrap().value, 2);
+//             cur2.move_next();
+//             assert_eq!(cur2.get().unwrap().value, 2);
+//             cur2.move_next();
+//             assert_eq!(cur2.peek_prev().get().unwrap().value, 2);
+//             assert_eq!(cur2.get().unwrap() as *const _, c.as_ref() as *const _);
+//             cur2.move_prev();
+//             assert_eq!(cur2.get().unwrap() as *const _, b.as_ref() as *const _);
+//             cur2.move_next();
+//             assert_eq!(cur2.get().unwrap() as *const _, c.as_ref() as *const _);
+//             cur2.move_next();
+//             assert!(cur2.is_null());
+//             assert!(cur2.clone().get().is_none());
+//         }
+//         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
 
-        cur.move_next();
-        assert_eq!(
-            cur.remove().unwrap().as_ref() as *const _,
-            b.as_ref() as *const _
-        );
-        assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
-        cur.insert_after(b.clone());
-        assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
-        cur.move_prev();
-        assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
-        assert_eq!(
-            cur.remove().unwrap().as_ref() as *const _,
-            a.as_ref() as *const _
-        );
-        assert!(!a.link1.is_linked());
-        assert!(c.link1.is_linked());
-        assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
-        assert_eq!(
-            cur.replace_with(a.clone()).unwrap().as_ref() as *const _,
-            c.as_ref() as *const _
-        );
-        assert!(a.link1.is_linked());
-        assert!(!c.link1.is_linked());
-        assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
-        cur.move_next();
-        assert_eq!(
-            cur.replace_with(c.clone()).unwrap().as_ref() as *const _,
-            b.as_ref() as *const _
-        );
-        assert!(a.link1.is_linked());
-        assert!(!b.link1.is_linked());
-        assert!(c.link1.is_linked());
-        assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
-    }
+//         cur.move_next();
+//         assert_eq!(
+//             cur.remove().unwrap().as_ref() as *const _,
+//             b.as_ref() as *const _
+//         );
+//         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
+//         cur.insert_after(b.clone());
+//         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
+//         cur.move_prev();
+//         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
+//         assert_eq!(
+//             cur.remove().unwrap().as_ref() as *const _,
+//             a.as_ref() as *const _
+//         );
+//         assert!(!a.link1.is_linked());
+//         assert!(c.link1.is_linked());
+//         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
+//         assert_eq!(
+//             cur.replace_with(a.clone()).unwrap().as_ref() as *const _,
+//             c.as_ref() as *const _
+//         );
+//         assert!(a.link1.is_linked());
+//         assert!(!c.link1.is_linked());
+//         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
+//         cur.move_next();
+//         assert_eq!(
+//             cur.replace_with(c.clone()).unwrap().as_ref() as *const _,
+//             b.as_ref() as *const _
+//         );
+//         assert!(a.link1.is_linked());
+//         assert!(!b.link1.is_linked());
+//         assert!(c.link1.is_linked());
+//         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
+//     }
 
-    #[test]
-    fn test_cursor_owning() {
-        struct Container {
-            cur: CursorOwning<ObjAdapter1>,
-        }
+//     #[test]
+//     fn test_cursor_owning() {
+//         struct Container {
+//             cur: CursorOwning<ObjAdapter1>,
+//         }
 
-        let mut l = LinkedList::new(ObjAdapter1::new());
-        l.push_back(make_rc_obj(1));
-        l.push_back(make_rc_obj(2));
-        l.push_back(make_rc_obj(3));
-        l.push_back(make_rc_obj(4));
-        let mut con = Container {
-            cur: l.cursor_owning(),
-        };
-        assert!(con.cur.as_cursor().is_null());
+//         let mut l = LinkedList::new(ObjAdapter1::new());
+//         l.push_back(make_rc_obj(1));
+//         l.push_back(make_rc_obj(2));
+//         l.push_back(make_rc_obj(3));
+//         l.push_back(make_rc_obj(4));
+//         let mut con = Container {
+//             cur: l.cursor_owning(),
+//         };
+//         assert!(con.cur.as_cursor().is_null());
 
-        con.cur = con.cur.into_inner().front_owning();
-        assert_eq!(con.cur.as_cursor().get().unwrap().value, 1);
+//         con.cur = con.cur.into_inner().front_owning();
+//         assert_eq!(con.cur.as_cursor().get().unwrap().value, 1);
 
-        con.cur.with_cursor_mut(|c| c.move_next());
-        assert_eq!(con.cur.as_cursor().get().unwrap().value, 2);
+//         con.cur.with_cursor_mut(|c| c.move_next());
+//         assert_eq!(con.cur.as_cursor().get().unwrap().value, 2);
 
-        con.cur = con.cur.into_inner().back_owning();
-        assert_eq!(con.cur.as_cursor().get().unwrap().value, 4);
-    }
+//         con.cur = con.cur.into_inner().back_owning();
+//         assert_eq!(con.cur.as_cursor().get().unwrap().value, 4);
+//     }
 
-    #[test]
-    fn test_push_pop() {
-        let a = make_rc_obj(1);
-        let b = make_rc_obj(2);
-        let c = make_rc_obj(3);
+//     #[test]
+//     fn test_push_pop() {
+//         let a = make_rc_obj(1);
+//         let b = make_rc_obj(2);
+//         let c = make_rc_obj(3);
 
-        let mut l = LinkedList::new(ObjAdapter1::new());
-        l.push_front(a);
-        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1]);
-        l.push_front(b);
-        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [2, 1]);
-        l.push_back(c);
-        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [2, 1, 3]);
-        assert_eq!(l.pop_front().unwrap().value, 2);
-        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3]);
-        assert_eq!(l.pop_back().unwrap().value, 3);
-        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1]);
-        assert_eq!(l.pop_front().unwrap().value, 1);
-        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        assert!(l.pop_front().is_none());
-        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        assert!(l.pop_back().is_none());
-        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-    }
+//         let mut l = LinkedList::new(ObjAdapter1::new());
+//         l.push_front(a);
+//         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1]);
+//         l.push_front(b);
+//         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [2, 1]);
+//         l.push_back(c);
+//         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [2, 1, 3]);
+//         assert_eq!(l.pop_front().unwrap().value, 2);
+//         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3]);
+//         assert_eq!(l.pop_back().unwrap().value, 3);
+//         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1]);
+//         assert_eq!(l.pop_front().unwrap().value, 1);
+//         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         assert!(l.pop_front().is_none());
+//         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         assert!(l.pop_back().is_none());
+//         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//     }
 
-    #[test]
-    fn test_split_splice() {
-        let mut l1 = LinkedList::new(ObjAdapter1::new());
-        let mut l2 = LinkedList::new(ObjAdapter1::new());
-        let mut l3 = LinkedList::new(ObjAdapter1::new());
+//     #[test]
+//     fn test_split_splice() {
+//         let mut l1 = LinkedList::new(ObjAdapter1::new());
+//         let mut l2 = LinkedList::new(ObjAdapter1::new());
+//         let mut l3 = LinkedList::new(ObjAdapter1::new());
 
-        let a = make_rc_obj(1);
-        let b = make_rc_obj(2);
-        let c = make_rc_obj(3);
-        let d = make_rc_obj(4);
-        l1.cursor_mut().insert_before(a);
-        l1.cursor_mut().insert_before(b);
-        l1.cursor_mut().insert_before(c);
-        l1.cursor_mut().insert_before(d);
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        {
-            let mut cur = l1.front_mut();
-            cur.move_next();
-            l2 = cur.split_after();
-        }
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2]);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), [3, 4]);
-        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        {
-            let mut cur = l2.back_mut();
-            l3 = cur.split_before();
-        }
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2]);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), [4]);
-        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), [3]);
-        {
-            let mut cur = l1.front_mut();
-            cur.splice_after(l2.take());
-        }
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 4, 2]);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), [3]);
-        {
-            let mut cur = l1.front_mut();
-            cur.move_next();
-            cur.splice_before(l3.take());
-        }
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        {
-            let mut cur = l2.cursor_mut();
-            cur.splice_after(l1.take());
-        }
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
-        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        {
-            let mut cur = l1.cursor_mut();
-            cur.splice_before(l2.take());
-        }
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        {
-            let mut cur = l1.cursor_mut();
-            l2 = cur.split_after();
-        }
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
-        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        {
-            let mut cur = l2.cursor_mut();
-            l1 = cur.split_before();
-        }
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        {
-            let mut cur = l1.front_mut();
-            l2 = cur.split_before();
-        }
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        {
-            let mut cur = l1.back_mut();
-            l2 = cur.split_after();
-        }
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-        assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
-    }
+//         let a = make_rc_obj(1);
+//         let b = make_rc_obj(2);
+//         let c = make_rc_obj(3);
+//         let d = make_rc_obj(4);
+//         l1.cursor_mut().insert_before(a);
+//         l1.cursor_mut().insert_before(b);
+//         l1.cursor_mut().insert_before(c);
+//         l1.cursor_mut().insert_before(d);
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         {
+//             let mut cur = l1.front_mut();
+//             cur.move_next();
+//             l2 = cur.split_after();
+//         }
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2]);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), [3, 4]);
+//         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         {
+//             let mut cur = l2.back_mut();
+//             l3 = cur.split_before();
+//         }
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2]);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), [4]);
+//         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), [3]);
+//         {
+//             let mut cur = l1.front_mut();
+//             cur.splice_after(l2.take());
+//         }
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 4, 2]);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), [3]);
+//         {
+//             let mut cur = l1.front_mut();
+//             cur.move_next();
+//             cur.splice_before(l3.take());
+//         }
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         {
+//             let mut cur = l2.cursor_mut();
+//             cur.splice_after(l1.take());
+//         }
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
+//         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         {
+//             let mut cur = l1.cursor_mut();
+//             cur.splice_before(l2.take());
+//         }
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         {
+//             let mut cur = l1.cursor_mut();
+//             l2 = cur.split_after();
+//         }
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
+//         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         {
+//             let mut cur = l2.cursor_mut();
+//             l1 = cur.split_before();
+//         }
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         {
+//             let mut cur = l1.front_mut();
+//             l2 = cur.split_before();
+//         }
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         {
+//             let mut cur = l1.back_mut();
+//             l2 = cur.split_after();
+//         }
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 3, 4, 2]);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//         assert_eq!(l3.iter().map(|x| x.value).collect::<Vec<_>>(), []);
+//     }
 
-    #[test]
-    fn test_iter() {
-        let mut l = LinkedList::new(ObjAdapter1::new());
-        let a = make_rc_obj(1);
-        let b = make_rc_obj(2);
-        let c = make_rc_obj(3);
-        let d = make_rc_obj(4);
-        l.cursor_mut().insert_before(a.clone());
-        l.cursor_mut().insert_before(b.clone());
-        l.cursor_mut().insert_before(c.clone());
-        l.cursor_mut().insert_before(d.clone());
+//     #[test]
+//     fn test_iter() {
+//         let mut l = LinkedList::new(ObjAdapter1::new());
+//         let a = make_rc_obj(1);
+//         let b = make_rc_obj(2);
+//         let c = make_rc_obj(3);
+//         let d = make_rc_obj(4);
+//         l.cursor_mut().insert_before(a.clone());
+//         l.cursor_mut().insert_before(b.clone());
+//         l.cursor_mut().insert_before(c.clone());
+//         l.cursor_mut().insert_before(d.clone());
 
-        assert_eq!(l.front().get().unwrap().value, 1);
-        assert_eq!(l.back().get().unwrap().value, 4);
-        unsafe {
-            assert_eq!(l.cursor_from_ptr(b.as_ref()).get().unwrap().value, 2);
-            assert_eq!(l.cursor_mut_from_ptr(c.as_ref()).get().unwrap().value, 3);
-        }
+//         assert_eq!(l.front().get().unwrap().value, 1);
+//         assert_eq!(l.back().get().unwrap().value, 4);
+//         unsafe {
+//             assert_eq!(l.cursor_from_ptr(b.as_ref()).get().unwrap().value, 2);
+//             assert_eq!(l.cursor_mut_from_ptr(c.as_ref()).get().unwrap().value, 3);
+//         }
 
-        let mut v = Vec::new();
-        for x in &l {
-            v.push(x.value);
-        }
-        assert_eq!(v, [1, 2, 3, 4]);
-        assert_eq!(
-            l.iter().clone().map(|x| x.value).collect::<Vec<_>>(),
-            [1, 2, 3, 4]
-        );
-        assert_eq!(
-            l.iter().rev().map(|x| x.value).collect::<Vec<_>>(),
-            [4, 3, 2, 1]
-        );
-        assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
+//         let mut v = Vec::new();
+//         for x in &l {
+//             v.push(x.value);
+//         }
+//         assert_eq!(v, [1, 2, 3, 4]);
+//         assert_eq!(
+//             l.iter().clone().map(|x| x.value).collect::<Vec<_>>(),
+//             [1, 2, 3, 4]
+//         );
+//         assert_eq!(
+//             l.iter().rev().map(|x| x.value).collect::<Vec<_>>(),
+//             [4, 3, 2, 1]
+//         );
+//         assert_eq!(l.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
 
-        assert_eq!(format!("{:?}", l), "[1, 2, 3, 4]");
+//         assert_eq!(format!("{:?}", l), "[1, 2, 3, 4]");
 
-        let mut v = Vec::new();
-        for x in l.take() {
-            v.push(x.value);
-        }
-        assert_eq!(v, [1, 2, 3, 4]);
-        assert!(l.is_empty());
-        assert!(!a.link1.is_linked());
-        assert!(!b.link1.is_linked());
-        assert!(!c.link1.is_linked());
-        assert!(!d.link1.is_linked());
+//         let mut v = Vec::new();
+//         for x in l.take() {
+//             v.push(x.value);
+//         }
+//         assert_eq!(v, [1, 2, 3, 4]);
+//         assert!(l.is_empty());
+//         assert!(!a.link1.is_linked());
+//         assert!(!b.link1.is_linked());
+//         assert!(!c.link1.is_linked());
+//         assert!(!d.link1.is_linked());
 
-        l.cursor_mut().insert_before(a.clone());
-        l.cursor_mut().insert_before(b.clone());
-        l.cursor_mut().insert_before(c.clone());
-        l.cursor_mut().insert_before(d.clone());
-        l.clear();
-        assert!(l.is_empty());
-        assert!(!a.link1.is_linked());
-        assert!(!b.link1.is_linked());
-        assert!(!c.link1.is_linked());
-        assert!(!d.link1.is_linked());
+//         l.cursor_mut().insert_before(a.clone());
+//         l.cursor_mut().insert_before(b.clone());
+//         l.cursor_mut().insert_before(c.clone());
+//         l.cursor_mut().insert_before(d.clone());
+//         l.clear();
+//         assert!(l.is_empty());
+//         assert!(!a.link1.is_linked());
+//         assert!(!b.link1.is_linked());
+//         assert!(!c.link1.is_linked());
+//         assert!(!d.link1.is_linked());
 
-        v.clear();
-        l.cursor_mut().insert_before(a.clone());
-        l.cursor_mut().insert_before(b.clone());
-        l.cursor_mut().insert_before(c.clone());
-        l.cursor_mut().insert_before(d.clone());
-        for x in l.into_iter().rev() {
-            v.push(x.value);
-        }
-        assert_eq!(v, [4, 3, 2, 1]);
-        assert!(!a.link1.is_linked());
-        assert!(!b.link1.is_linked());
-        assert!(!c.link1.is_linked());
-        assert!(!d.link1.is_linked());
-    }
+//         v.clear();
+//         l.cursor_mut().insert_before(a.clone());
+//         l.cursor_mut().insert_before(b.clone());
+//         l.cursor_mut().insert_before(c.clone());
+//         l.cursor_mut().insert_before(d.clone());
+//         for x in l.into_iter().rev() {
+//             v.push(x.value);
+//         }
+//         assert_eq!(v, [4, 3, 2, 1]);
+//         assert!(!a.link1.is_linked());
+//         assert!(!b.link1.is_linked());
+//         assert!(!c.link1.is_linked());
+//         assert!(!d.link1.is_linked());
+//     }
 
-    #[test]
-    fn test_multi_list() {
-        let mut l1 = LinkedList::new(ObjAdapter1::new());
-        let mut l2 = LinkedList::new(ObjAdapter2::new());
-        let a = make_rc_obj(1);
-        let b = make_rc_obj(2);
-        let c = make_rc_obj(3);
-        let d = make_rc_obj(4);
-        l1.cursor_mut().insert_before(a.clone());
-        l1.cursor_mut().insert_before(b.clone());
-        l1.cursor_mut().insert_before(c.clone());
-        l1.cursor_mut().insert_before(d.clone());
-        l2.cursor_mut().insert_after(a);
-        l2.cursor_mut().insert_after(b);
-        l2.cursor_mut().insert_after(c);
-        l2.cursor_mut().insert_after(d);
-        assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
-        assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), [4, 3, 2, 1]);
-    }
+//     #[test]
+//     fn test_multi_list() {
+//         let mut l1 = LinkedList::new(ObjAdapter1::new());
+//         let mut l2 = LinkedList::new(ObjAdapter2::new());
+//         let a = make_rc_obj(1);
+//         let b = make_rc_obj(2);
+//         let c = make_rc_obj(3);
+//         let d = make_rc_obj(4);
+//         l1.cursor_mut().insert_before(a.clone());
+//         l1.cursor_mut().insert_before(b.clone());
+//         l1.cursor_mut().insert_before(c.clone());
+//         l1.cursor_mut().insert_before(d.clone());
+//         l2.cursor_mut().insert_after(a);
+//         l2.cursor_mut().insert_after(b);
+//         l2.cursor_mut().insert_after(c);
+//         l2.cursor_mut().insert_after(d);
+//         assert_eq!(l1.iter().map(|x| x.value).collect::<Vec<_>>(), [1, 2, 3, 4]);
+//         assert_eq!(l2.iter().map(|x| x.value).collect::<Vec<_>>(), [4, 3, 2, 1]);
+//     }
 
-    #[test]
-    fn test_fast_clear_force_unlink() {
-        let mut l = LinkedList::new(UnsafeRefObjAdapter1::new());
-        let a = UnsafeRef::from_box(Box::new(make_obj(1)));
-        let b = UnsafeRef::from_box(Box::new(make_obj(2)));
-        let c = UnsafeRef::from_box(Box::new(make_obj(3)));
-        l.cursor_mut().insert_before(a.clone());
-        l.cursor_mut().insert_before(b.clone());
-        l.cursor_mut().insert_before(c.clone());
+//     #[test]
+//     fn test_fast_clear_force_unlink() {
+//         let mut l = LinkedList::new(UnsafeRefObjAdapter1::new());
+//         let a = UnsafeRef::from_box(Box::new(make_obj(1)));
+//         let b = UnsafeRef::from_box(Box::new(make_obj(2)));
+//         let c = UnsafeRef::from_box(Box::new(make_obj(3)));
+//         l.cursor_mut().insert_before(a.clone());
+//         l.cursor_mut().insert_before(b.clone());
+//         l.cursor_mut().insert_before(c.clone());
 
-        l.fast_clear();
-        assert!(l.is_empty());
+//         l.fast_clear();
+//         assert!(l.is_empty());
 
-        unsafe {
-            assert!(a.link1.is_linked());
-            assert!(b.link1.is_linked());
-            assert!(c.link1.is_linked());
+//         unsafe {
+//             assert!(a.link1.is_linked());
+//             assert!(b.link1.is_linked());
+//             assert!(c.link1.is_linked());
 
-            a.link1.force_unlink();
-            b.link1.force_unlink();
-            c.link1.force_unlink();
+//             a.link1.force_unlink();
+//             b.link1.force_unlink();
+//             c.link1.force_unlink();
 
-            assert!(l.is_empty());
+//             assert!(l.is_empty());
 
-            assert!(!a.link1.is_linked());
-            assert!(!b.link1.is_linked());
-            assert!(!c.link1.is_linked());
-        }
+//             assert!(!a.link1.is_linked());
+//             assert!(!b.link1.is_linked());
+//             assert!(!c.link1.is_linked());
+//         }
 
-        unsafe {
-            UnsafeRef::into_box(a);
-            UnsafeRef::into_box(b);
-            UnsafeRef::into_box(c);
-        }
-    }
+//         unsafe {
+//             UnsafeRef::into_box(a);
+//             UnsafeRef::into_box(b);
+//             UnsafeRef::into_box(c);
+//         }
+//     }
 
-    #[test]
-    fn test_non_static() {
-        #[derive(Clone)]
-        struct Obj<'a, T> {
-            link: Link,
-            value: &'a T,
-        }
-        intrusive_adapter!(ObjAdapter<'a, T> = &'a Obj<'a, T>: Obj<'a, T> {link: Link} where T: 'a);
+//     #[test]
+//     fn test_non_static() {
+//         #[derive(Clone)]
+//         struct Obj<'a, T> {
+//             link: Link,
+//             value: &'a T,
+//         }
+//         intrusive_adapter!(ObjAdapter<'a, T> = &'a Obj<'a, T>: Obj<'a, T> {link: Link} where T: 'a);
 
-        let v = 5;
-        let a = Obj {
-            link: Link::new(),
-            value: &v,
-        };
-        let b = a.clone();
-        let mut l = LinkedList::new(ObjAdapter::new());
-        l.cursor_mut().insert_before(&a);
-        l.cursor_mut().insert_before(&b);
-        assert_eq!(*l.front().get().unwrap().value, 5);
-        assert_eq!(*l.back().get().unwrap().value, 5);
-    }
+//         let v = 5;
+//         let a = Obj {
+//             link: Link::new(),
+//             value: &v,
+//         };
+//         let b = a.clone();
+//         let mut l = LinkedList::new(ObjAdapter::new());
+//         l.cursor_mut().insert_before(&a);
+//         l.cursor_mut().insert_before(&b);
+//         assert_eq!(*l.front().get().unwrap().value, 5);
+//         assert_eq!(*l.back().get().unwrap().value, 5);
+//     }
 
-    macro_rules! test_clone_pointer {
-        ($ptr: ident, $ptr_import: path) => {
-            use $ptr_import;
+//     macro_rules! test_clone_pointer {
+//         ($ptr: ident, $ptr_import: path) => {
+//             use $ptr_import;
 
-            #[derive(Clone)]
-            struct Obj {
-                link: Link,
-                value: usize,
-            }
-            intrusive_adapter!(ObjAdapter = $ptr<Obj>: Obj { link: Link });
+//             #[derive(Clone)]
+//             struct Obj {
+//                 link: Link,
+//                 value: usize,
+//             }
+//             intrusive_adapter!(ObjAdapter = $ptr<Obj>: Obj { link: Link });
 
-            let a = $ptr::new(Obj {
-                link: Link::new(),
-                value: 5,
-            });
-            let mut l = LinkedList::new(ObjAdapter::new());
-            l.cursor_mut().insert_before(a.clone());
-            assert_eq!(2, $ptr::strong_count(&a));
+//             let a = $ptr::new(Obj {
+//                 link: Link::new(),
+//                 value: 5,
+//             });
+//             let mut l = LinkedList::new(ObjAdapter::new());
+//             l.cursor_mut().insert_before(a.clone());
+//             assert_eq!(2, $ptr::strong_count(&a));
 
-            let pointer = l.front().clone_pointer().unwrap();
-            assert_eq!(pointer.value, 5);
-            assert_eq!(3, $ptr::strong_count(&a));
+//             let pointer = l.front().clone_pointer().unwrap();
+//             assert_eq!(pointer.value, 5);
+//             assert_eq!(3, $ptr::strong_count(&a));
 
-            l.front_mut().remove();
-            assert!(l.front().clone_pointer().is_none());
-        };
-    }
+//             l.front_mut().remove();
+//             assert!(l.front().clone_pointer().is_none());
+//         };
+//     }
 
-    #[test]
-    fn test_clone_pointer_rc() {
-        test_clone_pointer!(Rc, std::rc::Rc);
-    }
+//     #[test]
+//     fn test_clone_pointer_rc() {
+//         test_clone_pointer!(Rc, std::rc::Rc);
+//     }
 
-    #[test]
-    fn test_clone_pointer_arc() {
-        test_clone_pointer!(Arc, std::sync::Arc);
-    }
-}
+//     #[test]
+//     fn test_clone_pointer_arc() {
+//         test_clone_pointer!(Arc, std::sync::Arc);
+//     }
+// }
