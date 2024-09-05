@@ -104,6 +104,6 @@ impl<T: fmt::Debug + ?Sized> fmt::Debug for UnsafeRef<T> {
     }
 }
 
-unsafe impl<T: ?Sized + Send> Send for UnsafeRef<T> {}
+unsafe impl<T: ?Sized + Send + Sync> Send for UnsafeRef<T> {}
 
 unsafe impl<T: ?Sized + Sync> Sync for UnsafeRef<T> {}
