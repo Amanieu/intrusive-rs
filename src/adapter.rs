@@ -98,10 +98,10 @@ pub unsafe trait Adapter {
 /// pointer to the specified field of some container type.
 #[macro_export]
 macro_rules! container_of {
-    ($ptr:expr, $container:path, $field:ident) => {
+    ($ptr:expr, $container:path, $($fields:expr)+) => {
         #[allow(clippy::cast_ptr_alignment)]
         {
-            ($ptr as *const _ as *const u8).sub($crate::offset_of!($container, $field))
+            ($ptr as *const _ as *const u8).sub($crate::offset_of!($container, $($fields)+))
                 as *const $container
         }
     };
@@ -114,7 +114,7 @@ macro_rules! container_of {
 /// The basic syntax to create an adapter is:
 ///
 /// ```rust,ignore
-/// intrusive_adapter!(Adapter = Pointer: Value { link_field: LinkType });
+/// intrusive_adapter!(Adapter = Pointer: Value { link_field => LinkType });
 /// ```
 ///
 /// You can create a new instance of an adapter using the `new` method or the
@@ -128,7 +128,7 @@ macro_rules! container_of {
 /// intrusive_adapter!(
 ///     Adapter<'lifetime, Type, Type2> =
 ///         Pointer: Value {
-///             link_field: LinkType
+///             link_field => LinkType
 ///         }
 ///         where
 ///             Type: Copy,
@@ -150,9 +150,9 @@ macro_rules! container_of {
 ///     link: LinkedListLink,
 ///     link2: RBTreeLink,
 /// }
-/// intrusive_adapter!(MyAdapter = Box<Test>: Test { link: LinkedListLink });
-/// intrusive_adapter!(pub MyAdapter2 = Box<Test>: Test { link2: RBTreeLink });
-/// intrusive_adapter!(pub(crate) MyAdapter3 = Box<Test>: Test { link2: RBTreeLink });
+/// intrusive_adapter!(MyAdapter = Box<Test>: Test { link => LinkedListLink });
+/// intrusive_adapter!(pub MyAdapter2 = Box<Test>: Test { link2 => RBTreeLink });
+/// intrusive_adapter!(pub(crate) MyAdapter3 = Box<Test>: Test { link2 => RBTreeLink });
 ///
 /// pub struct Test2<T>
 ///     where T: Clone + ?Sized
@@ -160,13 +160,13 @@ macro_rules! container_of {
 ///     link: LinkedListLink,
 ///     val: T,
 /// }
-/// intrusive_adapter!(MyAdapter4<'a, T> = &'a Test2<T>: Test2<T> { link: LinkedListLink } where T: ?Sized + Clone + 'a);
+/// intrusive_adapter!(MyAdapter4<'a, T> = &'a Test2<T>: Test2<T> { link => LinkedListLink } where T: ?Sized + Clone + 'a);
 /// ```
 #[macro_export]
 macro_rules! intrusive_adapter {
     (@impl
         $(#[$attr:meta])* $vis:vis $name:ident ($($args:tt),*)
-        = $pointer:ty: $value:path { $field:ident: $link:ty } $($where_:tt)*
+        = $pointer:ty: $value:path { $($fields:expr)+ => $link:ty } $($where_:tt)*
     ) => {
         #[allow(explicit_outlives_requirements)]
         $(#[$attr])*
@@ -207,13 +207,13 @@ macro_rules! intrusive_adapter {
 
             #[inline]
             unsafe fn get_value(&self, link: <Self::LinkOps as $crate::LinkOps>::LinkPtr) -> *const <Self::PointerOps as $crate::PointerOps>::Value {
-                $crate::container_of!(link.as_ptr(), $value, $field)
+                $crate::container_of!(link.as_ptr(), $value, $($fields)+)
             }
             #[inline]
             unsafe fn get_link(&self, value: *const <Self::PointerOps as $crate::PointerOps>::Value) -> <Self::LinkOps as $crate::LinkOps>::LinkPtr {
                 // We need to do this instead of just accessing the field directly
                 // to strictly follow the stack borrow rules.
-                let ptr = (value as *const u8).add($crate::offset_of!($value, $field));
+                let ptr = (value as *const u8).add($crate::offset_of!($value, $($fields)+));
                 core::ptr::NonNull::new_unchecked(ptr as *mut _)
             }
             #[inline]
@@ -274,8 +274,17 @@ mod tests {
         link: LinkedListLink,
     }
 
+    struct Wrapper {
+        obj: Obj,
+    }
+
     intrusive_adapter! {
         /// Test doc comment
-        ObjAdapter1 = Rc<Obj>: Obj { link: LinkedListLink }
+        ObjAdapter1 = Rc<Obj>: Obj { link => LinkedListLink }
+    }
+
+    intrusive_adapter! {
+        /// Test doc comment
+        WrapperAdapter1 = Rc<Wrapper>: Wrapper { obj.link => LinkedListLink }
     }
 }
