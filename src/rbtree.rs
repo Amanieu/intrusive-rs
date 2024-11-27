@@ -1770,7 +1770,7 @@ where
 
     /// Removes all elements from the `RBTree`.
     ///
-    /// This will unlink all object currently in the tree, which requires
+    /// This will unlink all objects currently in the tree, which requires
     /// iterating through all elements in the `RBTree`. Each element is
     /// converted back to an owned pointer and then dropped.
     #[inline]
@@ -1781,7 +1781,7 @@ where
     /// Removes all elements from the `RBTree` and calls a function on each
     /// to handle dropping the owned pointer.
     ///
-    /// This will unlink all object currently in the tree, which requires
+    /// This will unlink all objects currently in the tree, which requires
     /// iterating through all elements in the `RBTree`. Each element is
     /// converted back to an owned pointer and then dropped.
     #[inline]

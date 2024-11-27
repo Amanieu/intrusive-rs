@@ -1333,7 +1333,7 @@ where
 
     /// Removes all elements from the `LinkedList`.
     ///
-    /// This will unlink all object currently in the list, which requires
+    /// This will unlink all objects currently in the list, which requires
     /// iterating through all elements in the `LinkedList`. Each element is
     /// converted back to an owned pointer and then dropped.
     #[inline]
@@ -1344,7 +1344,7 @@ where
     /// Removes all elements from the `LinkedList` and calls a function on each
     /// to handle dropping the owned pointer.
     ///
-    /// This will unlink all object currently in the list, which requires
+    /// This will unlink all objects currently in the list, which requires
     /// iterating through all elements in the `LinkedList`. Each element is
     /// converted back to an owned pointer and then passed to the given
     /// `dropper` function.
