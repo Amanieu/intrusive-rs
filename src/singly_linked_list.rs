@@ -275,7 +275,7 @@ impl AtomicLink {
     ///
     /// # Safety
     ///
-    /// This can only be called after `acquire_link` has been succesfully called.
+    /// This can only be called after `acquire_link` has been successfully called.
     #[inline]
     unsafe fn next_exclusive(&self) -> &Cell<Option<NonNull<AtomicLink>>> {
         // This is safe because currently AtomicPtr<AtomicLink> has the same representation Cell<Option<NonNull<AtomicLink>>>.

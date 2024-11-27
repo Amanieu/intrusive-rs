@@ -18,7 +18,7 @@ use crate::pointer_ops::PointerOps;
 use crate::singly_linked_list::SinglyLinkedListOps;
 use crate::xor_linked_list::XorLinkedListOps;
 use crate::Adapter;
-// Necessary for Rust 1.56 compatability
+// Necessary for Rust 1.56 compatibility
 #[allow(unused_imports)]
 use crate::unchecked_option::UncheckedOptionExt;
 
@@ -323,7 +323,7 @@ impl AtomicLink {
     ///
     /// # Safety
     ///
-    /// This can only be called after `acquire_link` has been succesfully called.
+    /// This can only be called after `acquire_link` has been successfully called.
     #[inline]
     unsafe fn next_exclusive(&self) -> &Cell<Option<NonNull<AtomicLink>>> {
         // This is safe because currently AtomicPtr<AtomicLink> has the same representation Cell<Option<NonNull<AtomicLink>>>.

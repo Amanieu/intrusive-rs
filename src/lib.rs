@@ -25,7 +25,7 @@
 //! use intrusive_collections::{LinkedList, LinkedListLink};
 //! use std::cell::Cell;
 //!
-//! // A simple struct containing an instrusive link and a value
+//! // A simple struct containing an intrusive link and a value
 //! struct Test {
 //!     link: LinkedListLink,
 //!     value: Cell<i32>,
@@ -61,7 +61,7 @@
 //! list.front().get().unwrap().value.set(4);
 //! assert_eq!(list.iter().map(|x| x.value.get()).collect::<Vec<_>>(), [4, 2, 1]);
 //!
-//! // Removing an object from an instrusive collection gives us back the
+//! // Removing an object from an intrusive collection gives us back the
 //! // Box<Test> that we originally inserted into it.
 //! let a = list.pop_front().unwrap();
 //! assert_eq!(a.value.get(), 4);

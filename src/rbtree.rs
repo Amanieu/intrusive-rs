@@ -25,7 +25,7 @@ use crate::singly_linked_list::SinglyLinkedListOps;
 use crate::xor_linked_list::XorLinkedListOps;
 use crate::Adapter;
 use crate::KeyAdapter;
-// Necessary for Rust 1.56 compatability
+// Necessary for Rust 1.56 compatibility
 #[allow(unused_imports)]
 use crate::unchecked_option::UncheckedOptionExt;
 
@@ -410,7 +410,7 @@ impl AtomicLink {
     ///
     /// # Safety
     ///
-    /// This can only be called after `acquire_link` has been succesfully called.
+    /// This can only be called after `acquire_link` has been successfully called.
     #[inline]
     unsafe fn parent_color_exclusive(&self) -> &Cell<usize> {
         // This is safe because currently AtomicUsize has the same representation Cell<usize>.
