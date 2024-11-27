@@ -1740,7 +1740,13 @@ where
     }
 
     #[inline]
-    fn clear_recurse(&mut self, current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>) {
+    fn clear_recurse<F>(
+        &mut self,
+        current: Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+        dropper: &mut F,
+    ) where
+        F: FnMut(<A::PointerOps as PointerOps>::Pointer),
+    {
         use link_ops::LinkOps;
         // If adapter.get_value or Pointer::from_raw panic here, it will leak
         // the nodes and keep them linked. However this is harmless since there
@@ -1749,12 +1755,15 @@ where
             unsafe {
                 let left = self.adapter.link_ops_mut().left(current);
                 let right = self.adapter.link_ops_mut().right(current);
-                self.clear_recurse(left);
-                self.clear_recurse(right);
+                self.clear_recurse(left, dropper);
+                self.clear_recurse(right, dropper);
                 self.adapter.link_ops_mut().release_link(current);
-                self.adapter
-                    .pointer_ops()
-                    .from_raw(self.adapter.get_value(current));
+
+                dropper(
+                    self.adapter
+                        .pointer_ops()
+                        .from_raw(self.adapter.get_value(current)),
+                );
             }
         }
     }
@@ -1766,8 +1775,22 @@ where
     /// converted back to an owned pointer and then dropped.
     #[inline]
     pub fn clear(&mut self) {
+        self.clear_with(drop);
+    }
+
+    /// Removes all elements from the `RBTree` and calls a function on each
+    /// to handle dropping the owned pointer.
+    ///
+    /// This will unlink all object currently in the tree, which requires
+    /// iterating through all elements in the `RBTree`. Each element is
+    /// converted back to an owned pointer and then dropped.
+    #[inline]
+    pub fn clear_with<F>(&mut self, mut dropper: F)
+    where
+        F: FnMut(<A::PointerOps as PointerOps>::Pointer),
+    {
         let root = self.root.take();
-        self.clear_recurse(root);
+        self.clear_recurse(root, &mut dropper);
     }
 
     /// Empties the `RBTree` without unlinking or freeing objects in it.

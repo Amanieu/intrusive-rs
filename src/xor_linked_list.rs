@@ -1498,6 +1498,21 @@ where
     /// converted back to an owned pointer and then dropped.
     #[inline]
     pub fn clear(&mut self) {
+        self.clear_with(drop);
+    }
+
+    /// Removes all elements from the `XorLinkedList` and calls a function on each
+    /// to handle dropping the owned pointer.
+    ///
+    /// This will unlink all object currently in the list, which requires
+    /// iterating through all elements in the `XorLinkedList`. Each element is
+    /// converted back to an owned pointer and then passed to the given
+    /// `dropper` function.
+    #[inline]
+    pub fn clear_with<F>(&mut self, mut dropper: F)
+    where
+        F: FnMut(<A::PointerOps as PointerOps>::Pointer),
+    {
         use link_ops::LinkOps;
 
         let mut current = self.head;
@@ -1508,9 +1523,13 @@ where
             unsafe {
                 let next = self.adapter.link_ops().next(x, prev);
                 self.adapter.link_ops_mut().release_link(x);
-                self.adapter
-                    .pointer_ops()
-                    .from_raw(self.adapter.get_value(x));
+
+                dropper(
+                    self.adapter
+                        .pointer_ops()
+                        .from_raw(self.adapter.get_value(x)),
+                );
+
                 prev = current;
                 current = next;
             }
