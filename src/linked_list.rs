@@ -1577,6 +1577,22 @@ where
         self.list.pop_back()
     }
 }
+// Allow sending to another thread if the ownership of the container can be
+// transferred to another thread.
+unsafe impl<A: Adapter> Send for IntoIter<A>
+where
+    LinkedList<A>: Send,
+    A::LinkOps: LinkedListOps,
+{
+}
+// Allow read-only access to values from multiple threads since IntoIter is
+// essentially a wrapper around the container so similar rules apply.
+unsafe impl<A: Adapter> Sync for IntoIter<A>
+where
+    LinkedList<A>: Sync,
+    A::LinkOps: LinkedListOps,
+{
+}
 
 // =============================================================================
 // Tests
