@@ -29,14 +29,14 @@ use crate::pointer_ops::PointerOps;
 /// }
 ///
 /// // Adapter which returns a key by value
-/// intrusive_adapter!(MyAdapter = Box<S>: S { link : RBTreeLink });
+/// intrusive_adapter!(MyAdapter = Box<S>: S { link => RBTreeLink });
 /// impl<'a> KeyAdapter<'a> for MyAdapter {
 ///     type Key = u32;
 ///     fn get_key(&self, s: &'a S) -> u32 { s.key }
 /// }
 ///
 /// // Adapter which returns a key by reference
-/// intrusive_adapter!(MyAdapter2 = Box<S>: S { link : RBTreeLink });
+/// intrusive_adapter!(MyAdapter2 = Box<S>: S { link => RBTreeLink });
 /// impl<'a> KeyAdapter<'a> for MyAdapter2 {
 ///     type Key = &'a u32;
 ///     fn get_key(&self, s: &'a S) -> &'a u32 { &s.key }
@@ -51,7 +51,7 @@ use crate::pointer_ops::PointerOps;
 ///
 /// // Adapter which returns a tuple as a key. When used in a RBTree, this will
 /// // keep all elements sorted by `key1` first, then `key2` and finally `key3`.
-/// intrusive_adapter!(MyAdapter3 = Box<U>: U { link : RBTreeLink });
+/// intrusive_adapter!(MyAdapter3 = Box<U>: U { link => RBTreeLink });
 /// impl<'a> KeyAdapter<'a> for MyAdapter3 {
 ///     type Key = (i32, &'a str, f64);
 ///     fn get_key(&self, u: &'a U) -> Self::Key { (u.key1, &u.key2, u.key3) }

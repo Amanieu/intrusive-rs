@@ -2550,7 +2550,7 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    intrusive_adapter!(RcObjAdapter = Rc<Obj>: Obj { link: Link });
+    intrusive_adapter!(RcObjAdapter = Rc<Obj>: Obj { link => Link });
 
     impl<'a> KeyAdapter<'a> for RcObjAdapter {
         type Key = i32;
@@ -2559,7 +2559,7 @@ mod tests {
         }
     }
 
-    intrusive_adapter!(UnsafeRefObjAdapter = UnsafeRef<Obj>: Obj { link: Link });
+    intrusive_adapter!(UnsafeRefObjAdapter = UnsafeRef<Obj>: Obj { link => Link });
 
     impl<'a> KeyAdapter<'a> for UnsafeRefObjAdapter {
         type Key = i32;
@@ -3291,7 +3291,7 @@ mod tests {
             link: Link,
             value: &'a T,
         }
-        intrusive_adapter!(RcObjAdapter<'a, T> = &'a Obj<'a, T>: Obj<'a, T> {link: Link} where T: 'a);
+        intrusive_adapter!(RcObjAdapter<'a, T> = &'a Obj<'a, T>: Obj<'a, T> {link => Link} where T: 'a);
         impl<'a, 'b, T: 'a + 'b> KeyAdapter<'a> for RcObjAdapter<'b, T> {
             type Key = &'a T;
             fn get_key(&self, value: &'a Obj<'b, T>) -> &'a T {
@@ -3321,7 +3321,7 @@ mod tests {
                 link: Link,
                 value: usize,
             }
-            intrusive_adapter!(RcObjAdapter = $ptr<Obj>: Obj { link: Link });
+            intrusive_adapter!(RcObjAdapter = $ptr<Obj>: Obj { link => Link });
             impl<'a> KeyAdapter<'a> for RcObjAdapter {
                 type Key = usize;
                 fn get_key(&self, value: &'a Obj) -> usize {

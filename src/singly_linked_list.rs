@@ -1299,9 +1299,9 @@ mod tests {
             write!(f, "{}", self.value)
         }
     }
-    intrusive_adapter!(RcObjAdapter1 = Rc<Obj>: Obj { link1: Link });
-    intrusive_adapter!(RcObjAdapter2 = Rc<Obj>: Obj { link2: Link });
-    intrusive_adapter!(UnsafeRefObjAdapter1 = UnsafeRef<Obj>: Obj { link1: Link });
+    intrusive_adapter!(RcObjAdapter1 = Rc<Obj>: Obj { link1 => Link });
+    intrusive_adapter!(RcObjAdapter2 = Rc<Obj>: Obj { link2 => Link });
+    intrusive_adapter!(UnsafeRefObjAdapter1 = UnsafeRef<Obj>: Obj { link1 => Link });
 
     fn make_rc_obj(value: u32) -> Rc<Obj> {
         Rc::new(make_obj(value))
@@ -1653,7 +1653,7 @@ mod tests {
             link: Link,
             value: &'a T,
         }
-        intrusive_adapter!(ObjAdapter<'a, T> = &'a Obj<'a, T>: Obj<'a, T> {link: Link} where T: 'a);
+        intrusive_adapter!(ObjAdapter<'a, T> = &'a Obj<'a, T>: Obj<'a, T> {link => Link} where T: 'a);
 
         let v = 5;
         let a = Obj {
@@ -1677,7 +1677,7 @@ mod tests {
                 link: Link,
                 value: usize,
             }
-            intrusive_adapter!(ObjAdapter = $ptr<Obj>: Obj { link: Link });
+            intrusive_adapter!(ObjAdapter = $ptr<Obj>: Obj { link => Link });
 
             let a = $ptr::new(Obj {
                 link: Link::new(),
