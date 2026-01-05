@@ -286,7 +286,6 @@ mod adapter;
 mod key_adapter;
 mod link_ops;
 mod pointer_ops;
-mod unchecked_option;
 
 pub mod linked_list;
 pub mod rbtree;
