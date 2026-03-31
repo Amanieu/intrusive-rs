@@ -1081,6 +1081,16 @@ where
         Some(unsafe { &*self.tree.adapter.get_value(self.current?) })
     }
 
+    /// Returns a raw pointer to the object that the cursor is currently
+    /// pointing to.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null
+    /// object.
+    #[inline]
+    pub fn get_ptr(&self) -> Option<*const <A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { self.tree.adapter.get_value(self.current?) })
+    }
+
     /// Clones and returns the pointer that points to the element that the
     /// cursor is referencing.
     ///
@@ -1181,6 +1191,16 @@ where
     #[inline]
     pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Value> {
         Some(unsafe { &*self.tree.adapter.get_value(self.current?) })
+    }
+
+    /// Returns a raw pointer to the object that the cursor is currently
+    /// pointing to.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null
+    /// object.
+    #[inline]
+    pub fn get_ptr(&self) -> Option<*const <A::PointerOps as PointerOps>::Value> {
+        Some(unsafe { self.tree.adapter.get_value(self.current?) })
     }
 
     /// Returns a read-only cursor pointing to the current element.
@@ -2615,6 +2635,7 @@ mod tests {
         let mut cur = t.cursor_mut();
         assert!(cur.is_null());
         assert!(cur.get().is_none());
+        assert!(cur.get_ptr().is_none());
         assert!(cur.remove().is_none());
 
         cur.insert_before(a.clone());
@@ -2629,16 +2650,19 @@ mod tests {
         assert!(cur.peek_prev().is_null());
         assert!(!cur.is_null());
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
+        assert_eq!(cur.get_ptr().unwrap(), a.as_ref() as *const _);
 
         {
             let mut cur2 = cur.as_cursor();
             assert_eq!(cur2.get().unwrap() as *const _, a.as_ref() as *const _);
+            assert_eq!(cur2.get_ptr().unwrap(), a.as_ref() as *const _);
             assert_eq!(cur2.peek_next().get().unwrap().value, 2);
             cur2.move_next();
             assert_eq!(cur2.get().unwrap().value, 2);
             cur2.move_next();
             assert_eq!(cur2.peek_prev().get().unwrap().value, 2);
             assert_eq!(cur2.get().unwrap() as *const _, c.as_ref() as *const _);
+            assert_eq!(cur2.get_ptr().unwrap(), c.as_ref() as *const _);
             cur2.move_prev();
             assert_eq!(cur2.get().unwrap() as *const _, b.as_ref() as *const _);
             cur2.move_next();
@@ -2646,8 +2670,10 @@ mod tests {
             cur2.move_next();
             assert!(cur2.is_null());
             assert!(cur2.clone().get().is_none());
+            assert!(cur2.get_ptr().is_none());
         }
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
+        assert_eq!(cur.get_ptr().unwrap(), a.as_ref() as *const _);
 
         let a2 = make_rc_obj(1);
         let b2 = make_rc_obj(2);
