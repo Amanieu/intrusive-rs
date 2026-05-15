@@ -1087,8 +1087,11 @@ where
     /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get_ptr(&self) -> Option<*const <A::PointerOps as PointerOps>::Value> {
-        Some(unsafe { self.tree.adapter.get_value(self.current?) })
+    pub fn get_ptr(&self) -> Option<NonNull<<A::PointerOps as PointerOps>::Value>> {
+        unsafe {
+            let ptr = self.tree.adapter.get_value(self.current?);
+            Some(NonNull::new_unchecked(ptr.cast_mut()))
+        }
     }
 
     /// Clones and returns the pointer that points to the element that the
@@ -1199,8 +1202,11 @@ where
     /// This returns `None` if the cursor is currently pointing to the null
     /// object.
     #[inline]
-    pub fn get_ptr(&self) -> Option<*const <A::PointerOps as PointerOps>::Value> {
-        Some(unsafe { self.tree.adapter.get_value(self.current?) })
+    pub fn get_ptr(&self) -> Option<NonNull<<A::PointerOps as PointerOps>::Value>> {
+        unsafe {
+            let ptr = self.tree.adapter.get_value(self.current?);
+            Some(NonNull::new_unchecked(ptr.cast_mut()))
+        }
     }
 
     /// Returns a read-only cursor pointing to the current element.
@@ -2550,6 +2556,7 @@ mod tests {
     use super::{CursorOwning, Entry, KeyAdapter, Link, PointerOps, RBTree};
     use crate::{Bound::*, UnsafeRef};
     use alloc::boxed::Box;
+    use core::ptr::NonNull;
     use rand::prelude::*;
     use rand_xorshift::XorShiftRng;
     use std::fmt;
@@ -2650,19 +2657,19 @@ mod tests {
         assert!(cur.peek_prev().is_null());
         assert!(!cur.is_null());
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
-        assert_eq!(cur.get_ptr().unwrap(), a.as_ref() as *const _);
+        assert_eq!(cur.get_ptr().unwrap(), NonNull::from(a.as_ref()));
 
         {
             let mut cur2 = cur.as_cursor();
             assert_eq!(cur2.get().unwrap() as *const _, a.as_ref() as *const _);
-            assert_eq!(cur2.get_ptr().unwrap(), a.as_ref() as *const _);
+            assert_eq!(cur2.get_ptr().unwrap(), NonNull::from(a.as_ref()));
             assert_eq!(cur2.peek_next().get().unwrap().value, 2);
             cur2.move_next();
             assert_eq!(cur2.get().unwrap().value, 2);
             cur2.move_next();
             assert_eq!(cur2.peek_prev().get().unwrap().value, 2);
             assert_eq!(cur2.get().unwrap() as *const _, c.as_ref() as *const _);
-            assert_eq!(cur2.get_ptr().unwrap(), c.as_ref() as *const _);
+            assert_eq!(cur2.get_ptr().unwrap(), NonNull::from(c.as_ref()));
             cur2.move_prev();
             assert_eq!(cur2.get().unwrap() as *const _, b.as_ref() as *const _);
             cur2.move_next();
@@ -2673,7 +2680,7 @@ mod tests {
             assert!(cur2.get_ptr().is_none());
         }
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
-        assert_eq!(cur.get_ptr().unwrap(), a.as_ref() as *const _);
+        assert_eq!(cur.get_ptr().unwrap(), NonNull::from(a.as_ref()));
 
         let a2 = make_rc_obj(1);
         let b2 = make_rc_obj(2);
