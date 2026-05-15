@@ -145,6 +145,10 @@
 //! `CursorMut` can be used to mutate the collection, but you may only use one
 //! of them at a time.
 //!
+//! Use `get` to access the current element by reference, or `get_ptr` to obtain
+//! the raw pointer for pointer identity or FFI interop. Both return `None` when
+//! the cursor is pointing at the null position.
+//!
 //! Cursors are a very powerful abstraction since they allow a collection to be
 //! mutated safely while it is being iterated on. For example, here is a
 //! function which removes all values within a given range from a `RBTree`:
