@@ -1,7 +1,7 @@
 intrusive-collections
 =====================
 
-[![Build Status](https://travis-ci.org/Amanieu/intrusive-rs.svg?branch=master)](https://travis-ci.org/Amanieu/intrusive-rs) [![Coverage Status](https://coveralls.io/repos/github/Amanieu/intrusive-rs/badge.svg?branch=master)](https://coveralls.io/github/Amanieu/intrusive-rs?branch=master) [![Crates.io](https://img.shields.io/crates/v/intrusive-collections.svg)](https://crates.io/crates/intrusive-collections)
+[![Build Status](https://github.com/Amanieu/intrusive-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/Amanieu/intrusive-rs/actions) [![Coverage Status](https://coveralls.io/repos/github/Amanieu/intrusive-rs/badge.svg?branch=master)](https://coveralls.io/github/Amanieu/intrusive-rs?branch=master) [![Crates.io](https://img.shields.io/crates/v/intrusive-collections.svg)](https://crates.io/crates/intrusive-collections)
 
 A Rust library for creating intrusive collections. Currently supports singly-linked and doubly-linked lists, as well as red-black trees.
 
