@@ -271,15 +271,17 @@ impl AtomicLink {
         self.next.store(ATOMIC_UNLINKED_MARKER, Ordering::Release);
     }
 
-    /// Access the `next` pointer in an exclusive context.
-    ///
-    /// # Safety
-    ///
-    /// This can only be called after `acquire_link` has been succesfully called.
     #[inline]
-    unsafe fn next_exclusive(&self) -> &Cell<Option<NonNull<AtomicLink>>> {
-        // This is safe because currently AtomicPtr<AtomicLink> has the same representation Cell<Option<NonNull<AtomicLink>>>.
-        core::mem::transmute(&self.next)
+    fn next(&self) -> Option<NonNull<AtomicLink>> {
+        NonNull::new(self.next.load(Ordering::Relaxed))
+    }
+
+    #[inline]
+    fn set_next(&self, next: Option<NonNull<AtomicLink>>) {
+        self.next.store(
+            next.map(|x| x.as_ptr()).unwrap_or(null_mut()),
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -359,12 +361,12 @@ unsafe impl link_ops::LinkOps for AtomicLinkOps {
 unsafe impl SinglyLinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        ptr.as_ref().next_exclusive().get()
+        ptr.as_ref().next()
     }
 
     #[inline]
     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
-        ptr.as_ref().next_exclusive().set(next);
+        ptr.as_ref().set_next(next);
     }
 }
 
@@ -377,8 +379,7 @@ unsafe impl XorLinkedListOps for AtomicLinkOps {
     ) -> Option<Self::LinkPtr> {
         let packed = ptr
             .as_ref()
-            .next_exclusive()
-            .get()
+            .next()
             .map(|x| x.as_ptr() as usize)
             .unwrap_or(0);
         let raw = packed ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
@@ -394,8 +395,7 @@ unsafe impl XorLinkedListOps for AtomicLinkOps {
     ) -> Option<Self::LinkPtr> {
         let packed = ptr
             .as_ref()
-            .next_exclusive()
-            .get()
+            .next()
             .map(|x| x.as_ptr() as usize)
             .unwrap_or(0);
         let raw = packed ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
@@ -413,7 +413,7 @@ unsafe impl XorLinkedListOps for AtomicLinkOps {
             ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
 
         let new_next = NonNull::new(new_packed as *mut _);
-        ptr.as_ref().next_exclusive().set(new_next);
+        ptr.as_ref().set_next(new_next);
     }
 
     #[inline]
@@ -425,8 +425,7 @@ unsafe impl XorLinkedListOps for AtomicLinkOps {
     ) {
         let packed = ptr
             .as_ref()
-            .next_exclusive()
-            .get()
+            .next()
             .map(|x| x.as_ptr() as usize)
             .unwrap_or(0);
         let new_packed = packed
@@ -434,7 +433,7 @@ unsafe impl XorLinkedListOps for AtomicLinkOps {
             ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
 
         let new_next = NonNull::new(new_packed as *mut _);
-        ptr.as_ref().next_exclusive().set(new_next);
+        ptr.as_ref().set_next(new_next);
     }
 }
 
@@ -1743,5 +1742,50 @@ mod tests {
     #[test]
     fn test_clone_pointer_arc() {
         test_clone_pointer!(Arc, std::sync::Arc);
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn atomic_link_is_linked_races_with_list_mutation() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+
+        struct Obj {
+            link: super::AtomicLink,
+            value: usize,
+        }
+        intrusive_adapter!(ObjAdapter = Arc<Obj>: Obj { link => super::AtomicLink });
+
+        let obj = Arc::new(Obj {
+            link: super::AtomicLink::new(),
+            value: 1,
+        });
+        let mut list = SinglyLinkedList::new(ObjAdapter::new());
+        list.push_front(obj.clone());
+
+        let mutation_done = AtomicBool::new(false);
+        thread::scope(|scope| {
+            let obj = &obj;
+            let reader_done = &mutation_done;
+            scope.spawn(move || {
+                while !reader_done.load(Ordering::Relaxed) {
+                    thread::yield_now();
+                }
+                // UB: `AtomicLink::is_linked` performs an atomic load, but
+                // `AtomicLinkOps` writes the same `next` pointer through a
+                // transmuted `Cell` while safe list mutation is in progress.
+                let _ = obj.link.is_linked();
+            });
+
+            let list = &mut list;
+            let writer_done = &mutation_done;
+            scope.spawn(move || {
+                let value = list.pop_front().unwrap();
+                assert_eq!(value.value, 1);
+                list.push_front(value);
+                writer_done.store(true, Ordering::Relaxed);
+            });
+        });
     }
 }

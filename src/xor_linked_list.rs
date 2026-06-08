@@ -294,15 +294,14 @@ impl AtomicLink {
         self.packed.store(UNLINKED_MARKER, Ordering::Release);
     }
 
-    /// Access the `packed` pointer in an exclusive context.
-    ///
-    /// # Safety
-    ///
-    /// This can only be called after `acquire_link` has been succesfully called.
     #[inline]
-    unsafe fn packed_exclusive(&self) -> &Cell<usize> {
-        // This is safe because currently AtomicUsize has the same representation Cell<usize>.
-        core::mem::transmute(&self.packed)
+    fn packed(&self) -> usize {
+        self.packed.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    fn set_packed(&self, packed: usize) {
+        self.packed.store(packed, Ordering::Relaxed);
     }
 }
 
@@ -388,8 +387,7 @@ unsafe impl XorLinkedListOps for AtomicLinkOps {
         ptr: Self::LinkPtr,
         prev: Option<Self::LinkPtr>,
     ) -> Option<Self::LinkPtr> {
-        let raw =
-            ptr.as_ref().packed_exclusive().get() ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = ptr.as_ref().packed() ^ prev.map(|x| x.as_ptr() as usize).unwrap_or(0);
         NonNull::new(raw as *mut _)
     }
 
@@ -399,8 +397,7 @@ unsafe impl XorLinkedListOps for AtomicLinkOps {
         ptr: Self::LinkPtr,
         next: Option<Self::LinkPtr>,
     ) -> Option<Self::LinkPtr> {
-        let raw =
-            ptr.as_ref().packed_exclusive().get() ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
+        let raw = ptr.as_ref().packed() ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
         NonNull::new(raw as *mut _)
     }
 
@@ -413,7 +410,7 @@ unsafe impl XorLinkedListOps for AtomicLinkOps {
     ) {
         let new_packed = prev.map(|x| x.as_ptr() as usize).unwrap_or(0)
             ^ next.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        ptr.as_ref().packed_exclusive().set(new_packed);
+        ptr.as_ref().set_packed(new_packed);
     }
 
     #[inline]
@@ -423,26 +420,25 @@ unsafe impl XorLinkedListOps for AtomicLinkOps {
         old: Option<Self::LinkPtr>,
         new: Option<Self::LinkPtr>,
     ) {
-        let new_packed = ptr.as_ref().packed_exclusive().get()
+        let new_packed = ptr.as_ref().packed()
             ^ old.map(|x| x.as_ptr() as usize).unwrap_or(0)
             ^ new.map(|x| x.as_ptr() as usize).unwrap_or(0);
 
-        ptr.as_ref().packed_exclusive().set(new_packed);
+        ptr.as_ref().set_packed(new_packed);
     }
 }
 
 unsafe impl SinglyLinkedListOps for AtomicLinkOps {
     #[inline]
     unsafe fn next(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        let raw = ptr.as_ref().packed_exclusive().get();
+        let raw = ptr.as_ref().packed();
         NonNull::new(raw as *mut _)
     }
 
     #[inline]
     unsafe fn set_next(&mut self, ptr: Self::LinkPtr, next: Option<Self::LinkPtr>) {
         ptr.as_ref()
-            .packed_exclusive()
-            .set(next.map(|x| x.as_ptr() as usize).unwrap_or(0));
+            .set_packed(next.map(|x| x.as_ptr() as usize).unwrap_or(0));
     }
 }
 
@@ -2510,5 +2506,50 @@ mod tests {
         }
 
         let _ = list.iter().map(|x| x.value).collect::<Vec<_>>();
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn atomic_link_is_linked_races_with_list_mutation() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+
+        struct Obj {
+            link: super::AtomicLink,
+            value: usize,
+        }
+        intrusive_adapter!(ObjAdapter = Arc<Obj>: Obj { link => super::AtomicLink });
+
+        let obj = Arc::new(Obj {
+            link: super::AtomicLink::new(),
+            value: 1,
+        });
+        let mut list = XorLinkedList::new(ObjAdapter::new());
+        list.push_back(obj.clone());
+
+        let mutation_done = AtomicBool::new(false);
+        thread::scope(|scope| {
+            let obj = &obj;
+            let reader_done = &mutation_done;
+            scope.spawn(move || {
+                while !reader_done.load(Ordering::Relaxed) {
+                    thread::yield_now();
+                }
+                // UB: `AtomicLink::is_linked` performs an atomic load, but
+                // `AtomicLinkOps` updates the packed link word through a
+                // transmuted `Cell` during safe list mutation.
+                let _ = obj.link.is_linked();
+            });
+
+            let list = &mut list;
+            let writer_done = &mutation_done;
+            scope.spawn(move || {
+                let value = list.pop_front().unwrap();
+                assert_eq!(value.value, 1);
+                list.push_back(value);
+                writer_done.store(true, Ordering::Relaxed);
+            });
+        });
     }
 }

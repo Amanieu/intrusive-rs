@@ -403,15 +403,15 @@ impl AtomicLink {
             .store(UNLINKED_MARKER, atomic::Ordering::Release);
     }
 
-    /// Access `parent_color` in an exclusive context.
-    ///
-    /// # Safety
-    ///
-    /// This can only be called after `acquire_link` has been succesfully called.
     #[inline]
-    unsafe fn parent_color_exclusive(&self) -> &Cell<usize> {
-        // This is safe because currently AtomicUsize has the same representation Cell<usize>.
-        core::mem::transmute(&self.parent_color)
+    fn parent_color(&self) -> usize {
+        self.parent_color.load(atomic::Ordering::Relaxed)
+    }
+
+    #[inline]
+    fn set_parent_color(&self, parent_color: usize) {
+        self.parent_color
+            .store(parent_color, atomic::Ordering::Relaxed);
     }
 }
 
@@ -478,9 +478,7 @@ impl AtomicLinkOps {
             Color::Black => 1,
         };
         let parent_usize = parent.map(|x| x.as_ptr() as usize).unwrap_or(0);
-        ptr.as_ref()
-            .parent_color_exclusive()
-            .set((parent_usize & !1) | bit);
+        ptr.as_ref().set_parent_color((parent_usize & !1) | bit);
     }
 }
 
@@ -523,13 +521,13 @@ unsafe impl RBTreeOps for AtomicLinkOps {
 
     #[inline]
     unsafe fn parent(&self, ptr: Self::LinkPtr) -> Option<Self::LinkPtr> {
-        let parent_usize = ptr.as_ref().parent_color_exclusive().get() & !1;
+        let parent_usize = ptr.as_ref().parent_color() & !1;
         NonNull::new(parent_usize as *mut AtomicLink)
     }
 
     #[inline]
     unsafe fn color(&self, ptr: Self::LinkPtr) -> Color {
-        if ptr.as_ref().parent_color_exclusive().get() & 1 == 1 {
+        if ptr.as_ref().parent_color() & 1 == 1 {
             Color::Black
         } else {
             Color::Red
@@ -3480,5 +3478,59 @@ mod tests {
         // node, but it leaves `head` pointing at that removed node. Alternating
         // back to `next` dereferences the freed link.
         let _ = iter.next();
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn atomic_link_is_linked_races_with_tree_mutation() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        struct Obj {
+            link: super::AtomicLink,
+            value: i32,
+        }
+        intrusive_adapter!(ObjAdapter = Arc<Obj>: Obj { link => super::AtomicLink });
+        impl<'a> KeyAdapter<'a> for ObjAdapter {
+            type Key = i32;
+
+            fn get_key(&self, value: &'a Obj) -> i32 {
+                value.value
+            }
+        }
+
+        let obj = Arc::new(Obj {
+            link: super::AtomicLink::new(),
+            value: 1,
+        });
+        let mut tree = RBTree::new(ObjAdapter::new());
+        tree.insert(obj.clone());
+
+        let barrier = Barrier::new(3);
+        thread::scope(|scope| {
+            let obj = &obj;
+            let reader_barrier = &barrier;
+            scope.spawn(move || {
+                reader_barrier.wait();
+                // UB: `AtomicLink::is_linked` performs an atomic load, but
+                // `AtomicLinkOps` updates the same `parent_color` word through
+                // a transmuted `Cell` during safe tree insertion. An outside
+                // `Arc` holder can observe it concurrently.
+                let _ = obj.link.is_linked();
+                reader_barrier.wait();
+            });
+
+            let tree = &mut tree;
+            let writer_barrier = &barrier;
+            scope.spawn(move || {
+                writer_barrier.wait();
+                let value = tree.front_mut().remove().unwrap();
+                tree.insert(value);
+                writer_barrier.wait();
+            });
+
+            barrier.wait();
+            barrier.wait();
+        });
     }
 }
