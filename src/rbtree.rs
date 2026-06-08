@@ -2207,6 +2207,7 @@ where
 unsafe impl<A: Adapter + Sync> Sync for RBTree<A>
 where
     <A::PointerOps as PointerOps>::Value: Sync,
+    <A::PointerOps as PointerOps>::Pointer: Sync,
     A::LinkOps: RBTreeOps,
 {
 }

@@ -1620,6 +1620,7 @@ where
 unsafe impl<A: Adapter + Sync> Sync for XorLinkedList<A>
 where
     <A::PointerOps as PointerOps>::Value: Sync,
+    <A::PointerOps as PointerOps>::Pointer: Sync,
     A::LinkOps: XorLinkedListOps,
 {
 }
