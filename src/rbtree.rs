@@ -2451,25 +2451,31 @@ where
         use link_ops::LinkOps;
 
         let head = self.head?;
+        let is_tail = Some(head) == self.tail;
         let link_ops = self.tree.adapter.link_ops_mut();
         unsafe {
+            let parent = link_ops.parent(head);
+            let right = link_ops.right(head);
+
             // Remove the node from the tree. Since head is always the
             // left-most node, we can infer the following:
             // - head.left is null.
             // - head is a left child of its parent (or the root node).
-            if let Some(parent) = link_ops.parent(head) {
-                link_ops.set_left(parent, link_ops.right(head));
+            if let Some(parent) = parent {
+                link_ops.set_left(parent, right);
             } else {
-                self.tree.root = link_ops.right(head);
-                if link_ops.right(head).is_none() {
-                    self.tail = None;
-                }
+                self.tree.root = right;
             }
-            if let Some(right) = link_ops.right(head) {
-                link_ops.set_parent(right, link_ops.parent(head));
+            if let Some(right) = right {
+                link_ops.set_parent(right, parent);
+            }
+            if is_tail {
+                self.head = None;
+                self.tail = None;
+            } else if let Some(right) = right {
                 self.head = Some(first_child(link_ops, right));
             } else {
-                self.head = link_ops.parent(head);
+                self.head = parent;
             }
             link_ops.release_link(head);
             Some(
@@ -2490,25 +2496,31 @@ where
         use link_ops::LinkOps;
 
         let tail = self.tail?;
+        let is_head = Some(tail) == self.head;
         let link_ops = self.tree.adapter.link_ops_mut();
         unsafe {
+            let parent = link_ops.parent(tail);
+            let left = link_ops.left(tail);
+
             // Remove the node from the tree. Since tail is always the
             // right-most node, we can infer the following:
             // - tail.right is null.
             // - tail is a right child of its parent (or the root node).
-            if let Some(parent) = link_ops.parent(tail) {
-                link_ops.set_right(parent, link_ops.left(tail));
+            if let Some(parent) = parent {
+                link_ops.set_right(parent, left);
             } else {
-                self.tree.root = link_ops.left(tail);
-                if link_ops.left(tail).is_none() {
-                    self.tail = None;
-                }
+                self.tree.root = left;
             }
-            if let Some(left) = link_ops.left(tail) {
-                link_ops.set_parent(left, link_ops.parent(tail));
+            if let Some(left) = left {
+                link_ops.set_parent(left, parent);
+            }
+            if is_head {
+                self.head = None;
+                self.tail = None;
+            } else if let Some(left) = left {
                 self.tail = Some(last_child(link_ops, left));
             } else {
-                self.tail = link_ops.parent(tail);
+                self.tail = parent;
             }
             link_ops.release_link(tail);
             Some(
