@@ -3084,6 +3084,60 @@ mod tests {
     }
 
     #[test]
+    fn into_iter_alternating_ends() {
+        fn build_tree(values: &[i32]) -> RBTree<RcObjAdapter> {
+            let mut tree = RBTree::new(RcObjAdapter::new());
+            for value in values {
+                tree.insert(make_rc_obj(*value));
+            }
+            tree
+        }
+
+        for len in 0..16 {
+            let ascending = (0..len).collect::<Vec<_>>();
+            let descending = (0..len).rev().collect::<Vec<_>>();
+            let mut zigzag = Vec::new();
+            let mut low = 0;
+            let mut high = len;
+            while low < high {
+                zigzag.push(low);
+                low += 1;
+                if low < high {
+                    high -= 1;
+                    zigzag.push(high);
+                }
+            }
+
+            let mut expected = Vec::new();
+            let mut front = 0;
+            let mut back = len;
+            while front < back {
+                back -= 1;
+                expected.push(back);
+                if front < back {
+                    expected.push(front);
+                    front += 1;
+                }
+            }
+
+            for values in [&ascending[..], &descending[..], &zigzag[..]] {
+                let mut iter = build_tree(values).into_iter();
+                let mut removed = Vec::new();
+                loop {
+                    match iter.next_back() {
+                        Some(value) => removed.push(value.value),
+                        None => break,
+                    }
+                    if let Some(value) = iter.next() {
+                        removed.push(value.value);
+                    }
+                }
+                assert_eq!(removed, expected);
+            }
+        }
+    }
+
+    #[test]
     fn test_find() {
         let v = (0..10).map(|x| make_rc_obj(x * 10)).collect::<Vec<_>>();
         let mut t = RBTree::new(RcObjAdapter::new());

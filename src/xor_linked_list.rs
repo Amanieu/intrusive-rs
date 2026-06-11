@@ -2064,6 +2064,45 @@ mod tests {
     }
 
     #[test]
+    fn splice_boundary_cases() {
+        let values =
+            |list: &XorLinkedList<RcObjAdapter1>| list.iter().map(|x| x.value).collect::<Vec<_>>();
+
+        let mut list = XorLinkedList::new(RcObjAdapter1::new());
+        for value in [1, 2, 3] {
+            list.push_back(make_rc_obj(value));
+        }
+        let mut inserted = XorLinkedList::new(RcObjAdapter1::new());
+        inserted.push_back(make_rc_obj(4));
+        inserted.push_back(make_rc_obj(5));
+        list.back_mut().splice_before(inserted);
+        assert_eq!(values(&list), [1, 2, 4, 5, 3]);
+        assert_eq!(list.back().get().unwrap().value, 3);
+        assert_eq!(
+            list.iter().rev().map(|x| x.value).collect::<Vec<_>>(),
+            [3, 5, 4, 2, 1]
+        );
+
+        let mut inserted = XorLinkedList::new(RcObjAdapter1::new());
+        inserted.push_back(make_rc_obj(6));
+        list.front_mut().splice_before(inserted);
+        assert_eq!(values(&list), [6, 1, 2, 4, 5, 3]);
+        assert_eq!(list.front().get().unwrap().value, 6);
+
+        let mut inserted = XorLinkedList::new(RcObjAdapter1::new());
+        inserted.push_back(make_rc_obj(7));
+        list.cursor_mut().splice_before(inserted);
+        assert_eq!(values(&list), [6, 1, 2, 4, 5, 3, 7]);
+        assert_eq!(list.back().get().unwrap().value, 7);
+
+        let mut inserted = XorLinkedList::new(RcObjAdapter1::new());
+        inserted.push_back(make_rc_obj(8));
+        list.cursor_mut().splice_after(inserted);
+        assert_eq!(values(&list), [8, 6, 1, 2, 4, 5, 3, 7]);
+        assert_eq!(list.front().get().unwrap().value, 8);
+    }
+
+    #[test]
     fn test_iter() {
         let mut l = XorLinkedList::new(RcObjAdapter1::new());
         let a = make_rc_obj(1);
