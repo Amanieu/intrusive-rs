@@ -514,6 +514,19 @@ where
         Some(unsafe { &*self.list.adapter.get_value(self.current?) })
     }
 
+    /// Returns a raw pointer to the object that the cursor is currently
+    /// pointing to.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null
+    /// object.
+    #[inline]
+    pub fn get_ptr(&self) -> Option<NonNull<<A::PointerOps as PointerOps>::Value>> {
+        unsafe {
+            let ptr = self.list.adapter.get_value(self.current?);
+            Some(NonNull::new_unchecked(ptr.cast_mut()))
+        }
+    }
+
     /// Clones and returns the pointer that points to the element that the
     /// cursor is referencing.
     ///
@@ -625,6 +638,19 @@ where
     #[inline]
     pub fn get(&self) -> Option<&<A::PointerOps as PointerOps>::Value> {
         Some(unsafe { &*self.list.adapter.get_value(self.current?) })
+    }
+
+    /// Returns a raw pointer to the object that the cursor is currently
+    /// pointing to.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null
+    /// object.
+    #[inline]
+    pub fn get_ptr(&self) -> Option<NonNull<<A::PointerOps as PointerOps>::Value>> {
+        unsafe {
+            let ptr = self.list.adapter.get_value(self.current?);
+            Some(NonNull::new_unchecked(ptr.cast_mut()))
+        }
     }
 
     /// Returns a read-only cursor pointing to the current element.
@@ -1771,6 +1797,7 @@ mod tests {
     use super::{CursorOwning, Link, XorLinkedList};
     use core::cell::Cell;
     use core::ptr;
+    use core::ptr::NonNull;
     use std::boxed::Box;
     use std::fmt;
     use std::format;
@@ -1838,6 +1865,7 @@ mod tests {
         let mut cur = l.cursor_mut();
         assert!(cur.is_null());
         assert!(cur.get().is_none());
+        assert!(cur.get_ptr().is_none());
         assert!(cur.remove().is_none());
         assert_eq!(
             cur.replace_with(a.clone()).unwrap_err().as_ref() as *const _,
@@ -1856,16 +1884,19 @@ mod tests {
         assert!(cur.peek_prev().is_null());
         assert!(!cur.is_null());
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
+        assert_eq!(cur.get_ptr().unwrap(), NonNull::from(a.as_ref()));
 
         {
             let mut cur2 = cur.as_cursor();
             assert_eq!(cur2.get().unwrap() as *const _, a.as_ref() as *const _);
+            assert_eq!(cur2.get_ptr().unwrap(), NonNull::from(a.as_ref()));
             assert_eq!(cur2.peek_next().get().unwrap().value, 2);
             cur2.move_next();
             assert_eq!(cur2.get().unwrap().value, 2);
             cur2.move_next();
             assert_eq!(cur2.peek_prev().get().unwrap().value, 2);
             assert_eq!(cur2.get().unwrap() as *const _, c.as_ref() as *const _);
+            assert_eq!(cur2.get_ptr().unwrap(), NonNull::from(c.as_ref()));
             cur2.move_prev();
             assert_eq!(cur2.get().unwrap() as *const _, b.as_ref() as *const _);
             cur2.move_next();
@@ -1873,8 +1904,10 @@ mod tests {
             cur2.move_next();
             assert!(cur2.is_null());
             assert!(cur2.clone().get().is_none());
+            assert!(cur2.get_ptr().is_none());
         }
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
+        assert_eq!(cur.get_ptr().unwrap(), NonNull::from(a.as_ref()));
 
         cur.move_next();
         assert_eq!(
@@ -1882,10 +1915,12 @@ mod tests {
             b.as_ref() as *const _
         );
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
+        assert_eq!(cur.get_ptr().unwrap(), NonNull::from(c.as_ref()));
         cur.insert_after(b.clone());
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
         cur.move_prev();
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
+        assert_eq!(cur.get_ptr().unwrap(), NonNull::from(a.as_ref()));
         assert_eq!(
             cur.remove().unwrap().as_ref() as *const _,
             a.as_ref() as *const _
@@ -1893,6 +1928,7 @@ mod tests {
         assert!(!a.link1.is_linked());
         assert!(c.link1.is_linked());
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
+        assert_eq!(cur.get_ptr().unwrap(), NonNull::from(c.as_ref()));
         assert_eq!(
             cur.replace_with(a.clone()).unwrap().as_ref() as *const _,
             c.as_ref() as *const _
@@ -1900,6 +1936,7 @@ mod tests {
         assert!(a.link1.is_linked());
         assert!(!c.link1.is_linked());
         assert_eq!(cur.get().unwrap() as *const _, a.as_ref() as *const _);
+        assert_eq!(cur.get_ptr().unwrap(), NonNull::from(a.as_ref()));
         cur.move_next();
         assert_eq!(
             cur.replace_with(c.clone()).unwrap().as_ref() as *const _,
@@ -1909,6 +1946,7 @@ mod tests {
         assert!(!b.link1.is_linked());
         assert!(c.link1.is_linked());
         assert_eq!(cur.get().unwrap() as *const _, c.as_ref() as *const _);
+        assert_eq!(cur.get_ptr().unwrap(), NonNull::from(c.as_ref()));
     }
 
     #[test]
