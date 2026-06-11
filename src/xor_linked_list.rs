@@ -964,11 +964,14 @@ where
                         link_ops.replace_next_or_prev(head, None, Some(x));
                         link_ops.replace_next_or_prev(x, None, Some(head));
                     }
-                    self.list.head = list.head;
-                    self.next = list.head;
-                }
-                if self.list.tail == self.current {
                     self.list.tail = list.tail;
+                    self.prev = self.list.tail;
+                }
+                if self.list.head == self.current {
+                    self.list.head = list.head;
+                }
+                if self.current.is_none() {
+                    self.next = self.list.head;
                 }
                 list.head = None;
                 list.tail = None;
