@@ -3352,4 +3352,35 @@ mod tests {
     fn test_clone_pointer_arc() {
         test_clone_pointer!(Arc, std::sync::Arc);
     }
+
+    #[cfg(miri)]
+    #[test]
+    fn into_iter_next_after_next_back_uses_removed_tail() {
+        struct Obj {
+            link: Link,
+            value: i32,
+        }
+        intrusive_adapter!(ObjAdapter = Box<Obj>: Obj { link => Link });
+        impl<'a> KeyAdapter<'a> for ObjAdapter {
+            type Key = i32;
+
+            fn get_key(&self, value: &'a Obj) -> i32 {
+                value.value
+            }
+        }
+
+        let mut tree = RBTree::new(ObjAdapter::new());
+        tree.insert(Box::new(Obj {
+            link: Link::new(),
+            value: 1,
+        }));
+
+        let mut iter = tree.into_iter();
+        drop(iter.next_back().unwrap());
+
+        // UB: `IntoIter::next_back` clears `tail` when it removes the only
+        // node, but it leaves `head` pointing at that removed node. Alternating
+        // back to `next` dereferences the freed link.
+        let _ = iter.next();
+    }
 }

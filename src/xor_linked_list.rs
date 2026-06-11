@@ -2339,4 +2339,88 @@ mod tests {
     fn test_clone_pointer_arc() {
         test_clone_pointer!(Arc, std::sync::Arc);
     }
+
+    #[cfg(miri)]
+    #[test]
+    fn splice_before_head_corrupts_head_link() {
+        struct Obj {
+            link: Link,
+            value: u32,
+        }
+        intrusive_adapter!(ObjAdapter = Box<Obj>: Obj { link => Link });
+
+        let mut list = XorLinkedList::new(ObjAdapter::new());
+        list.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 1,
+        }));
+        list.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 2,
+        }));
+
+        let mut inserted = XorLinkedList::new(ObjAdapter::new());
+        inserted.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 3,
+        }));
+        inserted.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 4,
+        }));
+
+        {
+            let mut cursor = list.front_mut();
+            // UB: splicing before the current head should move `list.head` to
+            // the spliced list's head. The implementation leaves `head`
+            // pointing at the old node even though that node now has a
+            // previous neighbor, so traversal reconstructs and dereferences a
+            // bogus XOR pointer.
+            cursor.splice_before(inserted);
+        }
+
+        let _ = list.iter().map(|x| x.value).collect::<Vec<_>>();
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn splice_before_null_corrupts_tail_link() {
+        struct Obj {
+            link: Link,
+            value: u32,
+        }
+        intrusive_adapter!(ObjAdapter = Box<Obj>: Obj { link => Link });
+
+        let mut list = XorLinkedList::new(ObjAdapter::new());
+        list.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 1,
+        }));
+        list.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 2,
+        }));
+
+        let mut inserted = XorLinkedList::new(ObjAdapter::new());
+        inserted.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 3,
+        }));
+        inserted.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 4,
+        }));
+
+        {
+            let mut cursor = list.cursor_mut();
+            // UB: splicing before the null cursor means appending to the
+            // non-empty list. The implementation overwrites `head` instead of
+            // updating `tail`, making the new head encode a non-null previous
+            // pointer. Iteration then materializes and dereferences an invalid
+            // pointer.
+            cursor.splice_before(inserted);
+        }
+
+        let _ = list.iter().map(|x| x.value).collect::<Vec<_>>();
+    }
 }
