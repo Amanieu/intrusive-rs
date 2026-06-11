@@ -464,6 +464,28 @@ unsafe fn link_between<T: XorLinkedListOps>(
     link_ops.set(ptr, prev, next);
 }
 
+/// Splices the non-empty range from `start` to `end` between `prev` and `next`.
+///
+/// This only rewires the XOR links. Callers must update list endpoints and
+/// cursor state separately.
+#[inline]
+unsafe fn splice_between<T: XorLinkedListOps>(
+    link_ops: &mut T,
+    start: T::LinkPtr,
+    end: T::LinkPtr,
+    prev: Option<T::LinkPtr>,
+    next: Option<T::LinkPtr>,
+) {
+    if let Some(prev) = prev {
+        link_ops.replace_next_or_prev(prev, next, Some(start));
+    }
+    if let Some(next) = next {
+        link_ops.replace_next_or_prev(next, prev, Some(end));
+    }
+    link_ops.replace_next_or_prev(start, None, prev);
+    link_ops.replace_next_or_prev(end, None, next);
+}
+
 // =============================================================================
 // Cursor, CursorMut, CursorOwning
 // =============================================================================
@@ -913,24 +935,18 @@ where
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
-                if let Some(current) = self.current {
-                    if let Some(next) = self.next {
-                        link_ops.replace_next_or_prev(next, Some(current), Some(tail));
-                        link_ops.replace_next_or_prev(tail, None, Some(next));
-                    }
-                    link_ops.replace_next_or_prev(head, None, Some(current));
+                splice_between(link_ops, head, tail, self.current, self.next);
+                if self.current.is_some() {
                     self.next = list.head;
-                    link_ops.set(current, self.prev, self.next);
                 } else {
-                    if let Some(x) = self.list.head {
-                        link_ops.replace_next_or_prev(tail, None, Some(x));
-                        link_ops.replace_next_or_prev(x, None, Some(tail));
-                    }
                     self.list.head = list.head;
-                    self.next = list.head;
                 }
                 if self.list.tail == self.current {
                     self.list.tail = list.tail;
+                }
+                if self.current.is_none() {
+                    self.prev = self.list.tail;
+                    self.next = self.list.head;
                 }
                 list.head = None;
                 list.tail = None;
@@ -951,26 +967,17 @@ where
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
-                if let Some(current) = self.current {
-                    if let Some(prev) = self.prev {
-                        link_ops.replace_next_or_prev(prev, Some(current), Some(head));
-                        link_ops.replace_next_or_prev(head, None, Some(prev));
-                    }
-                    link_ops.replace_next_or_prev(tail, None, Some(current));
+                splice_between(link_ops, head, tail, self.prev, self.current);
+                if self.current.is_some() {
                     self.prev = list.tail;
-                    link_ops.set(current, self.prev, self.next);
                 } else {
-                    if let Some(x) = self.list.tail {
-                        link_ops.replace_next_or_prev(head, None, Some(x));
-                        link_ops.replace_next_or_prev(x, None, Some(head));
-                    }
                     self.list.tail = list.tail;
-                    self.prev = self.list.tail;
                 }
                 if self.list.head == self.current {
                     self.list.head = list.head;
                 }
                 if self.current.is_none() {
+                    self.prev = self.list.tail;
                     self.next = self.list.head;
                 }
                 list.head = None;
