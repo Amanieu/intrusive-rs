@@ -2451,7 +2451,6 @@ where
         use link_ops::LinkOps;
 
         let head = self.head?;
-        let is_tail = Some(head) == self.tail;
         let link_ops = self.tree.adapter.link_ops_mut();
         unsafe {
             let parent = link_ops.parent(head);
@@ -2469,13 +2468,13 @@ where
             if let Some(right) = right {
                 link_ops.set_parent(right, parent);
             }
-            if is_tail {
-                self.head = None;
-                self.tail = None;
-            } else if let Some(right) = right {
+            if let Some(right) = right {
                 self.head = Some(first_child(link_ops, right));
             } else {
                 self.head = parent;
+            }
+            if self.head.is_none() {
+                self.tail = None;
             }
             link_ops.release_link(head);
             Some(
@@ -2496,7 +2495,6 @@ where
         use link_ops::LinkOps;
 
         let tail = self.tail?;
-        let is_head = Some(tail) == self.head;
         let link_ops = self.tree.adapter.link_ops_mut();
         unsafe {
             let parent = link_ops.parent(tail);
@@ -2514,13 +2512,13 @@ where
             if let Some(left) = left {
                 link_ops.set_parent(left, parent);
             }
-            if is_head {
-                self.head = None;
-                self.tail = None;
-            } else if let Some(left) = left {
+            if let Some(left) = left {
                 self.tail = Some(last_child(link_ops, left));
             } else {
                 self.tail = parent;
+            }
+            if self.tail.is_none() {
+                self.head = None;
             }
             link_ops.release_link(tail);
             Some(
