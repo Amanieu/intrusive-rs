@@ -464,6 +464,28 @@ unsafe fn link_between<T: XorLinkedListOps>(
     link_ops.set(ptr, prev, next);
 }
 
+/// Splices the non-empty range from `start` to `end` between `prev` and `next`.
+///
+/// This only rewires the XOR links. Callers must update list endpoints and
+/// cursor state separately.
+#[inline]
+unsafe fn splice_between<T: XorLinkedListOps>(
+    link_ops: &mut T,
+    start: T::LinkPtr,
+    end: T::LinkPtr,
+    prev: Option<T::LinkPtr>,
+    next: Option<T::LinkPtr>,
+) {
+    if let Some(prev) = prev {
+        link_ops.replace_next_or_prev(prev, next, Some(start));
+    }
+    if let Some(next) = next {
+        link_ops.replace_next_or_prev(next, prev, Some(end));
+    }
+    link_ops.replace_next_or_prev(start, None, prev);
+    link_ops.replace_next_or_prev(end, None, next);
+}
+
 // =============================================================================
 // Cursor, CursorMut, CursorOwning
 // =============================================================================
@@ -939,24 +961,18 @@ where
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
-                if let Some(current) = self.current {
-                    if let Some(next) = self.next {
-                        link_ops.replace_next_or_prev(next, Some(current), Some(tail));
-                        link_ops.replace_next_or_prev(tail, None, Some(next));
-                    }
-                    link_ops.replace_next_or_prev(head, None, Some(current));
+                splice_between(link_ops, head, tail, self.current, self.next);
+                if self.current.is_some() {
                     self.next = list.head;
-                    link_ops.set(current, self.prev, self.next);
                 } else {
-                    if let Some(x) = self.list.head {
-                        link_ops.replace_next_or_prev(tail, None, Some(x));
-                        link_ops.replace_next_or_prev(x, None, Some(tail));
-                    }
                     self.list.head = list.head;
-                    self.next = list.head;
                 }
                 if self.list.tail == self.current {
                     self.list.tail = list.tail;
+                }
+                if self.current.is_none() {
+                    self.prev = self.list.tail;
+                    self.next = self.list.head;
                 }
                 list.head = None;
                 list.tail = None;
@@ -977,24 +993,18 @@ where
 
                 let link_ops = self.list.adapter.link_ops_mut();
 
-                if let Some(current) = self.current {
-                    if let Some(prev) = self.prev {
-                        link_ops.replace_next_or_prev(prev, Some(current), Some(head));
-                        link_ops.replace_next_or_prev(head, None, Some(prev));
-                    }
-                    link_ops.replace_next_or_prev(tail, None, Some(current));
+                splice_between(link_ops, head, tail, self.prev, self.current);
+                if self.current.is_some() {
                     self.prev = list.tail;
-                    link_ops.set(current, self.prev, self.next);
                 } else {
-                    if let Some(x) = self.list.tail {
-                        link_ops.replace_next_or_prev(head, None, Some(x));
-                        link_ops.replace_next_or_prev(x, None, Some(head));
-                    }
-                    self.list.head = list.head;
-                    self.next = list.head;
-                }
-                if self.list.tail == self.current {
                     self.list.tail = list.tail;
+                }
+                if self.list.head == self.current {
+                    self.list.head = list.head;
+                }
+                if self.current.is_none() {
+                    self.prev = self.list.tail;
+                    self.next = self.list.head;
                 }
                 list.head = None;
                 list.tail = None;
@@ -2092,6 +2102,45 @@ mod tests {
     }
 
     #[test]
+    fn splice_boundary_cases() {
+        let values =
+            |list: &XorLinkedList<RcObjAdapter1>| list.iter().map(|x| x.value).collect::<Vec<_>>();
+
+        let mut list = XorLinkedList::new(RcObjAdapter1::new());
+        for value in [1, 2, 3] {
+            list.push_back(make_rc_obj(value));
+        }
+        let mut inserted = XorLinkedList::new(RcObjAdapter1::new());
+        inserted.push_back(make_rc_obj(4));
+        inserted.push_back(make_rc_obj(5));
+        list.back_mut().splice_before(inserted);
+        assert_eq!(values(&list), [1, 2, 4, 5, 3]);
+        assert_eq!(list.back().get().unwrap().value, 3);
+        assert_eq!(
+            list.iter().rev().map(|x| x.value).collect::<Vec<_>>(),
+            [3, 5, 4, 2, 1]
+        );
+
+        let mut inserted = XorLinkedList::new(RcObjAdapter1::new());
+        inserted.push_back(make_rc_obj(6));
+        list.front_mut().splice_before(inserted);
+        assert_eq!(values(&list), [6, 1, 2, 4, 5, 3]);
+        assert_eq!(list.front().get().unwrap().value, 6);
+
+        let mut inserted = XorLinkedList::new(RcObjAdapter1::new());
+        inserted.push_back(make_rc_obj(7));
+        list.cursor_mut().splice_before(inserted);
+        assert_eq!(values(&list), [6, 1, 2, 4, 5, 3, 7]);
+        assert_eq!(list.back().get().unwrap().value, 7);
+
+        let mut inserted = XorLinkedList::new(RcObjAdapter1::new());
+        inserted.push_back(make_rc_obj(8));
+        list.cursor_mut().splice_after(inserted);
+        assert_eq!(values(&list), [8, 6, 1, 2, 4, 5, 3, 7]);
+        assert_eq!(list.front().get().unwrap().value, 8);
+    }
+
+    #[test]
     fn test_iter() {
         let mut l = XorLinkedList::new(RcObjAdapter1::new());
         let a = make_rc_obj(1);
@@ -2376,5 +2425,89 @@ mod tests {
     #[test]
     fn test_clone_pointer_arc() {
         test_clone_pointer!(Arc, std::sync::Arc);
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn splice_before_head_corrupts_head_link() {
+        struct Obj {
+            link: Link,
+            value: u32,
+        }
+        intrusive_adapter!(ObjAdapter = Box<Obj>: Obj { link => Link });
+
+        let mut list = XorLinkedList::new(ObjAdapter::new());
+        list.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 1,
+        }));
+        list.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 2,
+        }));
+
+        let mut inserted = XorLinkedList::new(ObjAdapter::new());
+        inserted.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 3,
+        }));
+        inserted.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 4,
+        }));
+
+        {
+            let mut cursor = list.front_mut();
+            // UB: splicing before the current head should move `list.head` to
+            // the spliced list's head. The implementation leaves `head`
+            // pointing at the old node even though that node now has a
+            // previous neighbor, so traversal reconstructs and dereferences a
+            // bogus XOR pointer.
+            cursor.splice_before(inserted);
+        }
+
+        let _ = list.iter().map(|x| x.value).collect::<Vec<_>>();
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn splice_before_null_corrupts_tail_link() {
+        struct Obj {
+            link: Link,
+            value: u32,
+        }
+        intrusive_adapter!(ObjAdapter = Box<Obj>: Obj { link => Link });
+
+        let mut list = XorLinkedList::new(ObjAdapter::new());
+        list.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 1,
+        }));
+        list.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 2,
+        }));
+
+        let mut inserted = XorLinkedList::new(ObjAdapter::new());
+        inserted.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 3,
+        }));
+        inserted.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 4,
+        }));
+
+        {
+            let mut cursor = list.cursor_mut();
+            // UB: splicing before the null cursor means appending to the
+            // non-empty list. The implementation overwrites `head` instead of
+            // updating `tail`, making the new head encode a non-null previous
+            // pointer. Iteration then materializes and dereferences an invalid
+            // pointer.
+            cursor.splice_before(inserted);
+        }
+
+        let _ = list.iter().map(|x| x.value).collect::<Vec<_>>();
     }
 }

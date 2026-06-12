@@ -2479,23 +2479,28 @@ where
         let head = self.head?;
         let link_ops = self.tree.adapter.link_ops_mut();
         unsafe {
+            let parent = link_ops.parent(head);
+            let right = link_ops.right(head);
+
             // Remove the node from the tree. Since head is always the
             // left-most node, we can infer the following:
             // - head.left is null.
             // - head is a left child of its parent (or the root node).
-            if let Some(parent) = link_ops.parent(head) {
-                link_ops.set_left(parent, link_ops.right(head));
+            if let Some(parent) = parent {
+                link_ops.set_left(parent, right);
             } else {
-                self.tree.root = link_ops.right(head);
-                if link_ops.right(head).is_none() {
-                    self.tail = None;
-                }
+                self.tree.root = right;
             }
-            if let Some(right) = link_ops.right(head) {
-                link_ops.set_parent(right, link_ops.parent(head));
+            if let Some(right) = right {
+                link_ops.set_parent(right, parent);
+            }
+            if let Some(right) = right {
                 self.head = Some(first_child(link_ops, right));
             } else {
-                self.head = link_ops.parent(head);
+                self.head = parent;
+            }
+            if self.head.is_none() {
+                self.tail = None;
             }
             link_ops.release_link(head);
             Some(
@@ -2518,23 +2523,28 @@ where
         let tail = self.tail?;
         let link_ops = self.tree.adapter.link_ops_mut();
         unsafe {
+            let parent = link_ops.parent(tail);
+            let left = link_ops.left(tail);
+
             // Remove the node from the tree. Since tail is always the
             // right-most node, we can infer the following:
             // - tail.right is null.
             // - tail is a right child of its parent (or the root node).
-            if let Some(parent) = link_ops.parent(tail) {
-                link_ops.set_right(parent, link_ops.left(tail));
+            if let Some(parent) = parent {
+                link_ops.set_right(parent, left);
             } else {
-                self.tree.root = link_ops.left(tail);
-                if link_ops.left(tail).is_none() {
-                    self.tail = None;
-                }
+                self.tree.root = left;
             }
-            if let Some(left) = link_ops.left(tail) {
-                link_ops.set_parent(left, link_ops.parent(tail));
+            if let Some(left) = left {
+                link_ops.set_parent(left, parent);
+            }
+            if let Some(left) = left {
                 self.tail = Some(last_child(link_ops, left));
             } else {
-                self.tail = link_ops.parent(tail);
+                self.tail = parent;
+            }
+            if self.tail.is_none() {
+                self.head = None;
             }
             link_ops.release_link(tail);
             Some(
@@ -3105,6 +3115,60 @@ mod tests {
     }
 
     #[test]
+    fn into_iter_alternating_ends() {
+        fn build_tree(values: &[i32]) -> RBTree<RcObjAdapter> {
+            let mut tree = RBTree::new(RcObjAdapter::new());
+            for value in values {
+                tree.insert(make_rc_obj(*value));
+            }
+            tree
+        }
+
+        for len in 0..16 {
+            let ascending = (0..len).collect::<Vec<_>>();
+            let descending = (0..len).rev().collect::<Vec<_>>();
+            let mut zigzag = Vec::new();
+            let mut low = 0;
+            let mut high = len;
+            while low < high {
+                zigzag.push(low);
+                low += 1;
+                if low < high {
+                    high -= 1;
+                    zigzag.push(high);
+                }
+            }
+
+            let mut expected = Vec::new();
+            let mut front = 0;
+            let mut back = len;
+            while front < back {
+                back -= 1;
+                expected.push(back);
+                if front < back {
+                    expected.push(front);
+                    front += 1;
+                }
+            }
+
+            for values in [&ascending[..], &descending[..], &zigzag[..]] {
+                let mut iter = build_tree(values).into_iter();
+                let mut removed = Vec::new();
+                loop {
+                    match iter.next_back() {
+                        Some(value) => removed.push(value.value),
+                        None => break,
+                    }
+                    if let Some(value) = iter.next() {
+                        removed.push(value.value);
+                    }
+                }
+                assert_eq!(removed, expected);
+            }
+        }
+    }
+
+    #[test]
     fn test_find() {
         let v = (0..10).map(|x| make_rc_obj(x * 10)).collect::<Vec<_>>();
         let mut t = RBTree::new(RcObjAdapter::new());
@@ -3384,5 +3448,36 @@ mod tests {
     #[test]
     fn test_clone_pointer_arc() {
         test_clone_pointer!(Arc, std::sync::Arc);
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn into_iter_next_after_next_back_uses_removed_tail() {
+        struct Obj {
+            link: Link,
+            value: i32,
+        }
+        intrusive_adapter!(ObjAdapter = Box<Obj>: Obj { link => Link });
+        impl<'a> KeyAdapter<'a> for ObjAdapter {
+            type Key = i32;
+
+            fn get_key(&self, value: &'a Obj) -> i32 {
+                value.value
+            }
+        }
+
+        let mut tree = RBTree::new(ObjAdapter::new());
+        tree.insert(Box::new(Obj {
+            link: Link::new(),
+            value: 1,
+        }));
+
+        let mut iter = tree.into_iter();
+        drop(iter.next_back().unwrap());
+
+        // UB: `IntoIter::next_back` clears `tail` when it removes the only
+        // node, but it leaves `head` pointing at that removed node. Alternating
+        // back to `next` dereferences the freed link.
+        let _ = iter.next();
     }
 }
