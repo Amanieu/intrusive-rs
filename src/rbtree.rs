@@ -3451,6 +3451,46 @@ mod tests {
 
     #[cfg(miri)]
     #[test]
+    fn cursor_owning_panic_leaves_dangling_current() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        struct Obj {
+            link: Link,
+            value: i32,
+        }
+        intrusive_adapter!(ObjAdapter = Box<Obj>: Obj { link => Link });
+        impl<'a> KeyAdapter<'a> for ObjAdapter {
+            type Key = i32;
+
+            fn get_key(&self, value: &'a Obj) -> i32 {
+                value.value
+            }
+        }
+
+        let mut tree = RBTree::new(ObjAdapter::new());
+        tree.insert(Box::new(Obj {
+            link: Link::new(),
+            value: 1,
+        }));
+
+        let mut cursor = tree.front_owning();
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            cursor.with_cursor_mut(|cursor| {
+                drop(cursor.remove().unwrap());
+                panic!("leave CursorOwning state stale");
+            });
+        }));
+
+        // UB: `CursorOwning::with_cursor_mut` writes the temporary cursor
+        // state back only after the closure returns normally. Safe
+        // `catch_unwind` can observe the owning cursor after the closure
+        // removed and dropped the current tree node, so `current` still points
+        // at freed storage and `as_cursor().get()` dereferences it.
+        let _ = cursor.as_cursor().get().unwrap().value;
+    }
+
+    #[cfg(miri)]
+    #[test]
     fn into_iter_next_after_next_back_uses_removed_tail() {
         struct Obj {
             link: Link,

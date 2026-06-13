@@ -2426,6 +2426,39 @@ mod tests {
 
     #[cfg(miri)]
     #[test]
+    fn cursor_owning_panic_leaves_dangling_current() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        struct Obj {
+            link: Link,
+            value: u32,
+        }
+        intrusive_adapter!(ObjAdapter = Box<Obj>: Obj { link => Link });
+
+        let mut list = XorLinkedList::new(ObjAdapter::new());
+        list.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 1,
+        }));
+
+        let mut cursor = list.front_owning();
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            cursor.with_cursor_mut(|cursor| {
+                drop(cursor.remove().unwrap());
+                panic!("leave CursorOwning state stale");
+            });
+        }));
+
+        // UB: `CursorOwning::with_cursor_mut` updates `current`, `prev`, and
+        // `next` only after the closure returns normally. A panic after safe
+        // removal and drop of the current element leaves the owning cursor's
+        // saved `current` pointing at freed storage, and `as_cursor().get()`
+        // dereferences it.
+        let _ = cursor.as_cursor().get().unwrap().value;
+    }
+
+    #[cfg(miri)]
+    #[test]
     fn splice_before_head_corrupts_head_link() {
         struct Obj {
             link: Link,

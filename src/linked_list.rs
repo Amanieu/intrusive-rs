@@ -2098,6 +2098,40 @@ mod tests {
 
     #[cfg(miri)]
     #[test]
+    fn cursor_owning_panic_leaves_dangling_current() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        struct Obj {
+            link: Link,
+            value: u32,
+        }
+        intrusive_adapter!(ObjAdapter = Box<Obj>: Obj { link => Link });
+
+        let mut list = LinkedList::new(ObjAdapter::new());
+        list.push_back(Box::new(Obj {
+            link: Link::new(),
+            value: 1,
+        }));
+
+        let mut cursor = list.front_owning();
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            cursor.with_cursor_mut(|cursor| {
+                drop(cursor.remove().unwrap());
+                panic!("leave CursorOwning state stale");
+            });
+        }));
+
+        // UB: `CursorOwning::with_cursor_mut` only copies the temporary
+        // cursor position back after the closure returns normally. If the
+        // closure removes and drops the current element and then panics, safe
+        // `catch_unwind` leaves `CursorOwning.current` pointing at freed
+        // storage. Turning it back into a shared cursor dereferences that
+        // dangling pointer.
+        let _ = cursor.as_cursor().get().unwrap().value;
+    }
+
+    #[cfg(miri)]
+    #[test]
     fn atomic_link_is_linked_races_with_list_mutation() {
         use std::sync::{Arc, Barrier};
         use std::thread;
