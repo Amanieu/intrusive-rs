@@ -904,13 +904,33 @@ where
     /// All mutations of the cursor are reflected in the original.
     #[inline]
     pub fn with_cursor_mut<T>(&mut self, f: impl FnOnce(&mut CursorMut<'_, A>) -> T) -> T {
-        let mut cursor = CursorMut {
-            current: self.current,
-            list: &mut self.list,
+        struct WritebackOnDrop<'a, 'b, A: Adapter>
+        where
+            A::LinkOps: SinglyLinkedListOps,
+        {
+            current: &'a mut Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+            cursor: CursorMut<'b, A>,
+        }
+
+        impl<'a, 'b, A: Adapter> Drop for WritebackOnDrop<'a, 'b, A>
+        where
+            A::LinkOps: SinglyLinkedListOps,
+        {
+            fn drop(&mut self) {
+                *self.current = self.cursor.current;
+            }
+        }
+
+        let current = self.current;
+        let mut guard = WritebackOnDrop {
+            current: &mut self.current,
+            cursor: CursorMut {
+                current,
+                list: &mut self.list,
+            },
         };
-        let ret = f(&mut cursor);
-        self.current = cursor.current;
-        ret
+
+        f(&mut guard.cursor)
     }
 }
 unsafe impl<A: Adapter> Send for CursorOwning<A>

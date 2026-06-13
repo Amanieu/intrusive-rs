@@ -1156,20 +1156,43 @@ where
     /// All mutations of the cursor are reflected in the original.
     #[inline]
     pub fn with_cursor_mut<T>(&mut self, f: impl FnOnce(&mut CursorMut<'_, A>) -> T) -> T {
-        let mut cursor = CursorMut {
-            current: self.current,
-            prev: self.prev,
-            next: self.next,
-            list: &mut self.list,
+        struct WritebackOnDrop<'a, 'b, A: Adapter>
+        where
+            A::LinkOps: XorLinkedListOps,
+        {
+            current: &'a mut Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+            prev: &'a mut Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+            next: &'a mut Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+            cursor: CursorMut<'b, A>,
+        }
+
+        impl<'a, 'b, A: Adapter> Drop for WritebackOnDrop<'a, 'b, A>
+        where
+            A::LinkOps: XorLinkedListOps,
+        {
+            fn drop(&mut self) {
+                *self.current = self.cursor.current;
+                *self.prev = self.cursor.prev;
+                *self.next = self.cursor.next;
+            }
+        }
+
+        let current = self.current;
+        let prev = self.prev;
+        let next = self.next;
+        let mut guard = WritebackOnDrop {
+            current: &mut self.current,
+            prev: &mut self.prev,
+            next: &mut self.next,
+            cursor: CursorMut {
+                current,
+                prev,
+                next,
+                list: &mut self.list,
+            },
         };
 
-        let ret = f(&mut cursor);
-
-        self.current = cursor.current;
-        self.prev = cursor.prev;
-        self.next = cursor.next;
-
-        ret
+        f(&mut guard.cursor)
     }
 }
 unsafe impl<A: Adapter> Send for CursorOwning<A>
@@ -2424,37 +2447,35 @@ mod tests {
         test_clone_pointer!(Arc, std::sync::Arc);
     }
 
-    #[cfg(miri)]
     #[test]
     fn cursor_owning_panic_leaves_dangling_current() {
         use std::panic::{catch_unwind, AssertUnwindSafe};
 
         struct Obj {
             link: Link,
-            value: u32,
+            _value: u32,
         }
         intrusive_adapter!(ObjAdapter = Box<Obj>: Obj { link => Link });
 
         let mut list = XorLinkedList::new(ObjAdapter::new());
         list.push_back(Box::new(Obj {
             link: Link::new(),
-            value: 1,
+            _value: 1,
         }));
 
         let mut cursor = list.front_owning();
-        let _ = catch_unwind(AssertUnwindSafe(|| {
+        let panic = catch_unwind(AssertUnwindSafe(|| {
             cursor.with_cursor_mut(|cursor| {
                 drop(cursor.remove().unwrap());
                 panic!("leave CursorOwning state stale");
             });
         }));
 
-        // UB: `CursorOwning::with_cursor_mut` updates `current`, `prev`, and
-        // `next` only after the closure returns normally. A panic after safe
-        // removal and drop of the current element leaves the owning cursor's
-        // saved `current` pointing at freed storage, and `as_cursor().get()`
-        // dereferences it.
-        let _ = cursor.as_cursor().get().unwrap().value;
+        assert!(panic.is_err());
+        // Regression test: without panic-safe cursor state writeback,
+        // `CursorOwning.current` still points at the removed and dropped node
+        // here, and `as_cursor().get()` dereferences freed storage under Miri.
+        assert!(cursor.as_cursor().is_null());
     }
 
     #[cfg(miri)]
