@@ -1511,13 +1511,33 @@ where
     /// All mutations of the cursor are reflected in the original.
     #[inline]
     pub fn with_cursor_mut<T>(&mut self, f: impl FnOnce(&mut CursorMut<'_, A>) -> T) -> T {
-        let mut cursor = CursorMut {
-            current: self.current,
-            tree: &mut self.tree,
+        struct WritebackOnDrop<'a, 'b, A: Adapter>
+        where
+            A::LinkOps: RBTreeOps,
+        {
+            current: &'a mut Option<<A::LinkOps as link_ops::LinkOps>::LinkPtr>,
+            cursor: CursorMut<'b, A>,
+        }
+
+        impl<'a, 'b, A: Adapter> Drop for WritebackOnDrop<'a, 'b, A>
+        where
+            A::LinkOps: RBTreeOps,
+        {
+            fn drop(&mut self) {
+                *self.current = self.cursor.current;
+            }
+        }
+
+        let current = self.current;
+        let mut guard = WritebackOnDrop {
+            current: &mut self.current,
+            cursor: CursorMut {
+                current,
+                tree: &mut self.tree,
+            },
         };
-        let ret = f(&mut cursor);
-        self.current = cursor.current;
-        ret
+
+        f(&mut guard.cursor)
     }
 }
 unsafe impl<A: Adapter> Send for CursorOwning<A>
@@ -3447,6 +3467,44 @@ mod tests {
     #[test]
     fn test_clone_pointer_arc() {
         test_clone_pointer!(Arc, std::sync::Arc);
+    }
+
+    #[test]
+    fn cursor_owning_panic_leaves_dangling_current() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        struct Obj {
+            link: Link,
+            value: i32,
+        }
+        intrusive_adapter!(ObjAdapter = Box<Obj>: Obj { link => Link });
+        impl<'a> KeyAdapter<'a> for ObjAdapter {
+            type Key = i32;
+
+            fn get_key(&self, value: &'a Obj) -> i32 {
+                value.value
+            }
+        }
+
+        let mut tree = RBTree::new(ObjAdapter::new());
+        tree.insert(Box::new(Obj {
+            link: Link::new(),
+            value: 1,
+        }));
+
+        let mut cursor = tree.front_owning();
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            cursor.with_cursor_mut(|cursor| {
+                drop(cursor.remove().unwrap());
+                panic!("leave CursorOwning state stale");
+            });
+        }));
+
+        assert!(panic.is_err());
+        // Regression test: without panic-safe cursor state writeback,
+        // `CursorOwning.current` still points at the removed and dropped node
+        // here, and `as_cursor().get()` dereferences freed storage under Miri.
+        assert!(cursor.as_cursor().is_null());
     }
 
     #[cfg(miri)]
