@@ -1318,6 +1318,22 @@ where
         self.list.pop_front()
     }
 }
+// Allow sending to another thread if the ownership of the container can be
+// transferred to another thread.
+unsafe impl<A: Adapter> Send for IntoIter<A>
+where
+    SinglyLinkedList<A>: Send,
+    A::LinkOps: SinglyLinkedListOps,
+{
+}
+// Allow read-only access to values from multiple threads since IntoIter is
+// essentially a wrapper around the container so similar rules apply.
+unsafe impl<A: Adapter> Sync for IntoIter<A>
+where
+    SinglyLinkedList<A>: Sync,
+    A::LinkOps: SinglyLinkedListOps,
+{
+}
 
 // =============================================================================
 // Tests

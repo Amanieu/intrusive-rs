@@ -2575,6 +2575,22 @@ where
         }
     }
 }
+// Allow sending to another thread if the ownership of the containing
+// RBTree can be transferred to another thread.
+unsafe impl<A: Adapter> Send for IntoIter<A>
+where
+    RBTree<A>: Send,
+    A::LinkOps: RBTreeOps,
+{
+}
+// Allow read-only access to values from multiple threads since IntoIter is
+// essentially a wrapper around the RBTree so similar rules apply.
+unsafe impl<A: Adapter> Sync for IntoIter<A>
+where
+    RBTree<A>: Sync,
+    A::LinkOps: RBTreeOps,
+{
+}
 
 // =============================================================================
 // Tests
