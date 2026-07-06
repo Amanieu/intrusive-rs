@@ -9,7 +9,7 @@
 use crate::alloc::boxed::Box;
 #[cfg(feature = "alloc")]
 use crate::alloc::rc::Rc;
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", target_has_atomic = "ptr"))]
 use crate::alloc::sync::Arc;
 use crate::UnsafeRef;
 use core::marker::PhantomData;
@@ -194,7 +194,7 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<Rc<T>>> {
     }
 }
 
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", target_has_atomic = "ptr"))]
 unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Arc<T>> {
     type Value = T;
     type Pointer = Arc<T>;
@@ -210,7 +210,7 @@ unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Arc<T>> {
     }
 }
 
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", target_has_atomic = "ptr"))]
 unsafe impl<T: ?Sized> PointerOps for DefaultPointerOps<Pin<Arc<T>>> {
     type Value = T;
     type Pointer = Pin<Arc<T>>;

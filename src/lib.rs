@@ -299,17 +299,21 @@ pub mod xor_linked_list;
 pub use crate::adapter::Adapter;
 pub use crate::key_adapter::KeyAdapter;
 pub use crate::link_ops::{DefaultLinkOps, LinkOps};
+#[cfg(target_has_atomic = "ptr")]
 pub use crate::linked_list::AtomicLink as LinkedListAtomicLink;
 pub use crate::linked_list::Link as LinkedListLink;
 pub use crate::linked_list::LinkedList;
 pub use crate::pointer_ops::{DefaultPointerOps, PointerOps};
+#[cfg(target_has_atomic = "ptr")]
 pub use crate::rbtree::AtomicLink as RBTreeAtomicLink;
 pub use crate::rbtree::Link as RBTreeLink;
 pub use crate::rbtree::RBTree;
+#[cfg(target_has_atomic = "ptr")]
 pub use crate::singly_linked_list::AtomicLink as SinglyLinkedListAtomicLink;
 pub use crate::singly_linked_list::Link as SinglyLinkedListLink;
 pub use crate::singly_linked_list::SinglyLinkedList;
 pub use crate::unsafe_ref::UnsafeRef;
+#[cfg(target_has_atomic = "ptr")]
 pub use crate::xor_linked_list::AtomicLink as XorLinkedListAtomicLink;
 pub use crate::xor_linked_list::Link as XorLinkedListLink;
 pub use crate::xor_linked_list::XorLinkedList;
