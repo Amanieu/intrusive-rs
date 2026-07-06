@@ -1207,18 +1207,6 @@ where
     }
 
     /// Creates an empty `LinkedList`.
-    #[cfg(not(feature = "nightly"))]
-    #[inline]
-    pub fn new(adapter: A) -> LinkedList<A> {
-        LinkedList {
-            head: None,
-            tail: None,
-            adapter,
-        }
-    }
-
-    /// Creates an empty `LinkedList`.
-    #[cfg(feature = "nightly")]
     #[inline]
     pub const fn new(adapter: A) -> LinkedList<A> {
         LinkedList {
@@ -1665,6 +1653,12 @@ mod tests {
             link2: Link::default(),
             value,
         }
+    }
+
+    #[test]
+    fn new_is_const() {
+        const LIST: LinkedList<ObjAdapter1> = LinkedList::new(ObjAdapter1::new());
+        assert!(LIST.is_empty());
     }
 
     #[test]

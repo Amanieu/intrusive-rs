@@ -983,17 +983,6 @@ where
     }
 
     /// Creates an empty `SinglyLinkedList`.
-    #[cfg(not(feature = "nightly"))]
-    #[inline]
-    pub fn new(adapter: A) -> SinglyLinkedList<A> {
-        SinglyLinkedList {
-            head: None,
-            adapter,
-        }
-    }
-
-    /// Creates an empty `SinglyLinkedList`.
-    #[cfg(feature = "nightly")]
     #[inline]
     pub const fn new(adapter: A) -> SinglyLinkedList<A> {
         SinglyLinkedList {
@@ -1359,6 +1348,12 @@ mod tests {
             link2: Link::default(),
             value,
         }
+    }
+
+    #[test]
+    fn new_is_const() {
+        const LIST: SinglyLinkedList<RcObjAdapter1> = SinglyLinkedList::new(RcObjAdapter1::new());
+        assert!(LIST.is_empty());
     }
 
     #[test]

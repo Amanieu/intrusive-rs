@@ -196,7 +196,7 @@ macro_rules! intrusive_adapter {
                 pointer_ops: $crate::DefaultPointerOps::<$pointer>::new(),
             };
             #[inline]
-            pub fn new() -> Self {
+            pub const fn new() -> Self {
                 Self::NEW
             }
         }

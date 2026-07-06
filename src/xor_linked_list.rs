@@ -1249,18 +1249,6 @@ where
     }
 
     /// Creates an empty `XorLinkedList`.
-    #[cfg(not(feature = "nightly"))]
-    #[inline]
-    pub fn new(adapter: A) -> XorLinkedList<A> {
-        XorLinkedList {
-            head: None,
-            tail: None,
-            adapter,
-        }
-    }
-
-    /// Creates an empty `XorLinkedList`.
-    #[cfg(feature = "nightly")]
     #[inline]
     pub const fn new(adapter: A) -> XorLinkedList<A> {
         XorLinkedList {
@@ -1858,6 +1846,12 @@ mod tests {
             link2: Link::default(),
             value,
         }
+    }
+
+    #[test]
+    fn new_is_const() {
+        const LIST: XorLinkedList<RcObjAdapter1> = XorLinkedList::new(RcObjAdapter1::new());
+        assert!(LIST.is_empty());
     }
 
     #[test]
