@@ -1597,17 +1597,6 @@ where
     }
 
     /// Creates an empty `RBTree`.
-    #[cfg(not(feature = "nightly"))]
-    #[inline]
-    pub fn new(adapter: A) -> RBTree<A> {
-        RBTree {
-            root: None,
-            adapter,
-        }
-    }
-
-    /// Creates an empty `RBTree`.
-    #[cfg(feature = "nightly")]
     #[inline]
     pub const fn new(adapter: A) -> RBTree<A> {
         RBTree {
@@ -2630,6 +2619,12 @@ mod tests {
             link: Link::new(),
             value,
         }
+    }
+
+    #[test]
+    fn new_is_const() {
+        const TREE: RBTree<RcObjAdapter> = RBTree::new(RcObjAdapter::new());
+        assert!(TREE.is_empty());
     }
 
     #[test]

@@ -24,10 +24,10 @@ Add this to your `Cargo.toml`:
 intrusive-collections = "0.10"
 ```
 
-This crate has two Cargo features:
+This crate has the following Cargo features:
 
-- `nightly`: Enables nightly-only features: `const fn` constructors for collections (`Link` constructors are always `const fn`)
 - `alloc` (enabled by default): Implements `IntrusivePointer` for `Box`, `Rc` and `Arc`.
+- `nightly`: Reserved for future nightly-only features. Currently has no effect.
 
 ## License
 
