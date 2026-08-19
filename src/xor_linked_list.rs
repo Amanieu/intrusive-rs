@@ -679,6 +679,19 @@ where
         }
     }
 
+    /// Clones and returns the pointer that points to the element that the
+    /// cursor is referencing.
+    ///
+    /// This returns `None` if the cursor is currently pointing to the null
+    /// object.
+    #[inline]
+    pub fn clone_pointer(&self) -> Option<<A::PointerOps as PointerOps>::Pointer>
+    where
+        <A::PointerOps as PointerOps>::Pointer: Clone,
+    {
+        self.as_cursor().clone_pointer()
+    }
+
     /// Returns a read-only cursor pointing to the current element.
     ///
     /// The lifetime of the returned `Cursor` is bound to that of the
@@ -2434,8 +2447,13 @@ mod tests {
             assert_eq!(pointer.value, 5);
             assert_eq!(3, $ptr::strong_count(&a));
 
+            let pointer = l.front_mut().clone_pointer().unwrap();
+            assert_eq!(pointer.value, 5);
+            assert_eq!(4, $ptr::strong_count(&a));
+
             l.front_mut().remove();
             assert!(l.front().clone_pointer().is_none());
+            assert!(l.front_mut().clone_pointer().is_none());
         };
     }
 
